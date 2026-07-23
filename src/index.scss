@@ -1,0 +1,52 @@
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700;900&family=Noto+Sans+SC:wght@300;400;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+:root {
+  --bg-void: #060403;
+  --rust-dark: #1a0a05;
+  --rust: #2a1008;
+  --rust-mid: #3d1a0c;
+  --rust-light: #5a2812;
+  --blood-dry: #2a0808;
+  --blood: #4a1010;
+  --blood-bright: #7a1818;
+  --blood-wet: #a02020;
+  --flesh-base: #1a0c08;
+  --flesh-light: #2a1510;
+  --flesh-highlight: #3d1c12;
+  --iron: #3a3430;
+  --iron-dark: #1a1815;
+  --amber: #e0c080;
+  --amber-dim: #b8a070;
+  --chalk: #ddd5c8;
+  --chalk-dim: #a09080;
+  --emerge: #f0e8d8;
+
+  --font-display: 'Noto Serif SC', 'SimSun', serif;
+  --font-body: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 16px;
+}
+
+body {
+  font-family: var(--font-body);
+  background: var(--bg-void);
+  color: var(--chalk);
+  overflow: hidden;
+  width: 100%;
+}
+
+#app {
+  width: 100%;
+  overflow: hidden;
+}
