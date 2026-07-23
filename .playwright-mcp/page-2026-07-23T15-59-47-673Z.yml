@@ -1,0 +1,180 @@
+- generic [active] [ref=f13e1]:
+  - generic [ref=f13e5]:
+    - generic [ref=f13e6]:
+      - button "" [ref=f13e48] [cursor=pointer]
+      - text:                                        + No items                         ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☑ ☰ ☑ ☰ ☑ ☰ ☑ ☰ ☑ ☰ ☑ ☰ ☐ ☰ ☐ ☰ ☐ ☰                                  + No items      ☰ ☰ ☰ ☰ ☰ ☰ ☰  ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰  ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰  ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰ ☰                  +     No items   X        *    *    *     *    *    *    *    *                        *      *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    *    
+    - generic [ref=f13e9]:
+      - button "" [ref=f13e49] [cursor=pointer]
+      - text:                                                                       
+    - generic [ref=f13e12]:
+      - button "" [ref=f13e50] [cursor=pointer]
+      - text:                                               
+    - generic [ref=f13e15]:
+      - button "" [ref=f13e51] [cursor=pointer]
+      - text:                +     
+    - generic [ref=f13e18]:
+      - button "" [ref=f13e52] [cursor=pointer]
+      - text:                                   
+    - generic [ref=f13e21]:
+      - generic "更改背景图片" [ref=f13e53]:
+        - button "" [ref=f13e54] [cursor=pointer]
+      - text:       +                            
+    - generic [ref=f13e24]:
+      - button "" [ref=f13e55] [cursor=pointer]
+      - text: "        +               +                                                          渲染被```包裹的html、!DOCTYPE、script的代码块内容为交互式界面 提供STscript(command)异步函数执行酒馆命令: await STscript('/echo 你好世界！') 控制代码块转换为iframe渲染的功能 关闭后将清理所有已渲染的iframe 大型html适用 按需在 iframe 中注入 Wrapperiframe.js 流式多楼层动态渲染  每条消息添加图标，点击可看到发送给时AI的记录 在聊天框显示图标，点击可拦截将发送给AI的消息并显示 重构界面布局与细节优化 使用 NovelAI 为 AI 回复自动或手动生成配图，需在酒馆设置中配置 NovelAI Key  AI回复渲染后自动朗读。需要先在 config.yaml 开启 enableCorsProxy: true 并重启。所有请求通过 ST 内置代理，不经过第三方。  自动执行设定好的斜杠命令 输入/xbqte {{任务名称}}可以手动激活任务 导出/入角色卡时, 角色任务会随角色卡一起导出/入   No tasks found No tasks found No tasks found 突破第四面墙，与角色进行元对话交流。悬浮按钮位于页面右侧中间。 在消息楼层添加总结按钮，点击可打开剧情总结面板，AI分析生成关键词云、时间线、人物关系、角色弧光 在X按钮区域添加地图图标，点击可打开可视化剧情地图编辑器 发送前剧情规划，自动注入 plot/note                                                                                             +   + +  +     +        +                                                                                                                  没有找到脚本           "
+    - generic [ref=f13e27]:
+      - button "" [ref=f13e56] [cursor=pointer]
+      - text:                                    
+    - generic [ref=f13e30]:
+      - button "" [ref=f13e57] [cursor=pointer]
+      - text:                                                     群聊暂无成员。          无可用角色                                                                        
+  - generic:                      +                                                                                +    + +                  
+  - generic:                  
+  - generic [ref=f13e33]:
+    - text: 
+    - generic [ref=f13e34]:
+      - generic [ref=f13e58]:
+        - generic [ref=f13e59]:
+          - img "SillyTavern 徽标" [ref=f13e60]
+          - generic [ref=f13e61]: SillyTavern 1.17.0 'release' (aa50edcf4)
+          - text: 
+          - button "" [ref=f13e62] [cursor=pointer]
+        - generic [ref=f13e64]:
+          - generic [ref=f13e65]: 最近的聊天
+          - generic [ref=f13e66]:
+            - button "" [ref=f13e67] [cursor=pointer]
+            - button "" [ref=f13e69] [cursor=pointer]
+            - button "" [ref=f13e71] [cursor=pointer]
+            - generic [ref=f13e73]: "|"
+            - button " 临时聊天" [ref=f13e74] [cursor=pointer]:
+              - generic [ref=f13e75]: 
+              - generic [ref=f13e76]: 临时聊天
+        - list [ref=f13e78]:
+          - listitem [ref=f13e79] [cursor=pointer]:
+            - 'generic "[Character] 酒馆助手编写示例 File: 酒馆助手编写示例.png" [ref=f13e80]':
+              - img "酒馆助手编写示例" [ref=f13e81]
+            - generic [ref=f13e82]:
+              - generic [ref=f13e83]:
+                - generic "酒馆助手编写示例 - 2026-07-23@22h02m08s642ms.jsonl" [ref=f13e84]:
+                  - strong [ref=f13e85]: 酒馆助手编写示例
+                  - text: – 酒馆助手编写示例 - 2026-07-23@22h02m08s642ms
+                - generic "2026年7月23日 22:03" [ref=f13e86]: 2026/7/23
+                - generic [ref=f13e87]:
+                  - button "" [ref=f13e88]
+                  - button "" [ref=f13e90]
+                  - button "" [ref=f13e92]
+              - generic [ref=f13e94]:
+                - 'generic "[查看日记: 真是的, 就这么喜欢看吗(v〃ω〃)] <roleplay_options> 阅读日记第一页：青空黎打开粉色的日记本，从第一页开始认真阅读络络的记录内容。 问她封面上的兔子贴纸：青空黎好奇那枚蓝色兔子贴纸的来历，转头向络络询问。 观察络络的小动作：青空黎不急着翻开日记，而是注意到络络表情里一丝期待与不安。 和她闲聊天气：青空黎随口聊起傍晚风有点凉，试图舒缓紧张气氛。 调侃她：“有哪页是‘不许看’的？”青空黎轻松地试图化解她的小慌乱。 转身回教室：青空黎接过日记却并未立刻翻开，而是表示回教室再看，打算慢慢阅读。 </roleplay_options>" [ref=f13e95]'
+                - generic [ref=f13e96]:
+                  - generic [ref=f13e97]:
+                    - generic [ref=f13e98]: 
+                    - generic [ref=f13e99]: "3"
+                    - text: "|"
+                  - generic [ref=f13e100]: 6.42KB
+          - listitem [ref=f13e101] [cursor=pointer]:
+            - 'generic "[Character] 创世回廊5.0先行版 File: 创世回廊5.0先行版.png" [ref=f13e102]':
+              - img "创世回廊5.0先行版" [ref=f13e103]
+            - generic [ref=f13e104]:
+              - generic [ref=f13e105]:
+                - generic "创世回廊5.0先行版 - 2026-07-13@13h25m18s636ms.jsonl" [ref=f13e106]:
+                  - strong [ref=f13e107]: 创世回廊5.0先行版
+                  - text: – 创世回廊5.0先行版 - 2026-07-13@13h25m18s636ms
+                - generic "2026年7月23日 19:34" [ref=f13e108]: 2026/7/23
+                - generic [ref=f13e109]:
+                  - button "" [ref=f13e110]
+                  - button "" [ref=f13e112]
+                  - button "" [ref=f13e114]
+              - generic [ref=f13e116]:
+                - generic [ref=f13e117]
+                - generic [ref=f13e118]:
+                  - generic [ref=f13e119]:
+                    - generic [ref=f13e120]: 
+                    - generic [ref=f13e121]: "5"
+                    - text: "|"
+                  - generic [ref=f13e122]: 350.73KB
+          - listitem [ref=f13e123] [cursor=pointer]:
+            - 'generic "[Character] 无限回廊5.4.1 File: 无限回廊5.4.11.png" [ref=f13e124]':
+              - img "无限回廊5.4.1" [ref=f13e125]
+            - generic [ref=f13e126]:
+              - generic [ref=f13e127]:
+                - generic "无限回廊5.4.1 - 2026-07-23@00h53m21s574ms.jsonl" [ref=f13e128]:
+                  - strong [ref=f13e129]: 无限回廊5.4.1
+                  - text: – 无限回廊5.4.1 - 2026-07-23@00h53m21s574ms
+                - generic "2026年7月23日 15:25" [ref=f13e130]: 2026/7/23
+                - generic [ref=f13e131]:
+                  - button "" [ref=f13e132]
+                  - button "" [ref=f13e134]
+                  - button "" [ref=f13e136]
+              - generic [ref=f13e138]:
+                - generic [ref=f13e139]
+                - generic [ref=f13e140]:
+                  - generic [ref=f13e141]:
+                    - generic [ref=f13e142]: 
+                    - generic [ref=f13e143]: "3"
+                    - text: "|"
+                  - generic [ref=f13e144]: 235.62KB
+          - button "" [ref=f13e145] [cursor=pointer]
+      - generic [ref=f13e147]:
+        - generic [ref=f13e148]: "#0"
+        - generic [ref=f13e152]:
+          - generic [ref=f13e153]:
+            - generic [ref=f13e155]:
+              - generic [ref=f13e156]: Assistant
+              - text: 
+              - generic [ref=f13e157]: 2026年7月23日 23:59
+            - generic [ref=f13e158]:                
+            - text:       
+          - text:       
+          - generic [ref=f13e159]:
+            - paragraph [ref=f13e160]: 如果您已连接到一个 API，试着问我点什么吧！
+            - separator [ref=f13e161]
+            - paragraph [ref=f13e162]:
+              - strong [ref=f13e163]: 提示：
+              - text: 您可以通过角色设置中的 "更多…" 菜单将角色设为欢迎页面的助手。
+      - generic [ref=f13e165]:
+        - text:                               
+        - iframe [ref=f13e167]:
+          - generic [ref=f18e3]:
+            - generic [ref=f18e12]:
+              - generic: NO RETURN
+              - generic: 契约即枷锁
+            - generic [ref=f18e17]:
+              - heading "无 限 回 廊" [level=1] [ref=f18e18]
+              - paragraph [ref=f18e19]: z e n o
+              - button "◆ 踏 入 回 廊 ◆" [ref=f18e20] [cursor=pointer]:
+                - generic [ref=f18e21]: ◆
+                - text: 踏 入 回 廊
+                - generic [ref=f18e22]: ◆
+    - generic [ref=f13e36]:
+      - generic [ref=f13e169]:
+        - button "柏宝书" [ref=f13e171] [cursor=pointer]
+        - generic [ref=f13e172]:
+          - button "世界书缓存优化器" [ref=f13e173] [cursor=pointer]
+          - button "缓存命中对比" [ref=f13e174] [cursor=pointer]
+          - button "世界书智能去重" [ref=f13e175] [cursor=pointer]
+        - button "打开明月秋青" [ref=f13e177] [cursor=pointer]
+      - text:  
+      - generic [ref=f13e37]:
+        - generic [ref=f13e38]:
+          - generic [ref=f13e39] [cursor=pointer]: 
+          - generic "扩展程序" [ref=f13e178] [cursor=pointer]: 
+        - textbox "输入想发送的消息，或输入 /? 获取帮助" [ref=f13e179]
+        - generic [ref=f13e41]:
+          - text:      
+          - generic "发送消息" [ref=f13e180] [cursor=pointer]: 
+  - text:                       1       
+  - status [ref=f13e181]
+  - status [ref=f13e182]
+  - generic [ref=f13e183]: 
+  - text:                    
+  - status [ref=f13e186]
+  - status [ref=f13e187]
+  - status [ref=f13e188]
+  - status [ref=f13e189]
+  - status [ref=f13e190]
+  - status [ref=f13e191]
+  - status [ref=f13e192]
+  - status [ref=f13e193]
+  - status [ref=f13e194]
+  - status [ref=f13e195]
+  - button [ref=f13e196]
