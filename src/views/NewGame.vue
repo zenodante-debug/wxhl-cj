@@ -1,67 +1,74 @@
 <template>
   <div class="newgame-root">
-    <!-- Choice Screen -->
+    <!-- Choice Screen: Behind the door, interior with two doors -->
     <div v-if="screen === 'choice'" class="choice-screen">
-      <!-- Corridor background layer -->
-      <div class="choice-corridor-bg">
-        <div class="choice-ceiling">
-          <div class="choice-pipe"></div>
-          <div class="choice-pipe delay"></div>
-          <div class="choice-bulb">
-            <div class="choice-bulb-wire"></div>
-            <div class="choice-bulb-glass"></div>
+      <!-- Interior background -->
+      <div class="interior-bg">
+        <!-- Ceiling -->
+        <div class="int-ceiling">
+          <div class="int-pipe p1"></div>
+          <div class="int-pipe p2"></div>
+          <div class="int-bulb">
+            <div class="int-bulb-wire"></div>
+            <div class="int-bulb-glass"></div>
           </div>
         </div>
-        <div class="choice-walls">
-          <div class="choice-wall-left">
-            <div class="choice-flesh-veins"></div>
-            <div class="choice-rust-patches"></div>
-            <div class="choice-blood-streak s1"></div>
-          </div>
-          <div class="choice-wall-right">
-            <div class="choice-flesh-veins right"></div>
-            <div class="choice-rust-patches right"></div>
-            <div class="choice-blood-streak s2"></div>
-            <div class="choice-handprint"></div>
+
+        <!-- Left wall with door -->
+        <div class="int-wall int-wall-left">
+          <div class="int-flesh-veins"></div>
+          <div class="int-rust-patches"></div>
+          <div class="int-blood-streak"></div>
+
+          <!-- Door 1: 自主捏人 -->
+          <div class="int-doorway" @click="screen = 'custom'">
+            <div class="int-door-recess">
+              <div class="int-door-plate">自 主 捏 人</div>
+              <div class="int-door-status">⚒ 铸造你的契约</div>
+            </div>
+            <div class="int-door-glow"></div>
           </div>
         </div>
-        <div class="choice-floor">
-          <div class="choice-floor-lines"></div>
+
+        <!-- Right wall with door -->
+        <div class="int-wall int-wall-right">
+          <div class="int-flesh-veins right"></div>
+          <div class="int-rust-patches right"></div>
+          <div class="int-handprint"></div>
+
+          <!-- Door 2: 开局预设 -->
+          <div class="int-doorway" @click="screen = 'preset'">
+            <div class="int-door-recess">
+              <div class="int-door-plate">开 局 预 设</div>
+              <div class="int-door-status">◆ 直接坠入深渊</div>
+            </div>
+            <div class="int-door-glow"></div>
+          </div>
         </div>
-        <div class="choice-far-glow"></div>
+
+        <!-- Floor -->
+        <div class="int-floor">
+          <div class="int-floor-lines"></div>
+          <div class="int-floor-blood"></div>
+        </div>
+
+        <!-- Far wall hint -->
+        <div class="int-far-wall">
+          <div class="int-far-text">你已踏入回廊</div>
+        </div>
       </div>
 
-      <!-- Ember particles overlay -->
+      <!-- Ember particles -->
       <canvas ref="emberCanvas" class="choice-ember-canvas"></canvas>
 
-      <!-- Content -->
-      <a class="back-link" @click="goBack">← 回廊入口</a>
+      <!-- Content overlay -->
+      <a class="back-link" @click="goBack">← 转身离开</a>
 
       <div class="choice-inner">
         <div class="choice-header">
           <div class="choice-icon">◆</div>
-          <h1 class="choice-title">踏 入 回 廊</h1>
-          <p class="choice-subtitle">选择你与深渊缔约的方式</p>
-        </div>
-
-        <div class="choice-cards">
-          <button class="choice-card" @click="screen = 'custom'">
-            <span class="card-icon">⚒</span>
-            <span class="card-body">
-              <span class="card-label">自 主 捏 人</span>
-              <span class="card-desc">自行分配属性、书写特质、具现装备</span>
-            </span>
-            <span class="card-arrow">→</span>
-          </button>
-
-          <button class="choice-card" @click="screen = 'preset'">
-            <span class="card-icon">◆</span>
-            <span class="card-body">
-              <span class="card-label">开 局 预 设</span>
-              <span class="card-desc">使用预制的契约者档案，直接坠入深渊</span>
-            </span>
-            <span class="card-arrow">→</span>
-          </button>
+          <h1 class="choice-title">契 约 之 厅</h1>
+          <p class="choice-subtitle">选择一扇门，缔结你的命运</p>
         </div>
       </div>
     </div>
@@ -69,7 +76,7 @@
     <!-- Character Creation Screen -->
     <div v-else-if="screen === 'custom'" class="custom-screen">
       <div class="screen-header">
-        <a class="back-link" @click="screen = 'choice'">← 返回选择</a>
+        <a class="back-link" @click="screen = 'choice'">← 返回大厅</a>
       </div>
       <CharacterCreation @complete="onCharacterComplete" />
     </div>
@@ -77,7 +84,7 @@
     <!-- Preset Selection Screen -->
     <div v-else-if="screen === 'preset'" class="preset-screen">
       <div class="screen-header">
-        <a class="back-link" @click="screen = 'choice'">← 返回选择</a>
+        <a class="back-link" @click="screen = 'choice'">← 返回大厅</a>
       </div>
       <PresetSelect @select="onPresetSelect" />
     </div>
@@ -96,7 +103,7 @@ const router = useRouter()
 const store = useGameStore()
 const screen = ref<'choice' | 'custom' | 'preset'>('choice')
 
-// Ember particles for choice screen
+// Ember particles
 const emberCanvas = ref<HTMLCanvasElement | null>(null)
 let embers: Array<{ x: number; y: number; r: number; vx: number; vy: number; o: number; life: number }> = []
 let ctx: CanvasRenderingContext2D | null = null
@@ -111,14 +118,14 @@ function initEmbers() {
   c.height = rect.height
   ctx = c.getContext('2d')
   embers = []
-  for (let i = 0; i < 40; i++) {
+  for (let i = 0; i < 35; i++) {
     embers.push({
       x: Math.random() * c.width,
       y: Math.random() * c.height,
-      r: Math.random() * 1.0 + 0.2,
-      vx: (Math.random() - 0.5) * 0.15,
-      vy: -(Math.random() * 0.12 + 0.03),
-      o: Math.random() * 0.3 + 0.06,
+      r: Math.random() * 0.9 + 0.2,
+      vx: (Math.random() - 0.5) * 0.12,
+      vy: -(Math.random() * 0.1 + 0.02),
+      o: Math.random() * 0.25 + 0.05,
       life: Math.random(),
     })
   }
@@ -131,7 +138,7 @@ function drawEmbers() {
   ctx.clearRect(0, 0, c.width, c.height)
   for (const p of embers) {
     p.y += p.vy
-    p.x += p.vx + Math.sin(frame * 0.008 + p.life) * 0.15
+    p.x += p.vx + Math.sin(frame * 0.007 + p.life) * 0.12
     p.life -= 0.001
     if (p.life <= 0 || p.y < -20) {
       p.y = c.height + 20
@@ -144,15 +151,13 @@ function drawEmbers() {
     ctx.fillStyle = `rgba(180,80,30,${a})`
     ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2)
     ctx.fill()
-    ctx.beginPath()
-    ctx.fillStyle = `rgba(200,100,40,${a * 0.12})`
-    ctx.arc(p.x, p.y, p.r * 3, 0, Math.PI * 2)
-    ctx.fill()
   }
 }
 
 onMounted(() => {
-  gsap.fromTo('.choice-inner', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out', delay: 0.4 })
+  gsap.fromTo('.choice-inner', { opacity: 0, y: 10 }, { opacity: 1, y: 0, duration: 0.6, ease: 'power2.out', delay: 0.3 })
+  gsap.fromTo('.int-doorway', { opacity: 0, y: 15 }, { opacity: 1, y: 0, duration: 0.5, stagger: 0.15, ease: 'power2.out', delay: 0.5 })
+
   if (screen.value === 'choice') {
     setTimeout(() => {
       initEmbers()
@@ -171,13 +176,11 @@ function goBack() {
   router.push('/')
 }
 
-function onCharacterComplete(promptText: string) {
-  console.info('[NewGame] Character contract generated:', promptText.substring(0, 100) + '...')
+function onCharacterComplete(_promptText: string) {
   router.push('/main')
 }
 
-function onPresetSelect(presetId: string) {
-  console.info('[NewGame] Preset selected:', presetId)
+function onPresetSelect(_presetId: string) {
   router.push('/main')
 }
 </script>
@@ -211,211 +214,249 @@ function onPresetSelect(presetId: string) {
   color: var(--amber-dim);
   cursor: pointer;
   text-decoration: none;
-  transition: color 0.2s;
   padding: 10px 14px;
   display: inline-block;
   flex-shrink: 0;
   z-index: 10;
   position: relative;
+  transition: color 0.2s;
 }
-
 .back-link:hover { color: var(--amber); }
-
 .screen-header { flex-shrink: 0; position: relative; z-index: 10; }
 
-/* ===== CHOICE SCREEN CORRIDOR BACKGROUND ===== */
-.choice-corridor-bg {
+/* ===== INTERIOR BACKGROUND ===== */
+.interior-bg {
   position: absolute;
   inset: 0;
   z-index: 1;
-  overflow: hidden;
+  background:
+    radial-gradient(ellipse at 50% 40%, rgba(180, 60, 20, 0.06) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 100%, rgba(80, 20, 8, 0.1) 0%, transparent 35%),
+    linear-gradient(180deg, #0c0806 0%, #080503 50%, #0a0604 100%);
 }
 
 /* Ceiling */
-.choice-ceiling {
+.int-ceiling {
   position: absolute;
   top: 0; left: 0; right: 0;
-  height: 11%;
-  background: linear-gradient(180deg, #050302 0%, #0a0705 60%, #120c08 100%);
+  height: 10%;
+  background: linear-gradient(180deg, #040201 0%, #0a0604 70%, #0f0a07 100%);
   z-index: 4;
   border-bottom: 1px solid var(--iron-dark);
-  display: flex;
-  align-items: flex-end;
-  justify-content: center;
 }
-
-.choice-pipe {
+.int-pipe {
   position: absolute;
-  width: 10px;
-  height: 100%;
-  background: linear-gradient(90deg, #1a1612, #252018, #1a1612);
+  width: 8px; height: 100%;
+  background: linear-gradient(90deg, #181410, #221e18, #181410);
   border-radius: 0 0 2px 2px;
 }
-.choice-pipe:nth-child(1) { left: 25%; }
-.choice-pipe:nth-child(2) { left: 70%; }
-.choice-pipe:nth-child(1)::after {
-  content: '';
-  position: absolute;
-  bottom: -3px; left: 50%;
-  width: 2px; height: 5px;
-  background: rgba(80, 100, 70, 0.6);
-  border-radius: 1px;
-  animation: pipeDrip 5s ease-in-out infinite;
-}
-.choice-pipe.delay:nth-child(2)::after {
-  content: '';
-  position: absolute;
-  bottom: -3px; left: 50%;
-  width: 2px; height: 5px;
-  background: rgba(80, 100, 70, 0.6);
-  border-radius: 1px;
-  animation: pipeDrip 5s ease-in-out infinite 2s;
-}
+.int-pipe.p1 { left: 30%; }
+.int-pipe.p2 { left: 65%; }
 
-@keyframes pipeDrip {
-  0%, 85%, 100% { transform: scaleY(1); opacity: 0.5; }
-  90% { transform: scaleY(4); opacity: 1; }
-}
-
-.choice-bulb {
+.int-bulb {
   position: absolute;
   bottom: 0; left: 50%;
   transform: translateX(-50%);
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+  display: flex; flex-direction: column; align-items: center;
 }
-.choice-bulb-wire {
-  width: 1px; height: 6px; background: var(--iron);
-}
-.choice-bulb-glass {
-  width: 20px; height: 11px;
-  background: radial-gradient(ellipse at 50% 30%, rgba(210, 180, 140, 0.8), rgba(180, 140, 100, 0.3));
+.int-bulb-wire { width: 1px; height: 5px; background: var(--iron); }
+.int-bulb-glass {
+  width: 16px; height: 9px;
+  background: radial-gradient(ellipse at 50% 30%, rgba(210, 180, 140, 0.7), rgba(180, 140, 100, 0.25));
   border-radius: 50% / 40%;
-  box-shadow: 0 0 30px rgba(200, 160, 100, 0.4), 0 0 60px rgba(200, 150, 80, 0.2);
+  box-shadow: 0 0 25px rgba(200, 160, 100, 0.35), 0 0 50px rgba(200, 150, 80, 0.15);
   animation: bulbFlick 7s ease-in-out infinite;
 }
-
 @keyframes bulbFlick {
   0%, 24%, 26%, 28%, 30%, 100% { opacity: 1; }
-  25%, 27%, 29% { opacity: 0.15; }
+  25%, 27%, 29% { opacity: 0.12; }
 }
 
 /* Walls */
-.choice-walls {
+.int-wall {
   position: absolute;
-  top: 11%; bottom: 0;
-  left: 0; right: 0;
-}
-
-.choice-wall-left {
-  position: absolute;
-  top: 0; bottom: 0; left: 0;
+  top: 0; bottom: 20%;
   width: 34%;
-  background:
-    radial-gradient(ellipse at 100% 20%, var(--flesh-light) 0%, transparent 35%),
-    radial-gradient(ellipse at 90% 60%, rgba(80, 20, 8, 0.4) 0%, transparent 40%),
-    linear-gradient(90deg, var(--rust-dark) 0%, var(--rust) 50%, var(--rust-mid) 100%);
-  clip-path: polygon(0 0, 100% 4%, 100% 96%, 0 100%);
-  border-right: 1px solid rgba(120, 40, 20, 0.2);
+  overflow: hidden;
 }
-
-.choice-wall-right {
-  position: absolute;
-  top: 0; bottom: 0; right: 0;
-  width: 34%;
+.int-wall-left {
+  left: 0;
   background:
-    radial-gradient(ellipse at 0% 30%, var(--flesh-light) 0%, transparent 35%),
-    radial-gradient(ellipse at 10% 50%, rgba(80, 20, 8, 0.4) 0%, transparent 40%),
-    linear-gradient(270deg, var(--rust-dark) 0%, var(--rust) 50%, var(--rust-mid) 100%);
-  clip-path: polygon(0 4%, 100% 0, 100% 100%, 0 96%);
-  border-left: 1px solid rgba(120, 40, 20, 0.2);
+    radial-gradient(ellipse at 100% 20%, rgba(40, 15, 8, 0.5) 0%, transparent 40%),
+    radial-gradient(ellipse at 90% 60%, rgba(50, 15, 5, 0.3) 0%, transparent 35%),
+    linear-gradient(90deg, #0d0805 0%, #100a07 50%, #0e0906 100%);
+  clip-path: polygon(0 0, 100% 6%, 100% 94%, 0 100%);
+  border-right: 1px solid rgba(80, 30, 15, 0.2);
+}
+.int-wall-right {
+  right: 0;
+  background:
+    radial-gradient(ellipse at 0% 30%, rgba(40, 15, 8, 0.5) 0%, transparent 40%),
+    radial-gradient(ellipse at 10% 55%, rgba(50, 15, 5, 0.3) 0%, transparent 35%),
+    linear-gradient(270deg, #0d0805 0%, #100a07 50%, #0e0906 100%);
+  clip-path: polygon(0 6%, 100% 0, 100% 100%, 0 94%);
+  border-left: 1px solid rgba(80, 30, 15, 0.2);
 }
 
 /* Flesh veins */
-.choice-flesh-veins {
-  position: absolute; inset: 0; opacity: 0.45;
-  pointer-events: none;
+.int-flesh-veins {
+  position: absolute; inset: 0;
+  opacity: 0.4; pointer-events: none;
   background:
-    radial-gradient(ellipse at 80% 15%, rgba(60, 15, 10, 0.6) 0%, transparent 25%),
-    radial-gradient(ellipse at 75% 45%, rgba(40, 10, 8, 0.4) 0%, transparent 20%),
-    radial-gradient(ellipse at 85% 70%, rgba(50, 12, 8, 0.5) 0%, transparent 22%);
+    radial-gradient(ellipse at 80% 20%, rgba(50, 12, 8, 0.5) 0%, transparent 22%),
+    radial-gradient(ellipse at 75% 50%, rgba(35, 8, 5, 0.35) 0%, transparent 18%);
   animation: fleshPulse 8s ease-in-out infinite;
 }
-.choice-flesh-veins.right {
+.int-flesh-veins.right {
   background:
-    radial-gradient(ellipse at 20% 20%, rgba(60, 15, 10, 0.6) 0%, transparent 25%),
-    radial-gradient(ellipse at 25% 55%, rgba(40, 10, 8, 0.4) 0%, transparent 20%),
-    radial-gradient(ellipse at 15% 65%, rgba(50, 12, 8, 0.5) 0%, transparent 22%);
+    radial-gradient(ellipse at 20% 25%, rgba(50, 12, 8, 0.5) 0%, transparent 22%),
+    radial-gradient(ellipse at 25% 55%, rgba(35, 8, 5, 0.35) 0%, transparent 18%);
 }
-
 @keyframes fleshPulse {
-  0%, 100% { opacity: 0.4; }
-  50% { opacity: 0.55; }
+  0%, 100% { opacity: 0.35; }
+  50% { opacity: 0.5; }
 }
 
 /* Rust patches */
-.choice-rust-patches {
+.int-rust-patches {
   position: absolute; inset: 0; pointer-events: none;
   background:
-    radial-gradient(circle at 60% 30%, rgba(120, 50, 20, 0.3) 0%, transparent 30%),
-    radial-gradient(circle at 80% 60%, rgba(100, 40, 15, 0.25) 0%, transparent 25%);
+    radial-gradient(circle at 70% 35%, rgba(100, 40, 15, 0.25) 0%, transparent 25%),
+    radial-gradient(circle at 60% 70%, rgba(80, 30, 10, 0.2) 0%, transparent 20%);
 }
-.choice-rust-patches.right {
+.int-rust-patches.right {
   background:
-    radial-gradient(circle at 40% 25%, rgba(120, 50, 20, 0.3) 0%, transparent 30%),
-    radial-gradient(circle at 20% 55%, rgba(100, 40, 15, 0.25) 0%, transparent 25%);
+    radial-gradient(circle at 30% 30%, rgba(100, 40, 15, 0.25) 0%, transparent 25%),
+    radial-gradient(circle at 40% 65%, rgba(80, 30, 10, 0.2) 0%, transparent 20%);
 }
 
-/* Blood streaks */
-.choice-blood-streak {
+.int-blood-streak {
   position: absolute; pointer-events: none;
-  background: linear-gradient(180deg, transparent, rgba(120, 15, 10, 0.3) 20%, rgba(80, 8, 5, 0.5) 60%, rgba(50, 5, 3, 0.2) 100%);
+  right: 15%; top: 10%; width: 2px; height: 30%;
+  background: linear-gradient(180deg, transparent, rgba(100, 12, 8, 0.3), rgba(60, 6, 3, 0.15), transparent);
 }
-.choice-blood-streak.s1 { right: 12%; top: 8%; width: 3px; height: 35%; }
-.choice-blood-streak.s2 { left: 18%; top: 15%; width: 3px; height: 30%; }
-
-/* Handprint */
-.choice-handprint {
+.int-handprint {
   position: absolute; pointer-events: none;
-  left: 12%; top: 50%;
-  width: 22px; height: 26px;
+  left: 15%; top: 52%;
+  width: 20px; height: 24px;
   border-radius: 40% 40% 35% 35%;
-  background: rgba(100, 15, 8, 0.22);
-  box-shadow: 0 0 6px rgba(80, 10, 5, 0.18);
-  transform: rotate(10deg);
+  background: rgba(80, 12, 6, 0.2);
+  box-shadow: 0 0 5px rgba(60, 8, 4, 0.15);
+  transform: rotate(8deg);
+}
+
+/* ===== DOORWAYS ===== */
+.int-doorway {
+  position: absolute;
+  top: 18%; bottom: 25%;
+  width: 55%;
+  cursor: pointer;
+  z-index: 6;
+  transition: all 0.35s cubic-bezier(0.16, 1, 0.3, 1);
+}
+.int-wall-left .int-doorway { left: 22%; }
+.int-wall-right .int-doorway { right: 22%; }
+
+.int-doorway:hover {
+  filter: brightness(1.25);
+  transform: scale(1.04);
+}
+.int-doorway:hover .int-door-glow { opacity: 0.7; }
+.int-doorway:active { transform: scale(0.97); transition: all 0.1s; }
+
+.int-door-recess {
+  width: 100%; height: 100%;
+  background: linear-gradient(180deg, rgba(12, 7, 4, 0.95), rgba(18, 11, 7, 0.92));
+  border: 2px solid var(--iron);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.6);
+  position: relative;
+}
+.int-door-recess::after {
+  content: '';
+  position: absolute; inset: 3px; pointer-events: none;
+  border: 1px solid rgba(100, 50, 20, 0.15);
+}
+
+.int-door-plate {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  letter-spacing: 4px;
+  color: var(--amber);
+  text-shadow: 0 0 8px rgba(200, 150, 80, 0.25);
+}
+
+.int-door-status {
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  letter-spacing: 2px;
+  color: var(--chalk-dim);
+  text-align: center;
+}
+
+.int-door-glow {
+  position: absolute;
+  inset: -5px;
+  pointer-events: none;
+  background: radial-gradient(ellipse at center, rgba(200, 80, 20, 0.15) 0%, rgba(140, 40, 10, 0.06) 40%, transparent 70%);
+  opacity: 0.4;
+  transition: opacity 0.4s;
+  animation: doorGlowPulse 3s ease-in-out infinite;
+}
+@keyframes doorGlowPulse {
+  0%, 100% { opacity: 0.3; }
+  50% { opacity: 0.55; }
 }
 
 /* Floor */
-.choice-floor {
+.int-floor {
   position: absolute;
   bottom: 0; left: 14%; right: 14%;
   height: 20%;
-  background: linear-gradient(0deg, rgba(10, 6, 4, 0.85) 0%, rgba(20, 12, 8, 0.6) 40%, rgba(25, 15, 10, 0.2) 70%, transparent 100%);
+  background: linear-gradient(0deg, rgba(8, 5, 3, 0.85) 0%, rgba(15, 10, 6, 0.55) 40%, rgba(20, 12, 8, 0.15) 70%, transparent 100%);
   clip-path: polygon(0 30%, 100% 30%, 100% 100%, 0 100%);
 }
-
-.choice-floor-lines {
+.int-floor-lines {
   position: absolute; inset: 0; pointer-events: none;
 }
-.choice-floor-lines::before {
+.int-floor-lines::before {
   content: '';
   position: absolute; inset: 0;
-  background: repeating-linear-gradient(0deg, transparent, transparent 5px, rgba(60, 30, 20, 0.1) 5px, rgba(60, 30, 20, 0.1) 6px);
+  background: repeating-linear-gradient(0deg, transparent, transparent 5px, rgba(50, 25, 15, 0.1) 5px, rgba(50, 25, 15, 0.1) 6px);
 }
-
-/* Far end blood glow */
-.choice-far-glow {
+.int-floor-blood {
   position: absolute;
-  top: 18%; bottom: 24%;
-  left: 32%; right: 32%;
-  background: radial-gradient(ellipse at center, rgba(180, 60, 20, 0.15) 0%, rgba(120, 30, 10, 0.06) 40%, transparent 70%);
-  animation: portalBreathe 4s ease-in-out infinite;
+  right: 25%; top: 35%;
+  width: 35px; height: 22px;
+  background: radial-gradient(ellipse at center, rgba(60, 8, 4, 0.3) 0%, transparent 65%);
+  border-radius: 50%;
+  pointer-events: none;
 }
 
-@keyframes portalBreathe {
-  0%, 100% { opacity: 0.35; }
-  50% { opacity: 0.6; }
+/* Far wall */
+.int-far-wall {
+  position: absolute;
+  top: 24%; bottom: 26%;
+  left: 32%; right: 32%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  background: linear-gradient(180deg, rgba(6, 3, 2, 0.9), rgba(8, 4, 3, 0.85));
+  border: 1px solid rgba(80, 30, 15, 0.15);
+}
+
+.int-far-text {
+  font-family: var(--font-display);
+  font-size: 0.7rem;
+  letter-spacing: 3px;
+  color: var(--amber-dim);
+  opacity: 0.5;
+  text-shadow: 0 0 6px rgba(200, 150, 80, 0.2);
 }
 
 /* Ember canvas */
@@ -426,129 +467,48 @@ function onPresetSelect(presetId: string) {
   pointer-events: none;
 }
 
-/* ===== Choice Content ===== */
+/* ===== Choice Content Overlay ===== */
 .choice-inner {
-  flex: 1;
+  position: absolute;
+  bottom: 18%;
+  left: 0; right: 0;
+  z-index: 10;
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
-  padding: 0 20px 20px;
-  z-index: 10;
-  position: relative;
 }
 
 .choice-header {
   text-align: center;
-  margin-bottom: 28px;
 }
 
 .choice-icon {
-  font-size: 1.6rem;
+  font-size: 1.3rem;
   color: var(--blood-bright);
-  margin-bottom: 8px;
+  margin-bottom: 4px;
   animation: iconPulse 3s ease-in-out infinite;
 }
 
 @keyframes iconPulse {
-  0%, 100% { opacity: 0.5; text-shadow: 0 0 8px rgba(160, 30, 20, 0.3); }
-  50% { opacity: 1; text-shadow: 0 0 18px rgba(160, 30, 20, 0.6); }
+  0%, 100% { opacity: 0.4; text-shadow: 0 0 6px rgba(160, 30, 20, 0.3); }
+  50% { opacity: 1; text-shadow: 0 0 14px rgba(160, 30, 20, 0.5); }
 }
 
 .choice-title {
   font-family: var(--font-display);
-  font-size: 1.8rem;
-  letter-spacing: 8px;
+  font-size: 1.5rem;
+  letter-spacing: 6px;
   color: var(--emerge);
-  margin: 0 0 8px;
-  text-shadow: 0 0 14px rgba(200, 150, 80, 0.25);
+  margin: 0 0 4px;
+  text-shadow: 0 0 10px rgba(200, 150, 80, 0.2);
 }
 
 .choice-subtitle {
   font-family: var(--font-body);
-  font-size: 0.9rem;
+  font-size: 0.8rem;
   color: var(--chalk-dim);
   letter-spacing: 2px;
   margin: 0;
-}
-
-/* ===== Choice Cards ===== */
-.choice-cards {
-  display: flex;
-  flex-direction: column;
-  gap: 14px;
-  width: 100%;
-}
-
-.choice-card {
-  width: 100%;
-  padding: 18px 16px;
-  background: rgba(10, 6, 4, 0.75);
-  border: 2px solid var(--iron);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
-  position: relative;
-}
-
-.choice-card::before {
-  content: '';
-  position: absolute;
-  inset: 3px;
-  pointer-events: none;
-  border: 1px solid rgba(100, 50, 20, 0.12);
-  transition: border-color 0.3s;
-}
-
-.choice-card:hover {
-  border-color: var(--blood-bright);
-  box-shadow: 0 0 22px rgba(160, 30, 20, 0.25);
-  transform: translateX(3px);
-}
-.choice-card:hover::before { border-color: rgba(160, 30, 20, 0.25); }
-.choice-card:active { transform: scale(0.98); transition: all 0.1s; }
-
-.card-icon {
-  font-size: 1.5rem;
-  color: var(--amber);
-  flex-shrink: 0;
-  width: 40px;
-  text-align: center;
-}
-
-.card-body {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-width: 0;
-}
-
-.card-label {
-  font-family: var(--font-display);
-  font-size: 1.15rem;
-  letter-spacing: 4px;
-  color: var(--emerge);
-  margin-bottom: 3px;
-}
-
-.card-desc {
-  font-family: var(--font-body);
-  font-size: 0.8rem;
-  color: var(--chalk-dim);
-  line-height: 1.4;
-}
-
-.card-arrow {
-  font-size: 0.9rem;
-  color: var(--amber-dim);
-  flex-shrink: 0;
-  transition: transform 0.3s;
-}
-.choice-card:hover .card-arrow {
-  transform: translateX(4px);
-  color: var(--blood-bright);
 }
 
 /* ===== Custom/Preset screens ===== */
