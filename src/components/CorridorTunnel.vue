@@ -1,5 +1,5 @@
 <template>
-  <div class="title-scene">
+  <div class="title-scene" :style="{ aspectRatio: aspectRatio }">
     <slot name="particles"></slot>
 
     <div class="ceiling-slab">
@@ -52,6 +52,8 @@
 <script setup lang="ts">
 import { useGameStore } from '../store/game'
 
+withDefaults(defineProps<{ aspectRatio?: string }>(), { aspectRatio: '16 / 9' })
+
 const store = useGameStore()
 </script>
 
@@ -59,7 +61,6 @@ const store = useGameStore()
 .title-scene {
   max-width: 800px;
   width: 100%;
-  aspect-ratio: 16 / 9;
   overflow: hidden;
   position: relative;
   background: var(--bg-void);

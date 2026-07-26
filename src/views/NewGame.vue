@@ -83,13 +83,11 @@ function onPresetSelect(presetId: string) {
 <style scoped>
 /* ===== Root: vertical aspect ratio for mobile ===== */
 .newgame-root {
-  max-width: 450px;
   width: 100%;
   aspect-ratio: 9 / 16;
   overflow: hidden;
   position: relative;
   background: var(--bg-void);
-  margin: 0 auto;
 }
 
 .choice-screen,

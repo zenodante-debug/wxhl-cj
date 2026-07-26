@@ -1,77 +1,123 @@
 <template>
   <div class="ps-root">
     <div class="ps-scroll">
+
+      <!-- Header -->
       <header class="ps-header">
         <div class="ps-icon">◆</div>
-        <h1 class="ps-title">开 局 预 设</h1>
-        <p class="ps-subtitle">选择一份已刻印的契约，直接坠入深渊</p>
+        <h1 class="ps-title">命 运 跃 迁</h1>
+        <p class="ps-subtitle">选择接入回廊的方式，时间线不可逆转</p>
       </header>
 
-      <div class="ps-grid">
-        <button
-          v-for="preset in presets"
-          :key="preset.id"
-          class="ps-card"
-          @click="selectPreset(preset.id)"
-        >
-          <div class="ps-card-badge" :class="preset.difficulty">
-            {{ preset.difficultyLabel }}
-          </div>
-          <div class="ps-card-name">{{ preset.name }}</div>
-          <div class="ps-card-line"></div>
-          <div class="ps-card-desc">{{ preset.desc }}</div>
-          <div class="ps-card-tags">
-            <span v-for="tag in preset.tags" :key="tag" class="ps-tag">{{ tag }}</span>
-          </div>
-        </button>
+      <!-- Warning -->
+      <div class="ps-warn">
+        <div class="ps-warn-icon">⚠</div>
+        <div class="ps-warn-text">失败即抹杀。这里没有宽恕，只有绝对冰冷的数据与规则。</div>
       </div>
 
-      <p class="ps-hint">更多预设即将开放...</p>
+      <!-- Category 1: 引导者分支 -->
+      <div class="ps-section">
+        <div class="ps-section-head">
+          <span class="ps-section-ico">🔮</span>
+          <span class="ps-section-title">系统进程分支</span>
+          <span class="ps-section-badge">PROCESS</span>
+        </div>
+        <div class="ps-grid">
+          <button
+            v-for="p in processPresets"
+            :key="p.id"
+            class="ps-card"
+            :class="'ps-card-' + p.color"
+            @click="startCorridor(p.swipeId)"
+          >
+            <div class="ps-card-num">{{ p.num }}</div>
+            <div class="ps-card-body">
+              <div class="ps-card-name">{{ p.name }}</div>
+              <div class="ps-card-desc">{{ p.desc }}</div>
+            </div>
+            <span v-if="p.tag" class="ps-card-utag" :class="'ps-utag-' + p.tagColor">{{ p.tag }}</span>
+          </button>
+        </div>
+      </div>
+
+      <!-- Category 2: 预设身世 -->
+      <div class="ps-section">
+        <div class="ps-section-head">
+          <span class="ps-section-ico">🧬</span>
+          <span class="ps-section-title">预设身世载入</span>
+          <span class="ps-section-badge">PRESET</span>
+        </div>
+        <p class="ps-section-hint">选择此区域将自动分配初始属性与专长基础。</p>
+        <div class="ps-grid ps-grid-2col">
+          <button
+            v-for="p in identityPresets"
+            :key="p.id"
+            class="ps-card ps-card-sm"
+            :class="'ps-card-' + p.color"
+            @click="startCorridor(p.swipeId)"
+          >
+            <div class="ps-card-num">{{ p.num }}</div>
+            <div class="ps-card-body">
+              <div class="ps-card-name">{{ p.name }}</div>
+              <div class="ps-card-desc">{{ p.desc }}</div>
+            </div>
+          </button>
+        </div>
+      </div>
+
+      <!-- Footer -->
+      <div class="ps-footer">
+        <p class="ps-foot-warn">点击上方数据块将立即执行时空跳跃。</p>
+        <p class="ps-foot-note">※ 请确保角色卡 Alternate Greetings 已配置对应 Swipe ID。</p>
+        <p class="ps-foot-ver">GM NODE : ONLINE</p>
+      </div>
+
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
-const emit = defineEmits<{ select: [id: string] }>()
-
 interface Preset {
   id: string
+  num: string
   name: string
   desc: string
-  difficulty: 'easy' | 'normal' | 'hard'
-  difficultyLabel: string
-  tags: string[]
+  swipeId: number
+  color: 'purple' | 'green' | 'yellow' | 'blue'
+  tag?: string
+  tagColor?: string
 }
 
-const presets: Preset[] = [
-  {
-    id: 'soldier',
-    name: '前线突击兵',
-    desc: '一名经历过三次副本的老练士兵，装备精良但旧伤累累。携带先锋突击步枪与战术背心，属性偏向体力与力量。',
-    difficulty: 'easy',
-    difficultyLabel: '适合新手',
-    tags: ['战斗型', '装备齐全', '军衔:上士'],
-  },
-  {
-    id: 'survivor',
-    name: '荒野求生者',
-    desc: '来自文明崩溃后的废土，精通侦察与生存技巧。携带轻便装备与野外工具包，更依赖感知而非蛮力。',
-    difficulty: 'normal',
-    difficultyLabel: '进阶挑战',
-    tags: ['生存型', '高感知', '轻装'],
-  },
-  {
-    id: 'blank',
-    name: '空白灵魂',
-    desc: '一无所有，一无所知。只身坠入回廊，仅凭本能求生。无装备、无技能、无记忆——但拥有最大的成长空间。',
-    difficulty: 'hard',
-    difficultyLabel: '硬核模式',
-    tags: ['白板开局', '高成长', '全属性5'],
-  },
+const processPresets: Preset[] = [
+  { id: 'guide1',  num: '01', name: '大姐姐引导者', desc: '常规流程，温柔理性的资深者指导你完成基础登记。',     swipeId: 1,  color: 'purple' },
+  { id: 'guide2',  num: '02', name: '雌小鬼引导者',   desc: '被分派到雌小鬼引导员进行指引。',                       swipeId: 2,  color: 'purple' },
+  { id: 'memory',  num: '03', name: '记忆覆写',       desc: '跳过引导，直接载入已有数据或完全自定义属性。',           swipeId: 3,  color: 'green',  tag: '导入', tagColor: 'green' },
+  { id: 'companion', num: '04', name: '陪玩选择',      desc: '作为高维存在，选择你的专属陪玩。',                       swipeId: 4,  color: 'green',  tag: '捏人', tagColor: 'green' },
 ]
 
-function selectPreset(id: string) {
-  emit('select', id)
+const identityPresets: Preset[] = [
+  { id: 'p05', num: '05', name: '古武传人',       desc: '极高STR/AGI，近战专精。',                 swipeId: 5,  color: 'yellow' },
+  { id: 'p06', num: '06', name: '专业杀手',       desc: '极高AGI/PER，潜行爆发。',                 swipeId: 6,  color: 'yellow' },
+  { id: 'p07', num: '07', name: '国际雇佣兵',     desc: '均衡体魄，熟练掌握各类热武器。',           swipeId: 7,  color: 'yellow' },
+  { id: 'p08', num: '08', name: '退伍兵王',       desc: '极高CON，强悍意志与生存力。',             swipeId: 8,  color: 'yellow' },
+  { id: 'p09', num: '09', name: '私家侦探',       desc: '极高PER，洞察细微线索。',                 swipeId: 9,  color: 'yellow' },
+  { id: 'p10', num: '10', name: '科研工作者',     desc: '特化解析能力，易掌握黑科技。',             swipeId: 10, color: 'yellow' },
+  { id: 'p11', num: '11', name: '神秘学爱好者',   desc: '极高PER，法术极高亲和力。',               swipeId: 11, color: 'yellow' },
+  { id: 'p12', num: '12', name: '道士下山',       desc: '掌握基础术法与符箓，感知天机。',           swipeId: 12, color: 'yellow' },
+  { id: 'p13', num: '13', name: '特管局预备役',   desc: '现实官方背景，熟知基础情报。',             swipeId: 13, color: 'blue' },
+  { id: 'p14', num: '14', name: '黑帮少爷',       desc: '万界商人。',                               swipeId: 14, color: 'yellow' },
+]
+
+async function startCorridor(swipeId: number) {
+  try {
+    await setChatMessages([{ message_id: 0, swipe_id: swipeId }])
+    if (typeof triggerSlash === 'function') {
+      triggerSlash('/echo severity=success ✅ 载入成功：意识覆写完成，欢迎来到无限回廊。')
+    }
+  } catch (error: any) {
+    console.error('跃迁失败:', error)
+    alert('跃迁失败：数据链断裂。\n请检查角色卡的 Alternate Greetings 是否包含了第 ' + swipeId + ' 个开场白。\n\n系统报错：' + (error?.message || error))
+  }
 }
 </script>
 
@@ -82,13 +128,15 @@ function selectPreset(id: string) {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+  width: 100%;
 }
 
 .ps-scroll {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 16px 16px 32px;
+  padding: 14px 14px 28px;
+  width: 100%;
 }
 
 .ps-scroll::-webkit-scrollbar { width: 3px; }
@@ -98,13 +146,13 @@ function selectPreset(id: string) {
 /* ===== Header ===== */
 .ps-header {
   text-align: center;
-  margin-bottom: 20px;
+  margin-bottom: 12px;
 }
 
 .ps-icon {
-  font-size: 1.3rem;
+  font-size: 1.2rem;
   color: var(--blood-bright);
-  margin-bottom: 6px;
+  margin-bottom: 4px;
   text-shadow: 0 0 10px rgba(160, 30, 20, 0.4);
 }
 
@@ -113,39 +161,115 @@ function selectPreset(id: string) {
   font-size: 1.3rem;
   letter-spacing: 5px;
   color: var(--emerge);
-  margin: 0 0 6px;
+  margin: 0 0 4px;
 }
 
 .ps-subtitle {
   font-family: var(--font-body);
-  font-size: 0.65rem;
+  font-size: 0.6rem;
   color: var(--chalk-dim);
   letter-spacing: 1px;
   margin: 0;
+}
+
+/* ===== Warning ===== */
+.ps-warn {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  padding: 8px 10px;
+  border-left: 3px solid var(--blood-bright);
+  background: rgba(160, 30, 20, 0.08);
+  margin-bottom: 16px;
+}
+
+.ps-warn-icon {
+  color: var(--blood-bright);
+  font-size: 0.7rem;
+  flex-shrink: 0;
+}
+
+.ps-warn-text {
+  font-family: var(--font-body);
+  font-size: 0.6rem;
+  color: var(--chalk-dim);
+  line-height: 1.5;
+}
+
+/* ===== Section ===== */
+.ps-section {
+  margin-bottom: 16px;
+}
+
+.ps-section-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 8px 10px;
+  border-bottom: 1px solid rgba(120, 50, 20, 0.25);
+  margin-bottom: 10px;
+  background: rgba(5, 2, 1, 0.4);
+}
+
+.ps-section-ico {
+  font-size: 0.9rem;
+}
+
+.ps-section-title {
+  font-family: var(--font-display);
+  font-size: 0.8rem;
+  font-weight: bold;
+  color: var(--emerge);
+  letter-spacing: 2px;
+}
+
+.ps-section-badge {
+  margin-left: auto;
+  font-family: var(--font-mono);
+  font-size: 0.5rem;
+  color: var(--chalk-dim);
+  letter-spacing: 1px;
+}
+
+.ps-section-hint {
+  font-family: var(--font-body);
+  font-size: 0.55rem;
+  color: var(--amber-dim);
+  margin: 0 0 8px;
+  padding: 0 4px;
 }
 
 /* ===== Grid ===== */
 .ps-grid {
   display: flex;
   flex-direction: column;
-  gap: 12px;
+  gap: 8px;
+}
+
+.ps-grid-2col {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
+  gap: 8px;
 }
 
 /* ===== Card ===== */
 .ps-card {
   width: 100%;
-  padding: 14px;
+  padding: 10px 12px;
   background: rgba(10, 6, 4, 0.8);
   border: 1px solid var(--iron);
   cursor: pointer;
   text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 10px;
   position: relative;
-  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .ps-card:hover {
   border-color: var(--blood-bright);
-  box-shadow: 0 0 16px rgba(160, 30, 20, 0.2);
+  box-shadow: 0 0 12px rgba(160, 30, 20, 0.2);
   transform: translateX(2px);
 }
 
@@ -154,78 +278,89 @@ function selectPreset(id: string) {
   transition: all 0.1s;
 }
 
-.ps-card-badge {
-  display: inline-block;
-  padding: 2px 8px;
+.ps-card-sm {
+  padding: 8px 10px;
+  gap: 6px;
+}
+
+/* Color variants */
+.ps-card-purple { border-left: 2px solid rgba(160, 110, 240, 0.5); }
+.ps-card-purple:hover { border-left-color: #a371f7; }
+.ps-card-green  { border-left: 2px solid rgba(80, 200, 100, 0.4); }
+.ps-card-green:hover  { border-left-color: #56d364; }
+.ps-card-yellow { border-left: 2px solid rgba(220, 180, 60, 0.4); }
+.ps-card-yellow:hover { border-left-color: #e3b341; }
+.ps-card-blue   { border-left: 2px solid rgba(74, 158, 255, 0.4); }
+.ps-card-blue:hover   { border-left-color: #4a9eff; }
+
+.ps-card-num {
   font-family: var(--font-mono);
-  font-size: 0.55rem;
-  letter-spacing: 1px;
-  margin-bottom: 8px;
-}
-
-.ps-card-badge.easy {
-  background: rgba(60, 100, 50, 0.2);
-  color: #6a9070;
-  border: 1px solid rgba(80, 120, 70, 0.3);
-}
-
-.ps-card-badge.normal {
-  background: rgba(180, 120, 40, 0.2);
+  font-size: 0.7rem;
+  font-weight: bold;
   color: var(--amber);
-  border: 1px solid rgba(180, 120, 40, 0.3);
+  flex-shrink: 0;
+  min-width: 22px;
 }
 
-.ps-card-badge.hard {
-  background: rgba(160, 30, 20, 0.2);
-  color: var(--blood-bright);
-  border: 1px solid rgba(160, 30, 20, 0.3);
+.ps-card-body {
+  flex: 1;
+  min-width: 0;
 }
 
 .ps-card-name {
   font-family: var(--font-display);
-  font-size: 0.9rem;
-  letter-spacing: 3px;
+  font-size: 0.75rem;
+  letter-spacing: 2px;
   color: var(--emerge);
-  margin-bottom: 6px;
-}
-
-.ps-card-line {
-  height: 1px;
-  background: linear-gradient(90deg, rgba(160, 100, 60, 0.3), transparent);
-  margin-bottom: 8px;
+  margin-bottom: 2px;
 }
 
 .ps-card-desc {
   font-family: var(--font-body);
-  font-size: 0.65rem;
+  font-size: 0.58rem;
   color: var(--chalk-dim);
-  line-height: 1.5;
-  margin-bottom: 8px;
+  line-height: 1.4;
 }
 
-.ps-card-tags {
-  display: flex;
-  gap: 6px;
-  flex-wrap: wrap;
-}
-
-.ps-tag {
+.ps-card-utag {
   font-family: var(--font-mono);
-  font-size: 0.55rem;
-  padding: 2px 6px;
-  color: var(--amber-dim);
-  border: 1px solid rgba(120, 80, 30, 0.25);
-  background: rgba(40, 20, 10, 0.3);
-  letter-spacing: 1px;
+  font-size: 0.5rem;
+  padding: 1px 4px;
+  border: 1px solid rgba(100, 50, 20, 0.3);
+  background: rgba(20, 10, 5, 0.5);
+  color: var(--chalk-dim);
+  flex-shrink: 0;
 }
 
-/* ===== Hint ===== */
-.ps-hint {
+.ps-utag-green { color: #56d364; border-color: rgba(80, 200, 100, 0.3); }
+
+/* ===== Footer ===== */
+.ps-footer {
   text-align: center;
-  font-family: var(--font-display);
-  font-size: 0.55rem;
-  color: rgba(120, 50, 20, 0.4);
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px solid rgba(100, 50, 20, 0.2);
+}
+
+.ps-foot-warn {
+  font-family: var(--font-body);
+  font-size: 0.6rem;
+  color: var(--blood-bright);
+  margin: 0 0 4px;
+  line-height: 1.5;
+}
+
+.ps-foot-note {
+  font-family: var(--font-body);
+  font-size: 0.5rem;
+  color: var(--chalk-dim);
+  margin: 0 0 6px;
+}
+
+.ps-foot-ver {
+  font-family: var(--font-mono);
+  font-size: 0.5rem;
+  color: rgba(100, 50, 20, 0.4);
   letter-spacing: 2px;
-  margin-top: 20px;
 }
 </style>

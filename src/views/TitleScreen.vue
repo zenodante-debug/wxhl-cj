@@ -1,5 +1,5 @@
 <template>
-  <CorridorTunnel ref="tunnelRef">
+  <CorridorTunnel ref="tunnelRef" aspect-ratio="9 / 16">
     <template #particles>
       <EmberParticles :particle-count="60" base-color="180,80,30" :speed="0.12" />
     </template>
