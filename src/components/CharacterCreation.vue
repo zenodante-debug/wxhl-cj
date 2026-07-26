@@ -118,8 +118,8 @@
 
       <!-- Buttons -->
       <div class="cc-buttons">
-        <button class="cc-btn cc-btn-primary" @click="generateContract">缔结契约</button>
-        <button class="cc-btn" @click="copyContract" v-if="outputPrompt">拓印文书</button>
+        <button class="cc-btn cc-btn-primary" @click="generateAndSend">缔结契约</button>
+        <button class="cc-btn" @click="sendContract" v-if="outputPrompt">拓印文书 · 发送AI</button>
         <button class="cc-btn cc-btn-clear" @click="clearAll">抹除重写</button>
       </div>
     </div>
@@ -258,24 +258,46 @@ ${notes}
   localStorage.setItem('cc_output_v1', prompt)
 }
 
-function copyContract() {
+async function sendContract() {
   if (!outputPrompt.value) return
-  if (navigator.clipboard?.writeText) {
-    navigator.clipboard.writeText(outputPrompt.value).catch(() => fallbackCopy())
-  } else {
-    fallbackCopy()
+  try {
+    // Get current message ID (the UI floor) before sending
+    let currentMsgId: number | null = null
+    try { currentMsgId = getCurrentMessageId() } catch {}
+
+    // Send contract as user message to AI
+    await createChatMessages([{ role: 'user', message: outputPrompt.value }])
+
+    // Hide/delete the current floor (the character creation UI floor)
+    if (currentMsgId !== null) {
+      try {
+        await deleteChatMessages([currentMsgId])
+      } catch {
+        // If delete fails, try hiding by setting message to empty
+        try { setChatMessage(currentMsgId, { message: '' }) } catch {}
+      }
+    }
+
+    // Trigger AI generation on the new contract message
+    if (typeof generate === 'function') {
+      generate()
+    }
+    if (typeof triggerSlash === 'function') {
+      triggerSlash('/echo severity=success ✅ 契约已刻印，回廊中枢已响应。')
+    }
+    // Emit complete so parent can navigate
+    emit('complete', outputPrompt.value)
+  } catch (error: any) {
+    console.error('契约发送失败:', error)
+    alert('契约发送失败。\n\n系统报错：' + (error?.message || error))
   }
 }
 
-function fallbackCopy() {
-  const ta = document.createElement('textarea')
-  ta.value = outputPrompt.value
-  ta.style.position = 'fixed'
-  ta.style.opacity = '0'
-  document.body.appendChild(ta)
-  ta.select()
-  document.execCommand('copy')
-  document.body.removeChild(ta)
+function generateAndSend() {
+  generateContract()
+  if (outputPrompt.value) {
+    sendContract()
+  }
 }
 
 function clearAll() {
