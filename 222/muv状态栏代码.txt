@@ -1,0 +1,460 @@
+╔══════════════════════════════════════════════════════════════╗
+║     无限回廊 v6.0 — 前端状态栏 完整代码                      ║
+║     来源: github.com/zenodante-debug/wxhl                    ║
+║     commit: 5ccd3d4bdd0962c5ace7f36a1e85c2b2d1e3b93b        ║
+║     提取日期: 2026-07-24                                     ║
+╚══════════════════════════════════════════════════════════════╝
+
+本项目包含两个状态栏:
+  1. 主界面底部 HUD 状态栏 (#hud-bar) — 显示 HP/MP/耐力/契约者名称/生命状态
+  2. 手机终端顶部状态栏 (.phone-status-bar) — 显示时间和连接状态
+
+
+═══════════════════════════════════════════════════════════════
+  一、主界面底部 HUD 状态栏
+═══════════════════════════════════════════════════════════════
+
+───────────────────────────────────────────────────────────────
+1.1 HTML 结构 (index.html)
+───────────────────────────────────────────────────────────────
+
+<!-- ============ 底部 HUD 条 ============ -->
+<div id="hud-bar">
+  <!-- HP -->
+  <div class="hud-stat">
+    <span class="hud-label">HP</span>
+    <div class="hud-track"><div class="hud-fill hp" id="hud-hp-fill"></div></div>
+    <span class="hud-num" id="hud-hp-num">218/270</span>
+  </div>
+  <!-- MP -->
+  <div class="hud-stat">
+    <span class="hud-label">MP</span>
+    <div class="hud-track"><div class="hud-fill mp" id="hud-mp-fill"></div></div>
+    <span class="hud-num" id="hud-mp-num">90/90</span>
+  </div>
+  <!-- SP -->
+  <div class="hud-stat">
+    <span class="hud-label">耐力</span>
+    <div class="hud-track"><div class="hud-fill sp" id="hud-sp-fill"></div></div>
+    <span class="hud-num" id="hud-sp-num">155/180</span>
+  </div>
+  <!-- Name -->
+  <div class="hud-stat hud-name">
+    <span class="hud-label">契约者</span>
+    <span class="hud-num" id="hud-name">---</span>
+  </div>
+  <!-- Life State -->
+  <div class="hud-stat">
+    <span class="hud-label">状态</span>
+    <span class="hud-num danger" id="hud-life-state">受伤</span>
+  </div>
+</div>
+
+
+───────────────────────────────────────────────────────────────
+1.2 CSS 样式 (css/style.css)
+───────────────────────────────────────────────────────────────
+
+/* ============================================================
+   HUD BAR — 底部状态条
+   ============================================================ */
+#hud-bar {
+  position: fixed;
+  bottom: 0;
+  left: 0;
+  right: 0;
+  height: 52px;
+  background: linear-gradient(
+    0deg,
+    rgba(8, 5, 4, 0.95) 0%,
+    rgba(12, 8, 6, 0.9) 60%,
+    transparent 100%
+  );
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 24px;
+  padding: 0 24px;
+  border-top: 1px solid rgba(60, 30, 20, 0.2);
+}
+
+.hud-stat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-family: var(--font-mono);        /* 'JetBrains Mono', monospace */
+}
+
+.hud-label {
+  font-size: 0.8rem;
+  letter-spacing: 2px;
+  color: var(--amber-dim);              /* #b8a070 */
+  width: 36px;
+  text-align: right;
+  font-family: var(--font-display);     /* 'Noto Serif SC', 'SimSun', serif */
+}
+
+.hud-track {
+  width: 100px;
+  height: 6px;
+  background: rgba(20, 12, 8, 0.6);
+  border: 1px solid rgba(100, 50, 20, 0.3);
+  overflow: hidden;
+  border-radius: 2px;
+}
+
+.hud-fill {
+  height: 100%;
+  transition: width 0.6s;
+}
+
+.hud-fill.hp {
+  background: linear-gradient(90deg, #2a0808, #7a1818);
+}
+
+.hud-fill.mp {
+  background: linear-gradient(90deg, #2a4040, #4a7060);
+}
+
+.hud-fill.sp {
+  background: linear-gradient(90deg, #1a0a05, #5a2812);
+}
+
+.hud-num {
+  font-size: 0.85rem;
+  color: var(--chalk);                  /* #ddd5c8 */
+  min-width: 65px;
+  letter-spacing: 1px;
+}
+
+.hud-num.danger {
+  color: #a02020;                       /* var(--blood-wet) */
+}
+
+.hud-name {
+  margin-left: auto;
+}
+
+.hud-name .hud-num {
+  font-family: var(--font-display);
+  font-size: 1rem;
+  letter-spacing: 3px;
+  color: var(--amber);                  /* #e0c080 */
+  font-weight: 700;
+}
+
+
+───────────────────────────────────────────────────────────────
+1.3 JavaScript 逻辑 (js/app.js)
+───────────────────────────────────────────────────────────────
+
+--- 数据源（游戏状态对象中的相关字段）---
+
+G.stat_data = {
+  '契约者': {
+    '头部': {
+      '姓名': '未命名',
+      '等级': 3,
+      // ...
+    },
+    '衍生属性': {
+      'HP_最大': 270,
+      'HP_当前': 218,
+      'MP_最大': 90,
+      'MP_当前': 90,
+      '耐力_最大': 180,
+      '耐力_当前': 155,
+      // ...
+    },
+    '状态': {
+      '生命状态': '受伤',
+      // ...
+    }
+  }
+};
+
+--- populate 函数：填充 HUD 数据 ---
+
+function populate() {
+  const d = D;   // D(path, def) = getNested(G.stat_data, path, def)
+
+  // HP
+  const hpm = d('契约者.衍生属性.HP_最大', 0);
+  const hpc = d('契约者.衍生属性.HP_当前', 0);
+  setText('hud-hp-num', hpc + '/' + hpm);
+  setStyle('hud-hp-fill', 'width',
+    Math.min(hpc / Math.max(hpm, 1) * 100, 100) + '%');
+
+  // MP
+  const mpm = d('契约者.衍生属性.MP_最大', 0);
+  const mpc = d('契约者.衍生属性.MP_当前', 0);
+  setText('hud-mp-num', mpc + '/' + mpm);
+  setStyle('hud-mp-fill', 'width',
+    Math.min(mpc / Math.max(mpm, 1) * 100, 100) + '%');
+
+  // 耐力 (SP)
+  const spm = d('契约者.衍生属性.耐力_最大', 0);
+  const spc = d('契约者.衍生属性.耐力_当前', 0);
+  setText('hud-sp-num', spc + '/' + spm);
+  setStyle('hud-sp-fill', 'width',
+    Math.min(spc / Math.max(spm, 1) * 100, 100) + '%');
+
+  // 契约者名称
+  setText('hud-name', d('契约者.头部.姓名', '---'));
+
+  // 生命状态
+  setText('hud-life-state', d('契约者.状态.生命状态', '健康'));
+}
+
+--- 辅助函数 ---
+
+function setText(id, t) {
+  const el = document.getElementById(id);
+  if (el) el.textContent = t;
+}
+
+function setStyle(id, p, v) {
+  const el = document.getElementById(id);
+  if (el) el.style[p] = v;
+}
+
+function getNested(obj, path, def) {
+  const keys = path.split('.');
+  let cur = obj;
+  for (const k of keys) {
+    if (cur == null || typeof cur !== 'object') return def;
+    cur = cur[k];
+  }
+  return cur !== undefined ? cur : def;
+}
+
+--- 初始化调用 ---
+
+function init() {
+  initEmbers();
+  Overlay.init();
+  populate();    // ← 填充状态栏
+  bind();
+}
+document.addEventListener('DOMContentLoaded', init);
+
+
+───────────────────────────────────────────────────────────────
+1.4 CSS 响应式 (移动端适配)
+───────────────────────────────────────────────────────────────
+
+@media (max-width: 768px) {
+  #hud-bar { gap: 10px; padding: 0 10px; }
+  .hud-track { width: 60px; }
+  .hud-num { font-size: 0.72rem; min-width: 50px; }
+  .hud-label { font-size: 0.68rem; width: 26px; }
+}
+
+@media (max-width: 480px) {
+  #hud-bar { gap: 4px; padding: 0 6px; }
+  .hud-track { width: 40px; height: 5px; }
+  .hud-label { font-size: 0.6rem; width: 22px; }
+  .hud-num { font-size: 0.6rem; min-width: 40px; }
+}
+
+
+═══════════════════════════════════════════════════════════════
+  二、手机终端顶部状态栏
+═══════════════════════════════════════════════════════════════
+
+───────────────────────────────────────────────────────────────
+2.1 HTML 结构 (js/mobile-phone.js 中动态生成)
+───────────────────────────────────────────────────────────────
+
+<!-- 状态栏 -->
+<div class="phone-status-bar">
+  <span class="ps-time" id="ps-time">00:00</span>
+  <span class="ps-center">
+    <span class="ps-indicator"></span>
+    <span class="ps-label">无限回廊</span>
+  </span>
+  <span class="phone-status-actions">
+    <button class="phone-pin-btn" id="phone-pin-btn" title="置顶">置顶</button>
+  </span>
+</div>
+
+
+───────────────────────────────────────────────────────────────
+2.2 CSS 样式 (css/style.css)
+───────────────────────────────────────────────────────────────
+
+/* ---------- 状态栏 ---------- */
+.phone-status-bar {
+  height: 38px;
+  flex-shrink: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 0 20px;
+  background: rgba(8, 5, 3, 0.7);
+  backdrop-filter: blur(8px);
+  font-family: var(--font-mono);
+  font-size: 0.7rem;
+  border-bottom: 1px solid rgba(60, 30, 20, 0.2);
+  z-index: 5;
+}
+
+.phone-status-bar .ps-time {
+  color: var(--amber);         /* #e0c080 */
+  letter-spacing: 1px;
+}
+
+.phone-status-bar .ps-center {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.phone-status-bar .ps-indicator {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--blood-bright);   /* #7a1818 */
+  box-shadow: 0 0 4px var(--blood);
+  animation: dangerPulse 2s ease-in-out infinite;
+}
+
+.phone-status-bar .ps-label {
+  color: var(--chalk-dim);           /* #a09080 */
+  font-size: 0.6rem;
+  letter-spacing: 1px;
+}
+
+.phone-status-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.phone-pin-btn {
+  background: none;
+  border: 1px solid var(--iron);      /* #3a3430 */
+  color: var(--chalk-dim);
+  font-size: 0.65rem;
+  cursor: pointer;
+  padding: 2px 6px;
+  border-radius: 3px;
+  font-family: var(--font-display);
+  letter-spacing: 1px;
+  transition: all 0.2s;
+}
+
+.phone-pin-btn:hover {
+  border-color: var(--amber);
+  color: var(--amber);
+}
+
+.phone-pin-btn.pinned {
+  border-color: var(--blood-bright);
+  color: var(--blood-bright);
+}
+
+@keyframes dangerPulse {
+  0%, 100% { opacity: 0.7; }
+  50% {
+    opacity: 1;
+    text-shadow: 0 0 6px #4a1010;     /* var(--blood) */
+  }
+}
+
+
+───────────────────────────────────────────────────────────────
+2.3 JavaScript 逻辑 (js/mobile-phone.js)
+───────────────────────────────────────────────────────────────
+
+--- 更新时间 ---
+
+function updatePhoneTime() {
+  const now = new Date();
+  const timeStr = now.getHours().toString().padStart(2, '0') + ':'
+                + now.getMinutes().toString().padStart(2, '0');
+  const dateStr = (now.getMonth() + 1) + '/' + now.getDate();
+  const weekDays = ['日','一','二','三','四','五','六'];
+  const weekStr = '周' + weekDays[now.getDay()];
+
+  document.getElementById('ps-time').textContent = timeStr;
+  document.getElementById('ph-time').textContent = timeStr;
+  document.getElementById('ph-date').textContent = dateStr + ' ' + weekStr;
+
+  const world = getGameData('当前世界', '');
+  const gameDate = getGameData('当前时间.现实日期', '');
+  const elWorld = document.getElementById('ph-world');
+  if (elWorld) {
+    const parts = [world, gameDate].filter(Boolean);
+    elWorld.textContent = parts.length > 0
+      ? parts.join(' · ') : '里世界时间流';
+  }
+}
+
+--- 更新快捷状态 (手机主屏的 HP/MP/耐力数值) ---
+
+function updateQuickStats() {
+  document.getElementById('qs-hp').textContent =
+    getGameData('契约者.衍生属性.HP_当前', '?');
+  document.getElementById('qs-mp').textContent =
+    getGameData('契约者.衍生属性.MP_当前', '?');
+  document.getElementById('qs-sp').textContent =
+    getGameData('契约者.衍生属性.耐力_当前', '?');
+}
+
+--- 定时刷新 ---
+// 在 init() 中设置:
+setInterval(updatePhoneTime, 60000);   // 每分钟更新一次时间
+setInterval(updateQuickStats, 30000);  // 每30秒更新一次状态
+
+
+═══════════════════════════════════════════════════════════════
+  三、CSS 变量参考 (定义在 :root 中)
+═══════════════════════════════════════════════════════════════
+
+:root {
+  --bg-void: #060403;
+  --rust-dark: #1a0a05;
+  --rust: #2a1008;
+  --rust-mid: #3d1a0c;
+  --rust-light: #5a2812;
+  --blood-dry: #2a0808;
+  --blood: #4a1010;
+  --blood-bright: #7a1818;
+  --blood-wet: #a02020;
+  --flesh-base: #1a0c08;
+  --flesh-light: #2a1510;
+  --flesh-highlight: #3d1c12;
+  --iron: #3a3430;
+  --iron-dark: #1a1815;
+  --amber: #e0c080;
+  --amber-dim: #b8a070;
+  --chalk: #ddd5c8;
+  --chalk-dim: #a09080;
+  --warning: #a09080;
+  --emerge: #f0e8d8;
+
+  --font-display: 'Noto Serif SC', 'SimSun', serif;
+  --font-body: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+  --font-mono: 'JetBrains Mono', monospace;
+}
+
+
+═══════════════════════════════════════════════════════════════
+  四、Google Fonts 引用 (需在 <head> 中添加)
+═══════════════════════════════════════════════════════════════
+
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700;900&family=Noto+Sans+SC:wght@300;400;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+
+═══════════════════════════════════════════════════════════════
+  五、使用说明
+═══════════════════════════════════════════════════════════════
+
+1. 将 HTML 部分的 #hud-bar 放在 <body> 内合适位置
+2. 将 CSS 变量和 HUD 样式引入你的样式表
+3. 在 JS 中实现 populate() 函数，根据你的数据源更新状态栏
+4. 状态栏响应式适配了 768px 和 480px 两种断点
+5. 手机终端状态栏通过 Ctrl+M 快捷键呼出，支持拖动和置顶
+

@@ -59,6 +59,10 @@ function glob_script_files() {
       const file_dirname = path.dirname(file);
       for (const [index, result] of results.entries()) {
         const result_dirname = path.dirname(result);
+        // 顶层 src/ 或 示例/ 不应遮蔽其子目录中的独立项目
+        if (result_dirname === 'src' || result_dirname === '示例') {
+          continue;
+        }
         const common = common_path(result_dirname, file_dirname);
         if (common === result_dirname) {
           return;

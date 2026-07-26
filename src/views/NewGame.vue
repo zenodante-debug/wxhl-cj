@@ -1,117 +1,277 @@
 <template>
-  <CorridorTunnel ref="tunnelRef">
-    <template #particles>
-      <EmberParticles :particle-count="40" base-color="180,80,30" :speed="0.08" />
-    </template>
-
-    <div class="newgame-content">
+  <div class="newgame-root">
+    <!-- Choice Screen -->
+    <div v-if="screen === 'choice'" class="choice-screen">
       <a class="back-link" @click="goBack">← 回廊入口</a>
 
-      <RustFrame title="契 约 者 创 建" class="newgame-panel">
-        <div class="placeholder-area">
-          <div class="placeholder-icon">⌂</div>
-          <div class="placeholder-title">即 将 开 放</div>
-          <div class="placeholder-desc">内容敬请期待...</div>
+      <div class="choice-inner">
+        <div class="choice-header">
+          <div class="choice-icon">◆</div>
+          <h1 class="choice-title">踏 入 回 廊</h1>
+          <p class="choice-subtitle">选择你与深渊缔约的方式</p>
         </div>
-      </RustFrame>
 
-      <button class="confirm-btn" disabled>确认创建</button>
+        <div class="choice-cards">
+          <button class="choice-card" @click="screen = 'custom'">
+            <div class="card-icon">⚒</div>
+            <div class="card-label">自 主 捏 人</div>
+            <div class="card-desc">自行分配属性、书写特质、具现装备</div>
+            <div class="card-arrow">→</div>
+          </button>
+
+          <button class="choice-card" @click="screen = 'preset'">
+            <div class="card-icon">◆</div>
+            <div class="card-label">开 局 预 设</div>
+            <div class="card-desc">使用预制的契约者档案，直接坠入深渊</div>
+            <div class="card-arrow">→</div>
+          </button>
+        </div>
+      </div>
     </div>
-  </CorridorTunnel>
+
+    <!-- Character Creation Screen -->
+    <div v-else-if="screen === 'custom'" class="custom-screen">
+      <div class="screen-header">
+        <a class="back-link" @click="screen = 'choice'">← 返回选择</a>
+      </div>
+      <CharacterCreation @complete="onCharacterComplete" />
+    </div>
+
+    <!-- Preset Selection Screen -->
+    <div v-else-if="screen === 'preset'" class="preset-screen">
+      <div class="screen-header">
+        <a class="back-link" @click="screen = 'choice'">← 返回选择</a>
+      </div>
+      <PresetSelect @select="onPresetSelect" />
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
-import { onMounted } from 'vue'
+import { ref, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import gsap from 'gsap'
-import CorridorTunnel from '../components/CorridorTunnel.vue'
-import EmberParticles from '../components/EmberParticles.vue'
-import RustFrame from '../components/RustFrame.vue'
 import { useGameStore } from '../store/game'
+import CharacterCreation from '../components/CharacterCreation.vue'
+import PresetSelect from '../components/PresetSelect.vue'
 
 const router = useRouter()
 const store = useGameStore()
+const screen = ref<'choice' | 'custom' | 'preset'>('choice')
 
 onMounted(() => {
-  const tl = gsap.timeline({ delay: 0.4 })
-  tl.fromTo('.newgame-content', { opacity: 0, y: 30 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out' })
+  gsap.fromTo('.choice-screen', { opacity: 0, y: 20 }, { opacity: 1, y: 0, duration: 0.5, ease: 'power2.out', delay: 0.3 })
 })
 
 function goBack() {
   store.pullBack()
   router.push('/')
 }
+
+function onCharacterComplete(promptText: string) {
+  // Store the generated contract and navigate to main game
+  console.info('[NewGame] Character contract generated:', promptText.substring(0, 100) + '...')
+  router.push('/main')
+}
+
+function onPresetSelect(presetId: string) {
+  console.info('[NewGame] Preset selected:', presetId)
+  router.push('/main')
+}
 </script>
 
 <style scoped>
-.newgame-content {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
+/* ===== Root: vertical aspect ratio for mobile ===== */
+.newgame-root {
+  max-width: 450px;
   width: 100%;
-  padding: 20px;
+  aspect-ratio: 9 / 16;
+  overflow: hidden;
+  position: relative;
+  background: var(--bg-void);
+  margin: 0 auto;
 }
 
+.choice-screen,
+.custom-screen,
+.preset-screen {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  overflow-y: auto;
+  overflow-x: hidden;
+}
+
+/* ===== Back link ===== */
 .back-link {
-  align-self: flex-start;
   font-family: var(--font-display);
-  font-size: 0.85rem;
+  font-size: 0.75rem;
   color: var(--amber-dim);
   cursor: pointer;
   text-decoration: none;
   transition: color 0.2s;
-  margin-bottom: 12px;
+  padding: 10px 14px;
+  display: inline-block;
+  flex-shrink: 0;
 }
 
 .back-link:hover {
   color: var(--amber);
 }
 
-.newgame-panel {
-  width: 75%;
-  max-width: 400px;
+.screen-header {
+  flex-shrink: 0;
 }
 
-.placeholder-area {
+/* ===== Choice Screen ===== */
+.choice-screen {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(180, 60, 20, 0.12) 0%, transparent 50%),
+    radial-gradient(ellipse at 50% 100%, rgba(120, 30, 10, 0.08) 0%, transparent 40%),
+    linear-gradient(180deg, #0a0705 0%, #060403 50%, #0a0705 100%);
+}
+
+.choice-inner {
+  flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  padding: 32px 0;
-  border: 1px dashed rgba(100, 50, 20, 0.3);
-  min-height: 120px;
+  padding: 0 24px 24px;
 }
 
-.placeholder-icon {
-  font-size: 2rem;
-  color: var(--iron);
-  margin-bottom: 12px;
+.choice-header {
+  text-align: center;
+  margin-bottom: 32px;
 }
 
-.placeholder-title {
-  font-family: var(--font-display);
-  font-size: 1rem;
-  letter-spacing: 3px;
-  color: var(--amber-dim);
+.choice-icon {
+  font-size: 1.5rem;
+  color: var(--blood-bright);
   margin-bottom: 8px;
+  animation: iconPulse 3s ease-in-out infinite;
 }
 
-.placeholder-desc {
+@keyframes iconPulse {
+  0%, 100% { opacity: 0.5; text-shadow: 0 0 8px rgba(160, 30, 20, 0.3); }
+  50% { opacity: 1; text-shadow: 0 0 16px rgba(160, 30, 20, 0.6); }
+}
+
+.choice-title {
+  font-family: var(--font-display);
+  font-size: 1.5rem;
+  letter-spacing: 6px;
+  color: var(--emerge);
+  margin: 0 0 8px;
+}
+
+.choice-subtitle {
   font-family: var(--font-body);
   font-size: 0.75rem;
   color: var(--chalk-dim);
+  letter-spacing: 2px;
+  margin: 0;
 }
 
-.confirm-btn {
-  margin-top: 20px;
+/* ===== Choice Cards ===== */
+.choice-cards {
+  display: flex;
+  flex-direction: column;
+  gap: 14px;
+  width: 100%;
+}
+
+.choice-card {
+  width: 100%;
+  padding: 18px 16px;
+  background: rgba(10, 6, 4, 0.8);
+  border: 2px solid var(--iron);
+  cursor: pointer;
+  text-align: left;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  transition: all 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+  position: relative;
+  overflow: hidden;
+}
+
+.choice-card::before {
+  content: '';
+  position: absolute;
+  inset: 3px;
+  pointer-events: none;
+  border: 1px solid rgba(100, 50, 20, 0.12);
+  transition: border-color 0.3s;
+}
+
+.choice-card:hover {
+  border-color: var(--blood-bright);
+  box-shadow: 0 0 20px rgba(160, 30, 20, 0.25);
+  transform: translateX(3px);
+}
+
+.choice-card:hover::before {
+  border-color: rgba(160, 30, 20, 0.25);
+}
+
+.choice-card:active {
+  transform: scale(0.98);
+  transition: all 0.1s;
+}
+
+.card-icon {
+  font-size: 1.4rem;
+  color: var(--amber);
+  flex-shrink: 0;
+  width: 36px;
+  text-align: center;
+}
+
+.card-label {
   font-family: var(--font-display);
   font-size: 1rem;
-  letter-spacing: 4px;
-  padding: 10px 32px;
-  background: rgba(10, 6, 4, 0.5);
-  border: 2px solid var(--iron-dark);
+  letter-spacing: 3px;
+  color: var(--emerge);
+  margin-bottom: 2px;
+}
+
+.card-desc {
+  font-family: var(--font-body);
+  font-size: 0.65rem;
   color: var(--chalk-dim);
-  opacity: 0.4;
-  pointer-events: none;
+  line-height: 1.3;
+}
+
+.choice-card .card-label,
+.choice-card .card-desc {
+  display: block;
+}
+
+.choice-card > :not(.card-icon):not(.card-arrow) {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+}
+
+.card-arrow {
+  font-size: 0.8rem;
+  color: var(--amber-dim);
+  flex-shrink: 0;
+  transition: transform 0.3s;
+}
+
+.choice-card:hover .card-arrow {
+  transform: translateX(4px);
+  color: var(--blood-bright);
+}
+
+/* ===== Custom/Preset screens ===== */
+.custom-screen,
+.preset-screen {
+  background:
+    radial-gradient(ellipse at 50% 0%, rgba(180, 60, 20, 0.08) 0%, transparent 40%),
+    linear-gradient(180deg, #0a0705 0%, #060403 50%, #0a0705 100%);
 }
 </style>
