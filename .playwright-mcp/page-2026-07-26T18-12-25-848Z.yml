@@ -1,0 +1,99 @@
+- generic [ref=f3e42]:
+  - generic [ref=f3e43]: ← 返回选择
+  - generic [ref=f3e46]:
+    - banner [ref=f3e47]:
+      - generic [ref=f3e48]: ◆
+      - heading "命 运 跃 迁" [level=1] [ref=f3e49]
+      - paragraph [ref=f3e50]: 选择接入回廊的方式，时间线不可逆转
+    - generic [ref=f3e51]:
+      - generic [ref=f3e52]: ⚠
+      - generic [ref=f3e53]: 失败即抹杀。这里没有宽恕，只有绝对冰冷的数据与规则。
+    - generic [ref=f3e54]:
+      - generic [ref=f3e55]:
+        - generic [ref=f3e56]: 🔮
+        - generic [ref=f3e57]: 系统进程分支
+        - generic [ref=f3e58]: PROCESS
+      - generic [ref=f3e59]:
+        - button "01 大姐姐引导者 常规流程，温柔理性的资深者指导你完成基础登记。" [ref=f3e60] [cursor=pointer]:
+          - generic [ref=f3e61]: "01"
+          - generic [ref=f3e62]:
+            - generic [ref=f3e63]: 大姐姐引导者
+            - generic [ref=f3e64]: 常规流程，温柔理性的资深者指导你完成基础登记。
+        - button "02 雌小鬼引导者 被分派到雌小鬼引导员进行指引。" [ref=f3e65] [cursor=pointer]:
+          - generic [ref=f3e66]: "02"
+          - generic [ref=f3e67]:
+            - generic [ref=f3e68]: 雌小鬼引导者
+            - generic [ref=f3e69]: 被分派到雌小鬼引导员进行指引。
+        - button "03 记忆覆写 跳过引导，直接载入已有数据或完全自定义属性。 导入" [ref=f3e70] [cursor=pointer]:
+          - generic [ref=f3e71]: "03"
+          - generic [ref=f3e72]:
+            - generic [ref=f3e73]: 记忆覆写
+            - generic [ref=f3e74]: 跳过引导，直接载入已有数据或完全自定义属性。
+          - generic [ref=f3e75]: 导入
+        - button "04 陪玩选择 作为高维存在，选择你的专属陪玩。 捏人" [ref=f3e76] [cursor=pointer]:
+          - generic [ref=f3e77]: "04"
+          - generic [ref=f3e78]:
+            - generic [ref=f3e79]: 陪玩选择
+            - generic [ref=f3e80]: 作为高维存在，选择你的专属陪玩。
+          - generic [ref=f3e81]: 捏人
+    - generic [ref=f3e82]:
+      - generic [ref=f3e83]:
+        - generic [ref=f3e84]: 🧬
+        - generic [ref=f3e85]: 预设身世载入
+        - generic [ref=f3e86]: PRESET
+      - paragraph [ref=f3e87]: 选择此区域将自动分配初始属性与专长基础。
+      - generic [ref=f3e88]:
+        - button "05 古武传人 极高STR/AGI，近战专精。" [ref=f3e89] [cursor=pointer]:
+          - generic [ref=f3e90]: "05"
+          - generic [ref=f3e91]:
+            - generic [ref=f3e92]: 古武传人
+            - generic [ref=f3e93]: 极高STR/AGI，近战专精。
+        - button "06 专业杀手 极高AGI/PER，潜行爆发。" [ref=f3e94] [cursor=pointer]:
+          - generic [ref=f3e95]: "06"
+          - generic [ref=f3e96]:
+            - generic [ref=f3e97]: 专业杀手
+            - generic [ref=f3e98]: 极高AGI/PER，潜行爆发。
+        - button "07 国际雇佣兵 均衡体魄，熟练掌握各类热武器。" [ref=f3e99] [cursor=pointer]:
+          - generic [ref=f3e100]: "07"
+          - generic [ref=f3e101]:
+            - generic [ref=f3e102]: 国际雇佣兵
+            - generic [ref=f3e103]: 均衡体魄，熟练掌握各类热武器。
+        - button "08 退伍兵王 极高CON，强悍意志与生存力。" [ref=f3e104] [cursor=pointer]:
+          - generic [ref=f3e105]: "08"
+          - generic [ref=f3e106]:
+            - generic [ref=f3e107]: 退伍兵王
+            - generic [ref=f3e108]: 极高CON，强悍意志与生存力。
+        - button "09 私家侦探 极高PER，洞察细微线索。" [ref=f3e109] [cursor=pointer]:
+          - generic [ref=f3e110]: "09"
+          - generic [ref=f3e111]:
+            - generic [ref=f3e112]: 私家侦探
+            - generic [ref=f3e113]: 极高PER，洞察细微线索。
+        - button "10 科研工作者 特化解析能力，易掌握黑科技。" [ref=f3e114] [cursor=pointer]:
+          - generic [ref=f3e115]: "10"
+          - generic [ref=f3e116]:
+            - generic [ref=f3e117]: 科研工作者
+            - generic [ref=f3e118]: 特化解析能力，易掌握黑科技。
+        - button "11 神秘学爱好者 极高PER，法术极高亲和力。" [ref=f3e119] [cursor=pointer]:
+          - generic [ref=f3e120]: "11"
+          - generic [ref=f3e121]:
+            - generic [ref=f3e122]: 神秘学爱好者
+            - generic [ref=f3e123]: 极高PER，法术极高亲和力。
+        - button "12 道士下山 掌握基础术法与符箓，感知天机。" [ref=f3e124] [cursor=pointer]:
+          - generic [ref=f3e125]: "12"
+          - generic [ref=f3e126]:
+            - generic [ref=f3e127]: 道士下山
+            - generic [ref=f3e128]: 掌握基础术法与符箓，感知天机。
+        - button "13 特管局预备役 现实官方背景，熟知基础情报。" [ref=f3e129] [cursor=pointer]:
+          - generic [ref=f3e130]: "13"
+          - generic [ref=f3e131]:
+            - generic [ref=f3e132]: 特管局预备役
+            - generic [ref=f3e133]: 现实官方背景，熟知基础情报。
+        - button "14 黑帮少爷 万界商人。" [ref=f3e134] [cursor=pointer]:
+          - generic [ref=f3e135]: "14"
+          - generic [ref=f3e136]:
+            - generic [ref=f3e137]: 黑帮少爷
+            - generic [ref=f3e138]: 万界商人。
+    - generic [ref=f3e139]:
+      - paragraph [ref=f3e140]: 点击上方数据块将立即执行时空跳跃。
+      - paragraph [ref=f3e141]: ※ 请确保角色卡 Alternate Greetings 已配置对应 Swipe ID。
+      - paragraph [ref=f3e142]: "GM NODE : ONLINE"

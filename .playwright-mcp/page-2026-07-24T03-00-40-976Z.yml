@@ -1,0 +1,69 @@
+- generic [active] [ref=f6e1]:
+  - heading "Index of /" [level=1] [ref=f6e2]
+  - table [ref=f6e3]:
+    - rowgroup [ref=f6e4]:
+      - row [ref=f6e5]:
+        - cell [ref=f6e6]
+        - cell [ref=f6e8]:
+          - code [ref=f6e9]: (drw-rw-rw-)
+        - cell "22-7月-2026 10:34" [ref=f6e10]
+        - cell [ref=f6e11]:
+          - code
+        - cell [ref=f6e12]:
+          - link "角色卡示例/" [ref=f6e13] [cursor=pointer]:
+            - /url: ./%E8%A7%92%E8%89%B2%E5%8D%A1%E7%A4%BA%E4%BE%8B/
+      - row [ref=f6e14]:
+        - cell [ref=f6e15]
+        - cell [ref=f6e17]:
+          - code [ref=f6e18]: (drw-rw-rw-)
+        - cell "24-7月-2026 00:44" [ref=f6e19]
+        - cell [ref=f6e20]:
+          - code
+        - cell [ref=f6e21]:
+          - link "脚本示例/" [ref=f6e22] [cursor=pointer]:
+            - /url: ./%E8%84%9A%E6%9C%AC%E7%A4%BA%E4%BE%8B/
+      - row [ref=f6e23]:
+        - cell [ref=f6e24]
+        - cell [ref=f6e26]:
+          - code [ref=f6e27]: (drw-rw-rw-)
+        - cell "24-7月-2026 00:44" [ref=f6e28]
+        - cell [ref=f6e29]:
+          - code
+        - cell [ref=f6e30]:
+          - link "流式楼层界面示例/" [ref=f6e31] [cursor=pointer]:
+            - /url: ./%E6%B5%81%E5%BC%8F%E6%A5%BC%E5%B1%82%E7%95%8C%E9%9D%A2%E7%A4%BA%E4%BE%8B/
+      - row [ref=f6e32]:
+        - cell [ref=f6e33]
+        - cell [ref=f6e35]:
+          - code [ref=f6e36]: (drw-rw-rw-)
+        - cell "24-7月-2026 00:44" [ref=f6e37]
+        - cell [ref=f6e38]:
+          - code
+        - cell [ref=f6e39]:
+          - link "前端界面示例/" [ref=f6e40] [cursor=pointer]:
+            - /url: ./%E5%89%8D%E7%AB%AF%E7%95%8C%E9%9D%A2%E7%A4%BA%E4%BE%8B/
+      - row [ref=f6e41]:
+        - cell [ref=f6e42]
+        - cell [ref=f6e44]:
+          - code [ref=f6e45]: (drw-rw-rw-)
+        - cell "24-7月-2026 00:44" [ref=f6e46]
+        - cell [ref=f6e47]:
+          - code
+        - cell [ref=f6e48]:
+          - link "src/" [ref=f6e49] [cursor=pointer]:
+            - /url: ./src/
+      - row [ref=f6e50]:
+        - cell [ref=f6e51]
+        - cell [ref=f6e53]:
+          - code [ref=f6e54]: (drw-rw-rw-)
+        - cell "24-7月-2026 00:44" [ref=f6e55]
+        - cell [ref=f6e56]:
+          - code
+        - cell [ref=f6e57]:
+          - link "wxhl-001/" [ref=f6e58] [cursor=pointer]:
+            - /url: ./wxhl-001/
+  - generic [ref=f6e59]:
+    - text: Node.js v22.22.2/
+    - link "http-server" [ref=f6e60] [cursor=pointer]:
+      - /url: https://github.com/http-party/http-server
+    - text: server running @ localhost:5500

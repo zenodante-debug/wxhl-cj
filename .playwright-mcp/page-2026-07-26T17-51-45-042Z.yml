@@ -1,0 +1,67 @@
+- generic [ref=f2e42]:
+  - generic [ref=f2e43]: ← 返回选择
+  - generic [ref=f2e46]:
+    - banner [ref=f2e47]:
+      - heading "灵 魂 契 约" [level=1] [ref=f2e48]
+      - generic [ref=f2e49]: ◆ 无限回廊 ◆
+    - paragraph [ref=f2e50]: "\"将你的特质与渴望刻印于此。未落笔者，将于须臾后归于虚无。\""
+    - generic [ref=f2e51]:
+      - heading "壹 · 落款真名" [level=2] [ref=f2e52]
+      - textbox "写下你在现实世界中的名字..." [ref=f2e53]
+    - generic [ref=f2e54]:
+      - heading "贰 · 灵魂特质" [level=2] [ref=f2e55]
+      - paragraph [ref=f2e56]: 回忆你生前最深刻的执念、本能，或你是一个什么样的人。回廊将据此为你凝结一项初始天赋。
+      - textbox "例如：一个极度冷静的法医，习惯在危机中剖析逻辑；一个戏命赌徒，将生命献祭于混沌……" [ref=f2e57]
+    - generic [ref=f2e58]:
+      - heading "叁 · 基因重组" [level=2] [ref=f2e59]
+      - paragraph [ref=f2e60]: 凡人皆有定数，超越即为代价。将15点潜能分配至你的躯壳之中。
+      - generic [ref=f2e61]: 残存潜能：15
+      - generic [ref=f2e62]:
+        - generic [ref=f2e63]:
+          - generic [ref=f2e64]: 力量 (STR)
+          - generic [ref=f2e65]: 肌肉爆发、负重极限与近战毁伤
+        - generic [ref=f2e66]:
+          - button "−" [ref=f2e67] [cursor=pointer]
+          - generic [ref=f2e68]: "5"
+          - button "+" [ref=f2e69] [cursor=pointer]
+      - generic [ref=f2e70]:
+        - generic [ref=f2e71]:
+          - generic [ref=f2e72]: 敏捷 (AGI)
+          - generic [ref=f2e73]: 神经反射、躯体协调与远程校准
+        - generic [ref=f2e74]:
+          - button "−" [ref=f2e75] [cursor=pointer]
+          - generic [ref=f2e76]: "5"
+          - button "+" [ref=f2e77] [cursor=pointer]
+      - generic [ref=f2e78]:
+        - generic [ref=f2e79]:
+          - generic [ref=f2e80]: 体力 (CON)
+          - generic [ref=f2e81]: 生命力、抗打击耐受与异常抗性
+        - generic [ref=f2e82]:
+          - button "−" [ref=f2e83] [cursor=pointer]
+          - generic [ref=f2e84]: "5"
+          - button "+" [ref=f2e85] [cursor=pointer]
+      - generic [ref=f2e86]:
+        - generic [ref=f2e87]:
+          - generic [ref=f2e88]: 感知 (PER)
+          - generic [ref=f2e89]: 五感穿透、危机直觉、科技解析与超自然亲和
+        - generic [ref=f2e90]:
+          - button "−" [ref=f2e91] [cursor=pointer]
+          - generic [ref=f2e92]: "5"
+          - button "+" [ref=f2e93] [cursor=pointer]
+    - generic [ref=f2e94]:
+      - heading "肆 · 物质投影" [level=2] [ref=f2e95]
+      - paragraph [ref=f2e96]: 你可凭空带走一件现实中的凡俗防身之物，以度过最初的绝望。
+      - textbox "例如：一把沙漠之鹰手枪 或 一把锰钢战术砍刀..." [ref=f2e97]
+    - generic [ref=f2e98]:
+      - heading "伍 · 虚空刺探" [level=2] [ref=f2e99]
+      - paragraph [ref=f2e100]: 趁现在，向接引你的资深者提出最后一个疑问。
+      - textbox "写下你的疑问（留空则直接坠入深渊）..." [ref=f2e101]
+    - generic [ref=f2e102]:
+      - heading "陆 · 隐秘沉淀" [level=2] [ref=f2e103]
+      - textbox "任何关于你现实中未写明的特殊病史、执念、或隐秘的知识..." [ref=f2e104]
+    - generic [ref=f2e105]:
+      - heading "最终刻印" [level=2] [ref=f2e106]
+      - textbox "点击下方『缔结契约』，于此凝望你的命运..." [ref=f2e107]
+    - generic [ref=f2e108]:
+      - button "缔结契约" [ref=f2e109] [cursor=pointer]
+      - button "抹除重写" [ref=f2e110] [cursor=pointer]

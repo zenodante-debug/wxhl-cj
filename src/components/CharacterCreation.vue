@@ -92,13 +92,16 @@
         ></textarea>
       </div>
 
-      <!-- 6. Additional Notes -->
+      <!-- 6. Physical Appearance -->
       <div class="cc-section">
-        <h2 class="cc-section-title">陆 · 隐秘沉淀</h2>
+        <h2 class="cc-section-title">陆 · 个人形象</h2>
+        <p class="cc-whisper">
+          你的外貌、体型、年龄、衣着风格——回廊将据此投影你的躯壳。
+        </p>
         <textarea
           v-model="form.notes"
-          class="cc-textarea"
-          placeholder="任何关于你现实中未写明的特殊病史、执念、或隐秘的知识..."
+          class="cc-textarea cc-textarea-lg"
+          placeholder="例如：身高178cm，黑色短发，深棕色眼瞳，常穿深色卫衣与工装裤，左手腕有一道旧刀疤..."
         ></textarea>
       </div>
 
@@ -221,7 +224,7 @@ function generateContract() {
   const trait = form.trait.trim() || '无突出执念'
   const gear = form.gear.trim() || '赤手空拳'
   const question = form.question.trim() || '无言步入深渊'
-  const notes = form.notes.trim() || '无形之秘'
+  const notes = form.notes.trim() || '无形之貌'
   const { str, agi, con, per } = form.attrs
 
   const prompt = `【无限回廊 · 玩家契约登录档案】
@@ -239,7 +242,7 @@ ${gear}
 肆 · 虚空刺探（玩家疑问）
 ${question}
 
-伍 · 隐秘潜能储备
+伍 · 个人形象
 ${notes}
 
 【系统契约接入指令】
@@ -347,50 +350,50 @@ function clearAll() {
 /* ===== Header ===== */
 .cc-header {
   text-align: center;
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .cc-header h1 {
   font-family: var(--font-display);
-  font-size: 1.5rem;
-  letter-spacing: 4px;
+  font-size: 1.9rem;
+  letter-spacing: 6px;
   color: var(--blood-bright);
-  margin: 0 0 8px;
-  text-shadow: 0 0 12px rgba(160, 30, 20, 0.4);
+  margin: 0 0 10px;
+  text-shadow: 0 0 16px rgba(160, 30, 20, 0.5);
 }
 
 .cc-divider {
   font-family: var(--font-display);
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   color: var(--amber-dim);
-  letter-spacing: 3px;
+  letter-spacing: 4px;
   opacity: 0.7;
 }
 
 /* ===== Whisper text ===== */
 .cc-whisper {
   font-family: var(--font-body);
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   color: var(--chalk-dim);
   font-style: italic;
-  line-height: 1.6;
-  margin: 0 0 12px;
-  padding-left: 10px;
+  line-height: 1.7;
+  margin: 0 0 14px;
+  padding-left: 12px;
   border-left: 2px solid rgba(120, 50, 20, 0.3);
 }
 
 /* ===== Sections ===== */
 .cc-section {
-  margin-bottom: 14px;
+  margin-bottom: 18px;
 }
 
 .cc-section-title {
   font-family: var(--font-display);
-  font-size: 0.9rem;
-  letter-spacing: 2px;
+  font-size: 1.1rem;
+  letter-spacing: 3px;
   color: var(--amber);
-  margin: 0 0 6px;
-  padding-bottom: 3px;
+  margin: 0 0 8px;
+  padding-bottom: 4px;
   border-bottom: 1px solid rgba(180, 120, 60, 0.2);
 }
 
@@ -402,8 +405,8 @@ function clearAll() {
   border-bottom: 1px solid rgba(180, 120, 60, 0.3);
   color: var(--emerge);
   font-family: var(--font-body);
-  font-size: 0.8rem;
-  padding: 7px 4px;
+  font-size: 1rem;
+  padding: 9px 5px;
   outline: none;
   transition: border-color 0.3s;
 }
@@ -411,7 +414,7 @@ function clearAll() {
 .cc-input::placeholder {
   color: rgba(160, 140, 120, 0.35);
   font-style: italic;
-  font-size: 0.7rem;
+  font-size: 0.85rem;
 }
 
 .cc-input:focus {
@@ -425,20 +428,20 @@ function clearAll() {
   border-bottom: 1px solid rgba(180, 120, 60, 0.3);
   color: var(--emerge);
   font-family: var(--font-body);
-  font-size: 0.8rem;
-  padding: 7px 4px;
+  font-size: 1rem;
+  padding: 9px 5px;
   outline: none;
   resize: none;
-  height: 40px;
-  min-height: 40px;
+  height: 44px;
+  min-height: 44px;
   transition: border-color 0.3s;
-  line-height: 1.5;
+  line-height: 1.6;
 }
 
 .cc-textarea::placeholder {
   color: rgba(160, 140, 120, 0.35);
   font-style: italic;
-  font-size: 0.7rem;
+  font-size: 0.85rem;
 }
 
 .cc-textarea:focus {
@@ -446,23 +449,23 @@ function clearAll() {
 }
 
 .cc-textarea-lg {
-  height: 70px;
-  min-height: 70px;
+  height: 80px;
+  min-height: 80px;
 }
 
 /* ===== Points ===== */
 .cc-points {
   text-align: center;
   font-family: var(--font-display);
-  font-size: 0.85rem;
+  font-size: 1rem;
   color: var(--amber);
   letter-spacing: 2px;
-  margin-bottom: 12px;
+  margin-bottom: 14px;
 }
 
 .cc-points-val {
   color: var(--blood-bright);
-  font-size: 1rem;
+  font-size: 1.2rem;
 }
 
 /* ===== Attribute Row ===== */
@@ -470,9 +473,9 @@ function clearAll() {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 7px 0;
+  padding: 9px 0;
   border-bottom: 1px solid rgba(120, 50, 20, 0.15);
-  gap: 8px;
+  gap: 10px;
 }
 
 .cc-attr-info {
@@ -482,7 +485,7 @@ function clearAll() {
 
 .cc-attr-name {
   font-family: var(--font-display);
-  font-size: 0.75rem;
+  font-size: 0.9rem;
   font-weight: bold;
   color: var(--chalk);
   letter-spacing: 1px;
@@ -491,7 +494,7 @@ function clearAll() {
 
 .cc-attr-desc {
   font-family: var(--font-body);
-  font-size: 0.6rem;
+  font-size: 0.75rem;
   color: var(--chalk-dim);
   display: block;
   margin-top: 2px;
@@ -500,18 +503,18 @@ function clearAll() {
 .cc-attr-ctrls {
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 10px;
   flex-shrink: 0;
 }
 
 .cc-attr-btn {
-  width: 28px;
-  height: 28px;
+  width: 32px;
+  height: 32px;
   border-radius: 50%;
   border: 1px solid rgba(180, 120, 60, 0.4);
   background: transparent;
   color: var(--amber-dim);
-  font-size: 1rem;
+  font-size: 1.1rem;
   cursor: pointer;
   display: flex;
   align-items: center;
@@ -527,10 +530,10 @@ function clearAll() {
 
 .cc-attr-val {
   font-family: var(--font-mono);
-  font-size: 1rem;
+  font-size: 1.2rem;
   font-weight: bold;
   color: var(--emerge);
-  width: 22px;
+  width: 26px;
   text-align: center;
 }
 
@@ -541,8 +544,8 @@ function clearAll() {
   color: #d1bfae !important;
   border: 1px solid rgba(160, 30, 20, 0.4) !important;
   font-family: var(--font-mono);
-  font-size: 0.65rem !important;
-  padding: 10px !important;
+  font-size: 0.8rem !important;
+  padding: 12px !important;
   height: 180px !important;
   min-height: 180px !important;
   resize: none;
@@ -560,19 +563,19 @@ function clearAll() {
 .cc-buttons {
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  margin-top: 16px;
-  padding-top: 12px;
+  gap: 12px;
+  margin-top: 20px;
+  padding-top: 14px;
   border-top: 1px solid rgba(120, 50, 20, 0.2);
 }
 
 .cc-btn {
   width: 100%;
-  padding: 12px 0;
+  padding: 14px 0;
   font-family: var(--font-display);
-  font-size: 0.85rem;
+  font-size: 1rem;
   font-weight: bold;
-  letter-spacing: 3px;
+  letter-spacing: 4px;
   cursor: pointer;
   background: transparent;
   border: 1px solid var(--iron);
@@ -587,17 +590,17 @@ function clearAll() {
 .cc-btn-primary {
   border-color: var(--blood-bright);
   color: var(--blood-bright);
-  text-shadow: 0 0 8px rgba(160, 30, 20, 0.3);
+  text-shadow: 0 0 10px rgba(160, 30, 20, 0.3);
 }
 
 .cc-btn-primary:hover {
-  box-shadow: 0 0 16px rgba(160, 30, 20, 0.3);
+  box-shadow: 0 0 20px rgba(160, 30, 20, 0.3);
 }
 
 .cc-btn-clear {
   border-color: rgba(120, 50, 20, 0.3);
   color: rgba(160, 140, 120, 0.5);
-  font-size: 0.7rem;
+  font-size: 0.85rem;
   letter-spacing: 2px;
 }
 </style>

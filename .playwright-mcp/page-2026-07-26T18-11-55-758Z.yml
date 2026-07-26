@@ -1,0 +1,18 @@
+- generic [ref=f3e24]:
+  - generic [ref=f3e25] [cursor=pointer]: ← 回廊入口
+  - generic [ref=f3e26]:
+    - generic [ref=f3e27]:
+      - generic [ref=f3e28]: ◆
+      - heading "踏 入 回 廊" [level=1] [ref=f3e29]
+      - paragraph [ref=f3e30]: 选择你与深渊缔约的方式
+    - generic [ref=f3e31]:
+      - button "⚒ 自 主 捏 人 自行分配属性、书写特质、具现装备 →" [ref=f3e32] [cursor=pointer]:
+        - generic [ref=f3e33]: ⚒
+        - generic [ref=f3e34]: 自 主 捏 人
+        - generic [ref=f3e35]: 自行分配属性、书写特质、具现装备
+        - generic [ref=f3e36]: →
+      - button "◆ 开 局 预 设 使用预制的契约者档案，直接坠入深渊 →" [ref=f3e37] [cursor=pointer]:
+        - generic [ref=f3e38]: ◆
+        - generic [ref=f3e39]: 开 局 预 设
+        - generic [ref=f3e40]: 使用预制的契约者档案，直接坠入深渊
+        - generic [ref=f3e41]: →

@@ -1,0 +1,11 @@
+- generic [ref=f7e3]:
+  - generic [ref=f7e12]:
+    - generic: NO RETURN
+    - generic: 契约即枷锁
+  - generic [ref=f7e17]:
+    - heading "无 限 回 廊" [level=1] [ref=f7e18]
+    - paragraph [ref=f7e19]: z e n o
+    - button "◆ 踏 入 回 廊 ◆" [ref=f7e20] [cursor=pointer]:
+      - generic [ref=f7e21]: ◆
+      - text: 踏 入 回 廊
+      - generic [ref=f7e22]: ◆

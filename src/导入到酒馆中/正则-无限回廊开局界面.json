@@ -1,0 +1,15 @@
+{
+  "id": "wxhl-title-screen-002",
+  "scriptName": "无限回廊 · 开局标题界面",
+  "disabled": false,
+  "runOnEdit": false,
+  "findRegex": "/^(.*)$/s",
+  "trimStrings": [],
+  "replaceString": "<iframe src=\"http://localhost:8765/index.html\" style=\"width:100%;min-width:375px;aspect-ratio:16/9;border:none;display:block;margin-bottom:8px;\"></iframe>\n<hr style=\"border-color:rgba(100,50,20,0.2);margin:8px 0;\">\n$1",
+  "placement": [2],
+  "substituteRegex": 0,
+  "minDepth": 0,
+  "maxDepth": 0,
+  "markdownOnly": true,
+  "promptOnly": false
+}

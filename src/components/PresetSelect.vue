@@ -11,11 +11,11 @@
 
       <!-- Warning -->
       <div class="ps-warn">
-        <div class="ps-warn-icon">⚠</div>
-        <div class="ps-warn-text">失败即抹杀。这里没有宽恕，只有绝对冰冷的数据与规则。</div>
+        <span class="ps-warn-icon">⚠</span>
+        <span class="ps-warn-text">失败即抹杀。这里没有宽恕，只有绝对冰冷的数据与规则。</span>
       </div>
 
-      <!-- Category 1: 引导者分支 -->
+      <!-- Category 1: 系统进程分支 -->
       <div class="ps-section">
         <div class="ps-section-head">
           <span class="ps-section-ico">🔮</span>
@@ -30,11 +30,11 @@
             :class="'ps-card-' + p.color"
             @click="startCorridor(p.swipeId)"
           >
-            <div class="ps-card-num">{{ p.num }}</div>
-            <div class="ps-card-body">
-              <div class="ps-card-name">{{ p.name }}</div>
-              <div class="ps-card-desc">{{ p.desc }}</div>
-            </div>
+            <span class="ps-card-num">{{ p.num }}</span>
+            <span class="ps-card-body">
+              <span class="ps-card-name">{{ p.name }}</span>
+              <span class="ps-card-desc">{{ p.desc }}</span>
+            </span>
             <span v-if="p.tag" class="ps-card-utag" :class="'ps-utag-' + p.tagColor">{{ p.tag }}</span>
           </button>
         </div>
@@ -48,19 +48,19 @@
           <span class="ps-section-badge">PRESET</span>
         </div>
         <p class="ps-section-hint">选择此区域将自动分配初始属性与专长基础。</p>
-        <div class="ps-grid ps-grid-2col">
+        <div class="ps-grid">
           <button
             v-for="p in identityPresets"
             :key="p.id"
-            class="ps-card ps-card-sm"
+            class="ps-card"
             :class="'ps-card-' + p.color"
             @click="startCorridor(p.swipeId)"
           >
-            <div class="ps-card-num">{{ p.num }}</div>
-            <div class="ps-card-body">
-              <div class="ps-card-name">{{ p.name }}</div>
-              <div class="ps-card-desc">{{ p.desc }}</div>
-            </div>
+            <span class="ps-card-num">{{ p.num }}</span>
+            <span class="ps-card-body">
+              <span class="ps-card-name">{{ p.name }}</span>
+              <span class="ps-card-desc">{{ p.desc }}</span>
+            </span>
           </button>
         </div>
       </div>
@@ -88,24 +88,23 @@ interface Preset {
   tagColor?: string
 }
 
+// Swipe IDs shifted: removed guides 1-2, old 3→1, 4→2, 5→3, ..., 14→12
 const processPresets: Preset[] = [
-  { id: 'guide1',  num: '01', name: '大姐姐引导者', desc: '常规流程，温柔理性的资深者指导你完成基础登记。',     swipeId: 1,  color: 'purple' },
-  { id: 'guide2',  num: '02', name: '雌小鬼引导者',   desc: '被分派到雌小鬼引导员进行指引。',                       swipeId: 2,  color: 'purple' },
-  { id: 'memory',  num: '03', name: '记忆覆写',       desc: '跳过引导，直接载入已有数据或完全自定义属性。',           swipeId: 3,  color: 'green',  tag: '导入', tagColor: 'green' },
-  { id: 'companion', num: '04', name: '陪玩选择',      desc: '作为高维存在，选择你的专属陪玩。',                       swipeId: 4,  color: 'green',  tag: '捏人', tagColor: 'green' },
+  { id: 'memory',    num: '01', name: '记忆覆写', desc: '跳过引导，直接载入已有数据或完全自定义属性。',   swipeId: 1, color: 'green',  tag: '导入', tagColor: 'green' },
+  { id: 'companion', num: '02', name: '陪玩选择', desc: '作为高维存在，选择你的专属陪玩。',               swipeId: 2, color: 'green',  tag: '捏人', tagColor: 'green' },
 ]
 
 const identityPresets: Preset[] = [
-  { id: 'p05', num: '05', name: '古武传人',       desc: '极高STR/AGI，近战专精。',                 swipeId: 5,  color: 'yellow' },
-  { id: 'p06', num: '06', name: '专业杀手',       desc: '极高AGI/PER，潜行爆发。',                 swipeId: 6,  color: 'yellow' },
-  { id: 'p07', num: '07', name: '国际雇佣兵',     desc: '均衡体魄，熟练掌握各类热武器。',           swipeId: 7,  color: 'yellow' },
-  { id: 'p08', num: '08', name: '退伍兵王',       desc: '极高CON，强悍意志与生存力。',             swipeId: 8,  color: 'yellow' },
-  { id: 'p09', num: '09', name: '私家侦探',       desc: '极高PER，洞察细微线索。',                 swipeId: 9,  color: 'yellow' },
-  { id: 'p10', num: '10', name: '科研工作者',     desc: '特化解析能力，易掌握黑科技。',             swipeId: 10, color: 'yellow' },
-  { id: 'p11', num: '11', name: '神秘学爱好者',   desc: '极高PER，法术极高亲和力。',               swipeId: 11, color: 'yellow' },
-  { id: 'p12', num: '12', name: '道士下山',       desc: '掌握基础术法与符箓，感知天机。',           swipeId: 12, color: 'yellow' },
-  { id: 'p13', num: '13', name: '特管局预备役',   desc: '现实官方背景，熟知基础情报。',             swipeId: 13, color: 'blue' },
-  { id: 'p14', num: '14', name: '黑帮少爷',       desc: '万界商人。',                               swipeId: 14, color: 'yellow' },
+  { id: 'p03', num: '03', name: '古武传人',     desc: '极高STR/AGI，近战专精。',                 swipeId: 3,  color: 'yellow' },
+  { id: 'p04', num: '04', name: '专业杀手',     desc: '极高AGI/PER，潜行爆发。',                 swipeId: 4,  color: 'yellow' },
+  { id: 'p05', num: '05', name: '国际雇佣兵',   desc: '均衡体魄，熟练掌握各类热武器。',           swipeId: 5,  color: 'yellow' },
+  { id: 'p06', num: '06', name: '退伍兵王',     desc: '极高CON，强悍意志与生存力。',             swipeId: 6,  color: 'yellow' },
+  { id: 'p07', num: '07', name: '私家侦探',     desc: '极高PER，洞察细微线索。',                 swipeId: 7,  color: 'yellow' },
+  { id: 'p08', num: '08', name: '科研工作者',   desc: '特化解析能力，易掌握黑科技。',             swipeId: 8,  color: 'yellow' },
+  { id: 'p09', num: '09', name: '神秘学爱好者', desc: '极高PER，法术极高亲和力。',               swipeId: 9,  color: 'yellow' },
+  { id: 'p10', num: '10', name: '道士下山',     desc: '掌握基础术法与符箓，感知天机。',           swipeId: 10, color: 'yellow' },
+  { id: 'p11', num: '11', name: '特管局预备役', desc: '现实官方背景，熟知基础情报。',             swipeId: 11, color: 'blue' },
+  { id: 'p12', num: '12', name: '黑帮少爷',     desc: '万界商人。',                               swipeId: 12, color: 'yellow' },
 ]
 
 async function startCorridor(swipeId: number) {
@@ -135,7 +134,7 @@ async function startCorridor(swipeId: number) {
   flex: 1;
   overflow-y: auto;
   overflow-x: hidden;
-  padding: 14px 14px 28px;
+  padding: 16px 14px 28px;
   width: 100%;
 }
 
@@ -146,29 +145,29 @@ async function startCorridor(swipeId: number) {
 /* ===== Header ===== */
 .ps-header {
   text-align: center;
-  margin-bottom: 12px;
+  margin-bottom: 16px;
 }
 
 .ps-icon {
-  font-size: 1.2rem;
+  font-size: 1.5rem;
   color: var(--blood-bright);
-  margin-bottom: 4px;
+  margin-bottom: 6px;
   text-shadow: 0 0 10px rgba(160, 30, 20, 0.4);
 }
 
 .ps-title {
   font-family: var(--font-display);
-  font-size: 1.3rem;
-  letter-spacing: 5px;
+  font-size: 1.6rem;
+  letter-spacing: 6px;
   color: var(--emerge);
-  margin: 0 0 4px;
+  margin: 0 0 6px;
 }
 
 .ps-subtitle {
   font-family: var(--font-body);
-  font-size: 0.6rem;
+  font-size: 0.8rem;
   color: var(--chalk-dim);
-  letter-spacing: 1px;
+  letter-spacing: 2px;
   margin: 0;
 }
 
@@ -176,48 +175,48 @@ async function startCorridor(swipeId: number) {
 .ps-warn {
   display: flex;
   align-items: flex-start;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 10px 12px;
   border-left: 3px solid var(--blood-bright);
   background: rgba(160, 30, 20, 0.08);
-  margin-bottom: 16px;
+  margin-bottom: 18px;
 }
 
 .ps-warn-icon {
   color: var(--blood-bright);
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   flex-shrink: 0;
 }
 
 .ps-warn-text {
   font-family: var(--font-body);
-  font-size: 0.6rem;
+  font-size: 0.8rem;
   color: var(--chalk-dim);
   line-height: 1.5;
 }
 
 /* ===== Section ===== */
 .ps-section {
-  margin-bottom: 16px;
+  margin-bottom: 20px;
 }
 
 .ps-section-head {
   display: flex;
   align-items: center;
-  gap: 6px;
-  padding: 8px 10px;
+  gap: 8px;
+  padding: 10px 12px;
   border-bottom: 1px solid rgba(120, 50, 20, 0.25);
-  margin-bottom: 10px;
+  margin-bottom: 12px;
   background: rgba(5, 2, 1, 0.4);
 }
 
 .ps-section-ico {
-  font-size: 0.9rem;
+  font-size: 1.1rem;
 }
 
 .ps-section-title {
   font-family: var(--font-display);
-  font-size: 0.8rem;
+  font-size: 1rem;
   font-weight: bold;
   color: var(--emerge);
   letter-spacing: 2px;
@@ -226,16 +225,16 @@ async function startCorridor(swipeId: number) {
 .ps-section-badge {
   margin-left: auto;
   font-family: var(--font-mono);
-  font-size: 0.5rem;
+  font-size: 0.7rem;
   color: var(--chalk-dim);
   letter-spacing: 1px;
 }
 
 .ps-section-hint {
   font-family: var(--font-body);
-  font-size: 0.55rem;
+  font-size: 0.75rem;
   color: var(--amber-dim);
-  margin: 0 0 8px;
+  margin: 0 0 10px;
   padding: 0 4px;
 }
 
@@ -243,34 +242,26 @@ async function startCorridor(swipeId: number) {
 .ps-grid {
   display: flex;
   flex-direction: column;
-  gap: 8px;
-}
-
-.ps-grid-2col {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(140px, 1fr));
-  gap: 8px;
+  gap: 10px;
 }
 
 /* ===== Card ===== */
 .ps-card {
   width: 100%;
-  padding: 10px 12px;
+  padding: 14px 14px;
   background: rgba(10, 6, 4, 0.8);
   border: 1px solid var(--iron);
   cursor: pointer;
-  text-align: left;
   display: flex;
   align-items: center;
-  gap: 10px;
-  position: relative;
+  gap: 12px;
   transition: all 0.25s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .ps-card:hover {
   border-color: var(--blood-bright);
   box-shadow: 0 0 12px rgba(160, 30, 20, 0.2);
-  transform: translateX(2px);
+  transform: translateX(3px);
 }
 
 .ps-card:active {
@@ -278,12 +269,7 @@ async function startCorridor(swipeId: number) {
   transition: all 0.1s;
 }
 
-.ps-card-sm {
-  padding: 8px 10px;
-  gap: 6px;
-}
-
-/* Color variants */
+/* Color left-border variants */
 .ps-card-purple { border-left: 2px solid rgba(160, 110, 240, 0.5); }
 .ps-card-purple:hover { border-left-color: #a371f7; }
 .ps-card-green  { border-left: 2px solid rgba(80, 200, 100, 0.4); }
@@ -295,37 +281,39 @@ async function startCorridor(swipeId: number) {
 
 .ps-card-num {
   font-family: var(--font-mono);
-  font-size: 0.7rem;
+  font-size: 0.9rem;
   font-weight: bold;
   color: var(--amber);
   flex-shrink: 0;
-  min-width: 22px;
+  min-width: 26px;
 }
 
 .ps-card-body {
   flex: 1;
   min-width: 0;
+  display: flex;
+  flex-direction: column;
 }
 
 .ps-card-name {
   font-family: var(--font-display);
-  font-size: 0.75rem;
+  font-size: 0.95rem;
   letter-spacing: 2px;
   color: var(--emerge);
-  margin-bottom: 2px;
+  margin-bottom: 3px;
 }
 
 .ps-card-desc {
   font-family: var(--font-body);
-  font-size: 0.58rem;
+  font-size: 0.75rem;
   color: var(--chalk-dim);
   line-height: 1.4;
 }
 
 .ps-card-utag {
   font-family: var(--font-mono);
-  font-size: 0.5rem;
-  padding: 1px 4px;
+  font-size: 0.65rem;
+  padding: 2px 6px;
   border: 1px solid rgba(100, 50, 20, 0.3);
   background: rgba(20, 10, 5, 0.5);
   color: var(--chalk-dim);
@@ -337,29 +325,29 @@ async function startCorridor(swipeId: number) {
 /* ===== Footer ===== */
 .ps-footer {
   text-align: center;
-  margin-top: 16px;
-  padding-top: 12px;
+  margin-top: 20px;
+  padding-top: 14px;
   border-top: 1px solid rgba(100, 50, 20, 0.2);
 }
 
 .ps-foot-warn {
   font-family: var(--font-body);
-  font-size: 0.6rem;
+  font-size: 0.75rem;
   color: var(--blood-bright);
-  margin: 0 0 4px;
+  margin: 0 0 5px;
   line-height: 1.5;
 }
 
 .ps-foot-note {
   font-family: var(--font-body);
-  font-size: 0.5rem;
+  font-size: 0.65rem;
   color: var(--chalk-dim);
-  margin: 0 0 6px;
+  margin: 0 0 8px;
 }
 
 .ps-foot-ver {
   font-family: var(--font-mono);
-  font-size: 0.5rem;
+  font-size: 0.6rem;
   color: rgba(100, 50, 20, 0.4);
   letter-spacing: 2px;
 }
