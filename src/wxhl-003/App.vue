@@ -444,7 +444,7 @@ async function onNewPlan() {
   await careerStore.createPlan(newPlanKeywords.value.trim())
   newPlanKeywords.value = ''
 }
-async function onConfirmPlan(plan: CareerPlan) { viewingPlan.value = plan; await careerStore.confirmPlan(plan.id) }
+async function onConfirmPlan(plan: CareerPlan) { viewingPlan.value = plan; await careerStore.confirmPlan(plan.id); viewingPlan.value = careerStore.plans.find(p => p.id === plan.id) || viewingPlan.value }
 function onDeletePlan() {
   if (deleteTargetId.value) {
     careerStore.deletePlan(deleteTargetId.value)
