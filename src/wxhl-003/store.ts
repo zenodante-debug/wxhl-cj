@@ -587,6 +587,7 @@ export const useCareerStore = defineStore('career', () => {
 
   /** 第二轮生成：细节 */
   async function confirmPlan(id: number) {
+    if (generatingV2.value) return
     const idx = plans.value.findIndex(p => p.id === id)
     if (idx < 0) return
 
@@ -603,8 +604,10 @@ export const useCareerStore = defineStore('career', () => {
       const raw = await aiGenerate(cfg, prompt, CAREER_V2_SCHEMA)
       const data = extractJSON(raw)
 
-      plans.value[idx] = {
-        ...plan,
+      const latestIdx = plans.value.findIndex(p => p.id === id)
+      if (latestIdx < 0) return
+      plans.value[latestIdx] = {
+        ...plans.value[latestIdx],
         phase: 'complete',
         mainSkillTree: data.mainSkillTree || '',
         subSkillTree: data.subSkillTree || '',

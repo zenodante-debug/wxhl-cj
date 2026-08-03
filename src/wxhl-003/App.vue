@@ -441,8 +441,9 @@ function openCareer() { currentView.value = 'career'; careerView.value = 'list';
 async function onNewPlan() {
   if (!newPlanKeywords.value.trim()) return
   showNewDialog.value = false
-  await careerStore.createPlan(newPlanKeywords.value.trim())
+  const kw = newPlanKeywords.value.trim()
   newPlanKeywords.value = ''
+  await careerStore.createPlan(kw)
 }
 async function onConfirmPlan(plan: CareerPlan) { viewingPlan.value = plan; await careerStore.confirmPlan(plan.id); viewingPlan.value = careerStore.plans.find(p => p.id === plan.id) || viewingPlan.value }
 function onDeletePlan() {
