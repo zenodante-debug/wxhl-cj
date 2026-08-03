@@ -227,21 +227,21 @@ export const useForumStore = defineStore('forum', () => {
     complaints:'契约者吐槽区', intel:'势力情报分享区', dungeon:'副本经历分享区', build:'构筑分享区', trade:'装备道具交易区',
   }
 
-  const MODULE_SUMMARY = '无限回廊副本系统（40主模块×40副模块×3副本类型）：主模块: 低武江湖/高武大荒/古典修仙/洪荒神话/东方志异/诡异民俗/日常都市/都市异能/黑帮谍战/智斗博弈/现代怪异/超凡竞技/硬核科幻/太空歌剧/赛博朋克/废土生存/机甲巨兽/末日生化/智械危机/星际虫灾/低魔中世纪/高魔史诗/蒸汽维多利亚/暗黑魂系/暗黑哥特/魔法学院/克苏鲁神话/异常收容/规则怪谈/梦核超现实/童话反转/阈限空间/VR游戏/历史演义/美漫超英/Galgame向/深渊地狱/热血王道/黄文里番/荒诞喜剧。副模块: 大逃杀/绝境求生/天灾降临/绝症倒计时/狩猎靶标/狼人背叛/卧底潜伏/声望崩塌/阵营对抗/禁止杀戮/密室解谜/时间轮回/叙述诡计/连环凶案/因果逆转/据点塔防/两军对垒/斩首行动/护送任务/资源争夺/地牢深潜/巨物围猎/碎片拼凑/怪物图鉴/遗迹破译/全员禁魔/科技锁死/属性压制/原著附身/多方乱战/白手起家/权欲交易/领地建设/表里世界/移动迷宫/寻宝竞速/信仰掠夺/身份替换/筹码赌局/剧本演出。副本类型: 和平/阵营/血腥。CR难度: 漠视→观察→关注→重视→期待→炼狱。势力: 特管局/恶魔旅团/方舟集团/瑞辰基金会/神圣教会/零号局/OETA/APJC/EJSSA。奖励: UP货币/EXP/装备(白蓝紫金)/技能卷轴/RP/职业书/称号'
+  const MODULE_SUMMARY = WORLD_SUMMARY
 
   function buildRefreshPrompt(sectionKey: string, worldbookText: string): string {
     const worldCtx = worldbookText || ''
 
     const prompts: Record<string, string> = {
-      complaints: '你是无限回廊论坛「契约者吐槽区」的活跃用户。以不同契约者口吻生成8条吐槽帖。\n必须遵守：每条帖子涉及不同的主模块或副模块，8条覆盖至少6个不同模块。吐槽要有具体场景：被投进【赛博朋克】+【绝症倒计时】差点嗑药嗑死、在【洪荒神话】+【全员禁魔】被凡人追着砍。也可吐槽势力、CR系统、队友。语气真实接地气，像论坛骂街，严禁重复。作者昵称要有创意。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + MODULE_SUMMARY,
+      complaints: '你是无限回廊论坛「契约者吐槽区」的活跃用户。以不同契约者口吻生成8条吐槽帖。\n必须遵守：每条帖子涉及不同的主模块或副模块，8条覆盖至少6个不同模块。吐槽要有具体场景：被投进【赛博朋克】+【绝症倒计时】差点嗑药嗑死、在【洪荒神话】+【全员禁魔】被凡人追着砍。也可吐槽势力、CR系统、队友。语气真实接地气，像论坛骂街，严禁重复。作者昵称要有创意。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY,
 
-      intel: '你是无限回廊论坛「势力情报分享区」的资深分析员。以不同契约者口吻生成8条情报帖。\n必须遵守：每条分析不同的势力动态、模块策略或系统机制。情报要有具体数据。可分析特定模块组合的最优策略。语气理性客观，热评要有质疑或补充。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + MODULE_SUMMARY,
+      intel: '你是无限回廊论坛「势力情报分享区」的资深分析员。以不同契约者口吻生成8条情报帖。\n必须遵守：每条分析不同的势力动态、模块策略或系统机制。情报要有具体数据。可分析特定模块组合的最优策略。语气理性客观，热评要有质疑或补充。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY,
 
-      dungeon: '你是无限回廊论坛「副本经历分享区」的闯关者。以不同契约者口吻生成8条副本经历帖。\n必须遵守：每条帖子=一个具体副本经历，8条覆盖至少6个不同主模块。必须包含：副本来源(具体作品名)、主模块类型、副模块、副本类型、具体战斗/解谜过程、奖励收获。经历要有戏剧性。严禁重复相同副本来源。语气像亲身经历。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + MODULE_SUMMARY,
+      dungeon: '你是无限回廊论坛「副本经历分享区」的闯关者。以不同契约者口吻生成8条副本经历帖。\n必须遵守：每条帖子=一个具体副本经历，8条覆盖至少6个不同主模块。必须包含：副本来源(具体作品名)、主模块类型、副模块、副本类型、具体战斗/解谜过程、奖励收获。经历要有戏剧性。严禁重复相同副本来源。语气像亲身经历。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY,
 
-      build: '你是无限回廊论坛「构筑分享区」的配装研究者。以不同契约者口吻生成8条构筑帖。\n必须遵守：每条讨论针对特定模块类型的构筑方案。必须包含属性分配/推荐职业/核心装备/适合模块类型/实战测试数据。覆盖不同流派。数据要具体，流派间要有争论，热评要有反驳。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + MODULE_SUMMARY,
+      build: '你是无限回廊论坛「构筑分享区」的配装研究者。以不同契约者口吻生成8条构筑帖。\n必须遵守：每条讨论针对特定模块类型的构筑方案。必须包含属性分配/推荐职业/核心装备/适合模块类型/实战测试数据。覆盖不同流派。数据要具体，流派间要有争论，热评要有反驳。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY,
 
-      trade: '你是无限回廊论坛「装备道具交易区」的买卖双方。以不同契约者口吻生成8条交易帖。\n必须遵守：一半出售一半求购。物品要具体且来源明确。必须包含物品名称+品质+属性加成+来源副本+价格(UP币)。评论要有砍价竞价。语气真实。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + MODULE_SUMMARY,
+      trade: '你是无限回廊论坛「装备道具交易区」的买卖双方。以不同契约者口吻生成8条交易帖。\n必须遵守：一半出售一半求购。物品要具体且来源明确。必须包含物品名称+品质+属性加成+来源副本+价格(UP币)。评论要有砍价竞价。语气真实。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY,
     }
     return prompts[sectionKey] || ''
   }
