@@ -295,7 +295,8 @@
       <!-- V1 操作 -->
       <div v-if="viewingRoadmap.phase==='v1'" class="detail-footer">
         <button class="confirm-btn" @click="onConfirmRoadmap(viewingRoadmap)" :disabled="careerStore.generatingV2">{{ careerStore.generatingV2 ? '生成中...' : '继续生成细节' }}</button>
-        <div class="confirm-hint">当前仅有框架信息，点击上方按钮由 AI 补充执行步骤、技能/装备构筑建议和风险提示</div>
+        <button class="confirm-btn modify" @click="onModifyRoadmapClick(viewingRoadmap)" :disabled="careerStore.generatingV1">修改方案</button>
+        <div class="confirm-hint">当前仅有框架信息。可继续生成细节，或点击「修改方案」提出调整意见后重新生成框架</div>
       </div>
     </div>
   </template>
@@ -448,11 +449,14 @@ async function onNewPlan() {
   const kw = newPlanKeywords.value.trim()
   newPlanKeywords.value = ''
   if (showModifyDialog.value) {
-    // 修改模式：通过 modifyPlanId 找到方案并重新生成 V1
     showModifyDialog.value = false
-    if (viewingPlan.value) await careerStore.modifyPlan(viewingPlan.value.id, kw)
-    // 刷新 viewingPlan 指向 store 中更新后的方案
-    if (viewingPlan.value) viewingPlan.value = careerStore.plans.find(p => p.id === viewingPlan.value!.id) || viewingPlan.value
+    if (viewingRoadmap.value) {
+      await careerStore.modifyRoadmap(viewingRoadmap.value.id, kw)
+      viewingRoadmap.value = careerStore.roadmaps.find(r => r.id === viewingRoadmap.value!.id) || viewingRoadmap.value
+    } else if (viewingPlan.value) {
+      await careerStore.modifyPlan(viewingPlan.value.id, kw)
+      viewingPlan.value = careerStore.plans.find(p => p.id === viewingPlan.value!.id) || viewingPlan.value
+    }
   } else if (careerStore.activePlanType === 'roadmap') {
     await careerStore.createRoadmap(kw)
   } else {
@@ -462,6 +466,7 @@ async function onNewPlan() {
 async function onConfirmPlan(plan: CareerPlan) { viewingPlan.value = plan; await careerStore.confirmPlan(plan.id); viewingPlan.value = careerStore.plans.find(p => p.id === plan.id) || viewingPlan.value }
 async function onConfirmRoadmap(roadmap: CareerRoadmap) { viewingRoadmap.value = roadmap; await careerStore.confirmRoadmap(roadmap.id); viewingRoadmap.value = careerStore.roadmaps.find(r => r.id === roadmap.id) || viewingRoadmap.value }
 function onModifyClick(plan: CareerPlan) { showModifyDialog.value = true; showNewDialog.value = true; newPlanKeywords.value = '' }
+function onModifyRoadmapClick(roadmap: CareerRoadmap) { showModifyDialog.value = true; showNewDialog.value = true; newPlanKeywords.value = '' }
 function onDeletePlan() {
   if (deleteTargetId.value) {
     if (careerStore.activePlanType === 'roadmap') {

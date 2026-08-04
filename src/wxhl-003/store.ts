@@ -570,6 +570,30 @@ ${feedback}
 根据修改意见，重新设计方案框架。保留修改意见认可的部分，只改动需要调整的地方。必须返回完整的方案框架JSON（所有字段）。`
 }
 
+function buildModifyRoadmapPrompt(roadmap: CareerRoadmap, feedback: string, worldbookText: string): string {
+  const worldCtx = worldbookText ? '\n【世界观参考】\n' + worldbookText : ''
+  return `你是无限回廊的职业规划AI。契约者对已生成的生涯规划提出了修改意见，请根据意见重新生成规划框架。
+
+【职业系统规则】
+${CAREER_SYSTEM_RULES}
+
+${worldCtx}
+
+【当前规划框架】
+- 路线标题: ${roadmap.title}
+- 当前状况: ${roadmap.currentState}
+- 推荐方向: ${roadmap.recommendedDirection}
+- 目标世界: ${roadmap.targetWorlds.join('、')}
+- 融合建议: ${roadmap.fusionAdvice}
+- 转职路线: ${roadmap.evolutionPath}
+
+【修改意见】
+${feedback}
+
+【任务要求】
+根据修改意见，重新生成生涯规划框架。保留修改意见认可的部分，只改动需要调整的地方。必须返回完整的规划框架JSON（所有字段）。`
+}
+
 // ================================================================
 // 生涯规划 JSON Schemas & Prompts
 // ================================================================
@@ -939,6 +963,42 @@ export const useCareerStore = defineStore('career', () => {
     }
   }
 
+  async function modifyRoadmap(id: number, feedback: string) {
+    if (generatingV1.value) return
+    const idx = roadmaps.value.findIndex(r => r.id === id)
+    if (idx < 0) return
+
+    const forumStore = getForumStore()
+    const cfg = getActiveCfg(forumStore.settings)
+    if (!cfg.url || !cfg.apiKey) { lastError.value = '请先在终端设置中配置 API'; return }
+
+    generatingV1.value = true
+    lastError.value = ''
+    try {
+      const roadmap = roadmaps.value[idx]
+      const wb = await forumStore.getWorldbookContent()
+      const prompt = buildModifyRoadmapPrompt(roadmap, feedback, wb)
+      const raw = await aiGenerate(cfg, prompt, ROADMAP_V1_SCHEMA)
+      const data = extractJSON(raw)
+
+      const latestIdx = roadmaps.value.findIndex(r => r.id === id)
+      if (latestIdx < 0) return
+      roadmaps.value[latestIdx] = {
+        ...roadmaps.value[latestIdx],
+        title: data.title || roadmaps.value[latestIdx].title,
+        currentState: data.currentState || roadmaps.value[latestIdx].currentState,
+        recommendedDirection: data.recommendedDirection || roadmaps.value[latestIdx].recommendedDirection,
+        targetWorlds: Array.isArray(data.targetWorlds) ? data.targetWorlds : roadmaps.value[latestIdx].targetWorlds,
+        fusionAdvice: data.fusionAdvice || roadmaps.value[latestIdx].fusionAdvice,
+        evolutionPath: data.evolutionPath || roadmaps.value[latestIdx].evolutionPath,
+      }
+    } catch (e: any) {
+      lastError.value = e.message || '修改失败'
+    } finally {
+      generatingV1.value = false
+    }
+  }
+
   function deleteRoadmap(id: number) {
     roadmaps.value = roadmaps.value.filter(r => r.id !== id)
   }
@@ -946,6 +1006,6 @@ export const useCareerStore = defineStore('career', () => {
   return {
     plans, roadmaps, activePlanType, generatingV1, generatingV2, lastError,
     createPlan, modifyPlan, confirmPlan, deletePlan,
-    createRoadmap, confirmRoadmap, deleteRoadmap,
+    createRoadmap, modifyRoadmap, confirmRoadmap, deleteRoadmap,
   }
 })
