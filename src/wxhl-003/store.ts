@@ -1,4 +1,4 @@
-import { type ForumThread, type ForumPost, INITIAL_THREADS, RANK_BOARDS, type CareerPlan, CAREER_SYSTEM_RULES, WORLD_SUMMARY } from './data'
+import { type ForumThread, type ForumPost, INITIAL_THREADS, RANK_BOARDS, type CareerPlan, type CareerRoadmap, type PlanType, CAREER_SYSTEM_RULES, WORLD_SUMMARY } from './data'
 
 const SK = 'wxhl003_settings'
 
@@ -367,6 +367,20 @@ function saveCareerPlans(plans: CareerPlan[]) {
   try { localStorage.setItem(CP_SK, JSON.stringify(plans)) } catch (_) {}
 }
 
+const RD_SK = 'wxhl003_career_roadmaps'
+
+function loadRoadmaps(): CareerRoadmap[] {
+  try {
+    const r = localStorage.getItem(RD_SK)
+    if (r) return JSON.parse(r)
+  } catch (_) {}
+  return []
+}
+
+function saveRoadmaps(roadmaps: CareerRoadmap[]) {
+  try { localStorage.setItem(RD_SK, JSON.stringify(roadmaps)) } catch (_) {}
+}
+
 // ============ JSON Schema: 第一轮 ============
 const CAREER_V1_SCHEMA = {
   name: 'career_plan_v1',
@@ -525,24 +539,202 @@ ${worldCtx}
 }
 
 // ================================================================
+// 修改方案 Prompt
+// ================================================================
+function buildModifyPlanPrompt(plan: CareerPlan, feedback: string, worldbookText: string): string {
+  const worldCtx = worldbookText ? '\n【世界观参考】\n' + worldbookText : ''
+  return `你是无限回廊的职业规划AI。契约者对已生成的融合职业方案提出了修改意见，请根据意见重新生成方案框架。
+
+【职业系统规则】
+${CAREER_SYSTEM_RULES}
+
+${worldCtx}
+
+【当前方案框架】
+- 融合职业名称: ${plan.name}
+- 稀有度: ${plan.rarity}
+- 核心定位: ${plan.coreConcept}
+- 主职业: ${plan.mainJob.name}（${plan.mainJob.rarity}）— ${plan.mainJob.attributeTendency}
+- 副职业: ${plan.subJob.name}（${plan.subJob.rarity}）— 来自《${plan.subJob.world}》
+- 主职业转职: ${plan.mainJob.classTree}
+- 副职业转职: ${plan.subJob.classTree}
+- 相性: ${plan.affinity.result} — ${plan.affinity.reasons}
+- 一转: ${plan.evolution.firstClass}
+- 二转: ${plan.evolution.secondClass}
+- 三转: ${plan.evolution.thirdClass}
+
+【修改意见】
+${feedback}
+
+【任务要求】
+根据修改意见，重新设计方案框架。保留修改意见认可的部分，只改动需要调整的地方。必须返回完整的方案框架JSON（所有字段）。`
+}
+
+// ================================================================
+// 生涯规划 JSON Schemas & Prompts
+// ================================================================
+const ROADMAP_V1_SCHEMA = {
+  name: 'career_roadmap_v1',
+  value: {
+    type: 'object',
+    properties: {
+      title: { type: 'string' },
+      currentState: { type: 'string' },
+      recommendedDirection: { type: 'string' },
+      targetWorlds: { type: 'array', items: { type: 'string' } },
+      fusionAdvice: { type: 'string' },
+      evolutionPath: { type: 'string' },
+    },
+    required: ['title', 'currentState', 'recommendedDirection', 'targetWorlds', 'fusionAdvice', 'evolutionPath'],
+  },
+}
+
+const ROADMAP_V2_SCHEMA = {
+  name: 'career_roadmap_v2',
+  value: {
+    type: 'object',
+    properties: {
+      stepPlan: { type: 'array', items: { type: 'string' } },
+      skillAdvice: { type: 'string' },
+      equipmentAdvice: { type: 'string' },
+      risks: { type: 'string' },
+    },
+    required: ['stepPlan', 'skillAdvice', 'equipmentAdvice', 'risks'],
+  },
+}
+
+function buildRoadmapV1Prompt(keywords: string, playerCareer: string, worldbookText: string): string {
+  const worldCtx = worldbookText ? '\n【世界观参考】\n' + worldbookText : ''
+  return `你是无限回廊的职业规划AI。契约者希望基于自己当前的职业状况，制定一份职业生涯规划。
+
+【职业系统规则】
+${CAREER_SYSTEM_RULES}
+
+${worldCtx}
+
+【契约者当前职业状况】
+${playerCareer || '（未检测到当前职业数据）'}
+
+【契约者期望的发展方向】
+${keywords}
+
+【任务要求】
+根据契约者当前职业状况和期望方向，生成职业生涯规划框架：
+
+1. title: 路线标题，如"剑士→暗杀特化发展路线"
+2. currentState: 分析当前职业的优势和不足
+3. recommendedDirection: 推荐发展方向（具体说明理由）
+4. targetWorlds: 建议进入的副本世界列表（至少2-3个），并简要说明每个世界的目标
+5. fusionAdvice: 是否建议进行职业融合，如果建议则推荐具体的目标融合职业
+6. evolutionPath: 推荐的转职路线（考虑主副职业的转职路径）`
+}
+
+function buildRoadmapV2Prompt(roadmap: CareerRoadmap, worldbookText: string): string {
+  const worldCtx = worldbookText ? '\n【世界观参考】\n' + worldbookText : ''
+  return `你是无限回廊的职业规划AI。你已为契约者制定了职业生涯规划框架，现在需要补充具体执行细节。
+
+【职业系统规则】
+${CAREER_SYSTEM_RULES}
+
+${worldCtx}
+
+【已确认的规划框架】
+- 路线标题: ${roadmap.title}
+- 当前状况: ${roadmap.currentState}
+- 推荐方向: ${roadmap.recommendedDirection}
+- 目标世界: ${roadmap.targetWorlds.join('、')}
+- 融合建议: ${roadmap.fusionAdvice}
+- 转职路线: ${roadmap.evolutionPath}
+
+【任务要求】
+请在以上框架的基础上，生成以下具体细节：
+
+1. stepPlan: 分步执行计划（每一步具体要做什么，从当前状态到达成目标）
+2. skillAdvice: 技能构筑建议。生成3-5个具有联动效果的示例技能组合，每个技能说明其构筑定位和与其他技能的联动方式。格式示例：
+\`\`\`
+核心技能【暗影突刺】：瞬移至目标背后造成暴击 → 触发被动【暗杀者本能】：背刺后3秒内下次攻击必暴击 → 衔接【连环刺】：连续3次攻击每次递增20%伤害 → 收尾【消失】：击杀后进入潜行重置循环
+\`\`\`
+3. equipmentAdvice: 装备构筑建议。按部位给出关键词方向的装备建议，并说明组合成的构筑效果。格式示例：
+\`\`\`
+躯体 — 【潜行】【轻装】
+头部 — 【夜视】【感知】
+...
+组合效果：潜行入场→背刺暴击→击杀刷新→消失→重复
+\`\`\`
+4. risks: 风险提示和执行注意事项`
+}
+
+// ================================================================
+// 读取玩家职业数据
+// ================================================================
+function readPlayerCareer(): string {
+  try {
+    let vars: any = {}
+    try {
+      const mid = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : -1
+      if (mid && mid !== -1) vars = getVariables?.({ type: 'message', message_id: mid }) ?? {}
+    } catch (_) {}
+    if (!vars?.stat_data?.契约者) {
+      try { vars = getVariables?.({ type: 'message', message_id: -1 }) ?? {} } catch (_) {}
+    }
+    if (!vars?.stat_data?.契约者) {
+      try { vars = getVariables?.({ type: 'chat' }) ?? {} } catch (_) {}
+    }
+    const character = vars?.stat_data?.契约者
+    if (!character) return '（未找到角色数据）'
+
+    const career = character?.职业
+    if (!career) return '（角色当前未持有职业）'
+
+    // 提取关键职业字段
+    const parts: string[] = []
+    if (career.名称) parts.push('职业名称: ' + career.名称)
+    if (career.稀有度) parts.push('稀有度: ' + career.稀有度)
+    if (career.转职阶段) parts.push('转职阶段: ' + career.转职阶段)
+    if (career.职业等级) parts.push('职业等级: Lv.' + career.职业等级)
+    if (career.主属性加成) parts.push('主属性加成: ' + JSON.stringify(career.主属性加成))
+    if (career.副属性加成) parts.push('副属性加成: ' + JSON.stringify(career.副属性加成))
+    if (career.职业技能 && Object.keys(career.职业技能).length > 0) parts.push('职业技能: ' + JSON.stringify(career.职业技能))
+    if (career.职业特性 && Object.keys(career.职业特性).length > 0) parts.push('职业特性: ' + JSON.stringify(career.职业特性))
+    if (career.传承技能 && Object.keys(career.传承技能).length > 0) parts.push('传承技能: ' + JSON.stringify(career.传承技能))
+    if (career.转职树) parts.push('转职树: ' + JSON.stringify(career.转职树))
+
+    // 同时也读取角色基础信息
+    if (character?.头部) {
+      const h = character.头部
+      if (h.姓名) parts.push('契约者: ' + h.姓名)
+      if (h.等级) parts.push('等级: Lv.' + h.等级)
+      if (h.阶位) parts.push('阶位: ' + h.阶位)
+      if (h.所属势力) parts.push('势力: ' + h.所属势力)
+    }
+
+    return parts.join('\n')
+  } catch (_) {
+    return '（读取职业数据时出错）'
+  }
+}
+
+// ================================================================
 // PINIA STORE: useCareerStore
 // ================================================================
 export const useCareerStore = defineStore('career', () => {
   const plans = ref<CareerPlan[]>(loadCareerPlans())
+  const roadmaps = ref<CareerRoadmap[]>(loadRoadmaps())
+  const activePlanType = ref<PlanType>('fusion')
   const generatingV1 = ref(false)
   const generatingV2 = ref(false)
   const lastError = ref('')
 
   // 自动同步 localStorage
   watchEffect(() => saveCareerPlans(plans.value))
+  watchEffect(() => saveRoadmaps(roadmaps.value))
 
-  // 引用论坛 store 的 getWorldbookContent（复用世界书选择）
   function getForumStore() {
-    // useForumStore 在同一文件中定义，可直接调用
     return useForumStore()
   }
 
-  /** 第一轮生成：框架 */
+  // ============ 融合方案 ============
+
   async function createPlan(keywords: string) {
     const forumStore = getForumStore()
     const cfg = getActiveCfg(forumStore.settings)
@@ -585,7 +777,45 @@ export const useCareerStore = defineStore('career', () => {
     }
   }
 
-  /** 第二轮生成：细节 */
+  /** 修改 V1 方案（根据反馈重新生成框架） */
+  async function modifyPlan(id: number, feedback: string) {
+    if (generatingV1.value) return
+    const idx = plans.value.findIndex(p => p.id === id)
+    if (idx < 0) return
+
+    const forumStore = getForumStore()
+    const cfg = getActiveCfg(forumStore.settings)
+    if (!cfg.url || !cfg.apiKey) { lastError.value = '请先在终端设置中配置 API'; return }
+
+    generatingV1.value = true
+    lastError.value = ''
+    try {
+      const plan = plans.value[idx]
+      const wb = await forumStore.getWorldbookContent()
+      const prompt = buildModifyPlanPrompt(plan, feedback, wb)
+      const raw = await aiGenerate(cfg, prompt, CAREER_V1_SCHEMA)
+      const data = extractJSON(raw)
+
+      // 原地替换 V1 字段
+      const latestIdx = plans.value.findIndex(p => p.id === id)
+      if (latestIdx < 0) return
+      plans.value[latestIdx] = {
+        ...plans.value[latestIdx],
+        name: data.name || plans.value[latestIdx].name,
+        rarity: data.rarity || plans.value[latestIdx].rarity,
+        coreConcept: data.coreConcept || plans.value[latestIdx].coreConcept,
+        mainJob: data.mainJob || plans.value[latestIdx].mainJob,
+        subJob: data.subJob || plans.value[latestIdx].subJob,
+        affinity: data.affinity || plans.value[latestIdx].affinity,
+        evolution: data.evolution || plans.value[latestIdx].evolution,
+      }
+    } catch (e: any) {
+      lastError.value = e.message || '修改失败'
+    } finally {
+      generatingV1.value = false
+    }
+  }
+
   async function confirmPlan(id: number) {
     if (generatingV2.value) return
     const idx = plans.value.findIndex(p => p.id === id)
@@ -625,13 +855,97 @@ export const useCareerStore = defineStore('career', () => {
     }
   }
 
-  /** 删除方案 */
   function deletePlan(id: number) {
     plans.value = plans.value.filter(p => p.id !== id)
   }
 
+  // ============ 生涯规划 ============
+
+  async function createRoadmap(keywords: string) {
+    const forumStore = getForumStore()
+    const cfg = getActiveCfg(forumStore.settings)
+    if (!cfg.url || !cfg.apiKey) { lastError.value = '请先在终端设置中配置 API'; return }
+
+    const career = readPlayerCareer()
+    generatingV1.value = true
+    lastError.value = ''
+    try {
+      const wb = await forumStore.getWorldbookContent()
+      const prompt = buildRoadmapV1Prompt(keywords, career, wb)
+      const raw = await aiGenerate(cfg, prompt, ROADMAP_V1_SCHEMA)
+      const data = extractJSON(raw)
+
+      const now = new Date()
+      const ts = now.getFullYear() + '-' +
+        String(now.getMonth() + 1).padStart(2, '0') + '-' +
+        String(now.getDate()).padStart(2, '0') + ' ' +
+        String(now.getHours()).padStart(2, '0') + ':' +
+        String(now.getMinutes()).padStart(2, '0')
+
+      const maxId = roadmaps.value.reduce((m, r) => Math.max(m, r.id), 0)
+      const roadmap: CareerRoadmap = {
+        id: maxId + 1,
+        createdAt: ts,
+        keywords,
+        phase: 'v1',
+        planType: 'roadmap',
+        title: data.title || '未命名路线',
+        currentState: data.currentState || '',
+        recommendedDirection: data.recommendedDirection || '',
+        targetWorlds: Array.isArray(data.targetWorlds) ? data.targetWorlds : [],
+        fusionAdvice: data.fusionAdvice || '',
+        evolutionPath: data.evolutionPath || '',
+      }
+      roadmaps.value.unshift(roadmap)
+    } catch (e: any) {
+      lastError.value = e.message || '生成失败'
+    } finally {
+      generatingV1.value = false
+    }
+  }
+
+  async function confirmRoadmap(id: number) {
+    if (generatingV2.value) return
+    const idx = roadmaps.value.findIndex(r => r.id === id)
+    if (idx < 0) return
+
+    const forumStore = getForumStore()
+    const cfg = getActiveCfg(forumStore.settings)
+    if (!cfg.url || !cfg.apiKey) { lastError.value = '请先在终端设置中配置 API'; return }
+
+    generatingV2.value = true
+    lastError.value = ''
+    try {
+      const roadmap = roadmaps.value[idx]
+      const wb = await forumStore.getWorldbookContent()
+      const prompt = buildRoadmapV2Prompt(roadmap, wb)
+      const raw = await aiGenerate(cfg, prompt, ROADMAP_V2_SCHEMA)
+      const data = extractJSON(raw)
+
+      const latestIdx = roadmaps.value.findIndex(r => r.id === id)
+      if (latestIdx < 0) return
+      roadmaps.value[latestIdx] = {
+        ...roadmaps.value[latestIdx],
+        phase: 'complete',
+        stepPlan: Array.isArray(data.stepPlan) ? data.stepPlan : [],
+        skillAdvice: data.skillAdvice || '',
+        equipmentAdvice: data.equipmentAdvice || '',
+        risks: data.risks || '',
+      }
+    } catch (e: any) {
+      lastError.value = e.message || '生成细节失败'
+    } finally {
+      generatingV2.value = false
+    }
+  }
+
+  function deleteRoadmap(id: number) {
+    roadmaps.value = roadmaps.value.filter(r => r.id !== id)
+  }
+
   return {
-    plans, generatingV1, generatingV2, lastError,
-    createPlan, confirmPlan, deletePlan,
+    plans, roadmaps, activePlanType, generatingV1, generatingV2, lastError,
+    createPlan, modifyPlan, confirmPlan, deletePlan,
+    createRoadmap, confirmRoadmap, deleteRoadmap,
   }
 })

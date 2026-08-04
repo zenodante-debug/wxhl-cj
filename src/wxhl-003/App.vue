@@ -139,14 +139,14 @@
   </div>
 
 <!-- ============ CAREER ============ -->
-<!-- 新建方案对话框 -->
-<div v-if="currentView==='career'&&showNewDialog" class="dialog-mask" @click.self="showNewDialog=false">
+<!-- 新建方案 / 修改方案 对话框 -->
+<div v-if="currentView==='career'&&(showNewDialog||showModifyDialog)" class="dialog-mask" @click.self="showNewDialog=false;showModifyDialog=false">
   <div class="dialog-box">
-    <div class="dialog-title">新建职业方案</div>
-    <textarea v-model="newPlanKeywords" class="dialog-input" placeholder="输入关键词或想法...&#10;例如：我想要一个暗杀型的职业，最好结合忍者元素..." rows="4"></textarea>
+    <div class="dialog-title">{{ showModifyDialog ? '修改方案' : (careerStore.activePlanType==='roadmap' ? '新建生涯规划' : '新建职业方案') }}</div>
+    <textarea v-model="newPlanKeywords" class="dialog-input" :placeholder="dialogPlaceholder" rows="4"></textarea>
     <div class="dialog-btns">
-      <button class="dialog-btn cancel" @click="showNewDialog=false">取消</button>
-      <button class="dialog-btn confirm" @click="onNewPlan" :disabled="!newPlanKeywords.trim()||careerStore.generatingV1">{{ careerStore.generatingV1 ? '生成中...' : '生成方案' }}</button>
+      <button class="dialog-btn cancel" @click="showNewDialog=false;showModifyDialog=false">取消</button>
+      <button class="dialog-btn confirm" @click="onNewPlan" :disabled="!newPlanKeywords.trim()||careerStore.generatingV1">{{ careerStore.generatingV1 ? '生成中...' : (showModifyDialog ? '重新生成' : '生成方案') }}</button>
     </div>
   </div>
 </div>
@@ -155,7 +155,7 @@
 <div v-if="currentView==='career'&&deleteTargetId" class="dialog-mask" @click.self="deleteTargetId=0">
   <div class="dialog-box">
     <div class="dialog-title">确认删除</div>
-    <div class="dialog-body">确定要删除这个职业方案吗？此操作不可撤销。</div>
+    <div class="dialog-body">确定要删除这个方案吗？此操作不可撤销。</div>
     <div class="dialog-btns">
       <button class="dialog-btn cancel" @click="deleteTargetId=0">取消</button>
       <button class="dialog-btn danger" @click="onDeletePlan">删除</button>
@@ -167,41 +167,57 @@
 <div v-if="currentView==='career'&&careerView==='list'" class="app-page">
   <div class="app-header"><button class="hdr-btn" @click="goDesktop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button><span class="hdr-title">职业规划</span><span class="hdr-spacer"></span></div>
 
+  <!-- Tab Bar -->
+  <div class="section-tabs">
+    <button class="section-tab" :class="{active:careerStore.activePlanType==='fusion'}" @click="careerStore.activePlanType='fusion'"><span class="tab-icon">🔀</span><span class="tab-label">融合方案</span></button>
+    <button class="section-tab" :class="{active:careerStore.activePlanType==='roadmap'}" @click="careerStore.activePlanType='roadmap'"><span class="tab-icon">🗺️</span><span class="tab-label">现有职业规划</span></button>
+  </div>
+
   <div v-if="careerStore.generatingV1" class="gen-overlay"><div class="gen-spinner"></div><span>AI 正在设计职业方案...</span></div>
 
   <template v-else>
-    <div v-if="careerStore.lastError" class="refresh-err">{{ careerStore.lastError }} <button v-if="careerStore.generatingV1===false" class="retry-link" @click="showNewDialog=true">重试</button></div>
+    <div v-if="careerStore.lastError" class="refresh-err">{{ careerStore.lastError }} <button class="retry-link" @click="showNewDialog=true">重试</button></div>
 
-    <div v-if="careerStore.plans.length===0" class="empty-state">
-      <div class="empty-icon">📋</div>
-      <div class="empty-text">尚未创建职业方案</div>
-      <div class="empty-sub">输入关键词或想法，让 AI 为你设计融合职业路线</div>
-    </div>
-
-    <div v-else class="scroll-area">
-      <div v-for="p in careerStore.plans" :key="p.id" class="plan-card" @click="viewingPlan=p;careerView='detail'">
-        <div class="pc-top">
-          <span class="pc-name">{{ p.name }}</span>
-          <span class="pc-rarity" :class="'rarity-'+p.rarity">{{ p.rarity }}</span>
-        </div>
-        <div class="pc-concept">{{ p.coreConcept }}</div>
-        <div class="pc-meta">
-          <span class="pc-tag">{{ p.keywords.slice(0, 40) }}{{ p.keywords.length > 40 ? '...' : '' }}</span>
-          <span class="pc-time">{{ p.createdAt }}</span>
-          <span v-if="p.phase==='v1'" class="pc-phase pending">未完成</span>
-          <span v-else class="pc-phase done">已完成</span>
+    <!-- ============ 融合方案列表 ============ -->
+    <template v-if="careerStore.activePlanType==='fusion'">
+      <div v-if="careerStore.plans.length===0" class="empty-state">
+        <div class="empty-icon">🔀</div>
+        <div class="empty-text">尚未创建融合职业方案</div>
+        <div class="empty-sub">输入关键词或想法，让 AI 为你设计融合职业路线</div>
+      </div>
+      <div v-else class="scroll-area">
+        <div v-for="p in careerStore.plans" :key="p.id" class="plan-card" @click="viewingPlan=p;viewingRoadmap=null;careerView='detail'">
+          <div class="pc-top"><span class="pc-name">{{ p.name }}</span><span class="pc-rarity" :class="'rarity-'+p.rarity">{{ p.rarity }}</span></div>
+          <div class="pc-concept">{{ p.coreConcept }}</div>
+          <div class="pc-meta"><span class="pc-tag">{{ p.keywords.slice(0, 40) }}{{ p.keywords.length > 40 ? '...' : '' }}</span><span class="pc-time">{{ p.createdAt }}</span><span v-if="p.phase==='v1'" class="pc-phase pending">未完成</span><span v-else class="pc-phase done">已完成</span></div>
         </div>
       </div>
-    </div>
+    </template>
+
+    <!-- ============ 生涯规划列表 ============ -->
+    <template v-if="careerStore.activePlanType==='roadmap'">
+      <div v-if="careerStore.roadmaps.length===0" class="empty-state">
+        <div class="empty-icon">🗺️</div>
+        <div class="empty-text">尚未创建生涯规划</div>
+        <div class="empty-sub">基于你当前持有的职业，让 AI 为你制定职业发展路线</div>
+      </div>
+      <div v-else class="scroll-area">
+        <div v-for="r in careerStore.roadmaps" :key="r.id" class="plan-card" @click="viewingRoadmap=r;viewingPlan=null;careerView='detail'">
+          <div class="pc-top"><span class="pc-name">{{ r.title }}</span><span v-if="r.phase==='v1'" class="pc-phase pending">未完成</span><span v-else class="pc-phase done">已完成</span></div>
+          <div class="pc-concept">{{ r.recommendedDirection }}</div>
+          <div class="pc-meta"><span class="pc-tag">{{ r.keywords.slice(0, 40) }}{{ r.keywords.length > 40 ? '...' : '' }}</span><span class="pc-time">{{ r.createdAt }}</span></div>
+        </div>
+      </div>
+    </template>
 
     <div class="career-fab">
-      <button class="fab-btn" @click="showNewDialog=true">＋ 新建方案</button>
+      <button class="fab-btn" @click="showNewDialog=true;showModifyDialog=false;newPlanKeywords=''">{{ careerStore.activePlanType==='roadmap' ? '＋ 新建生涯规划' : '＋ 新建融合方案' }}</button>
     </div>
   </template>
 </div>
 
-<!-- 职业方案详情页 -->
-<div v-if="currentView==='career'&&careerView==='detail'&&viewingPlan" class="app-page">
+<!-- ============ 融合方案详情页 ============ -->
+<div v-if="currentView==='career'&&careerView==='detail'&&viewingPlan&&!viewingRoadmap" class="app-page">
   <div class="app-header">
     <button class="hdr-btn" @click="careerView='list';viewingPlan=null"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>
     <span class="hdr-title">{{ viewingPlan.name }}</span>
@@ -212,92 +228,74 @@
 
   <template v-else>
     <div v-if="careerStore.lastError" class="refresh-err">{{ careerStore.lastError }}</div>
-
     <div class="scroll-area detail-scroll">
       <!-- 目标概览 -->
-      <div class="detail-block">
-        <div class="db-title"><span class="db-icon">🎯</span>目标概览</div>
-        <div class="db-row"><span class="db-label">融合职业</span><span class="db-value">{{ viewingPlan.name }}</span></div>
-        <div class="db-row"><span class="db-label">稀有度</span><span class="db-value rarity-badge" :class="'rarity-'+viewingPlan.rarity">{{ viewingPlan.rarity }}</span></div>
-        <div class="db-row"><span class="db-label">核心定位</span><span class="db-value">{{ viewingPlan.coreConcept }}</span></div>
-      </div>
-
+      <div class="detail-block"><div class="db-title"><span class="db-icon">🎯</span>目标概览</div><div class="db-row"><span class="db-label">融合职业</span><span class="db-value">{{ viewingPlan.name }}</span></div><div class="db-row"><span class="db-label">稀有度</span><span class="db-value rarity-badge" :class="'rarity-'+viewingPlan.rarity">{{ viewingPlan.rarity }}</span></div><div class="db-row"><span class="db-label">核心定位</span><span class="db-value">{{ viewingPlan.coreConcept }}</span></div></div>
       <!-- 主职业 -->
-      <div class="detail-block">
-        <div class="db-title"><span class="db-icon">⚔️</span>主职业（回廊原生）</div>
-        <div class="db-row"><span class="db-label">职业名称</span><span class="db-value">{{ viewingPlan.mainJob.name }}</span></div>
-        <div class="db-row"><span class="db-label">稀有度</span><span class="db-value">{{ viewingPlan.mainJob.rarity }}</span></div>
-        <div class="db-row"><span class="db-label">属性倾向</span><span class="db-value">{{ viewingPlan.mainJob.attributeTendency }}</span></div>
-        <div class="db-section"><span class="db-label">获取方式</span><div class="db-text">{{ viewingPlan.mainJob.acquisition }}</div></div>
-        <div class="db-section"><span class="db-label">转职路线</span><div class="db-text">{{ viewingPlan.mainJob.classTree }}</div></div>
-      </div>
-
+      <div class="detail-block"><div class="db-title"><span class="db-icon">⚔️</span>主职业（回廊原生）</div><div class="db-row"><span class="db-label">职业名称</span><span class="db-value">{{ viewingPlan.mainJob.name }}</span></div><div class="db-row"><span class="db-label">稀有度</span><span class="db-value">{{ viewingPlan.mainJob.rarity }}</span></div><div class="db-row"><span class="db-label">属性倾向</span><span class="db-value">{{ viewingPlan.mainJob.attributeTendency }}</span></div><div class="db-section"><span class="db-label">获取方式</span><div class="db-text">{{ viewingPlan.mainJob.acquisition }}</div></div><div class="db-section"><span class="db-label">转职路线</span><div class="db-text">{{ viewingPlan.mainJob.classTree }}</div></div></div>
       <!-- 副职业 -->
-      <div class="detail-block">
-        <div class="db-title"><span class="db-icon">🌍</span>副职业（副本职业）</div>
-        <div class="db-row"><span class="db-label">职业名称</span><span class="db-value">{{ viewingPlan.subJob.name }}</span></div>
-        <div class="db-row"><span class="db-label">稀有度</span><span class="db-value">{{ viewingPlan.subJob.rarity }}</span></div>
-        <div class="db-row"><span class="db-label">来源世界</span><span class="db-value">{{ viewingPlan.subJob.world }}</span></div>
-        <div class="db-row"><span class="db-label">属性倾向</span><span class="db-value">{{ viewingPlan.subJob.attributeTendency }}</span></div>
-        <div class="db-section"><span class="db-label">获取方法</span><div class="db-text">{{ viewingPlan.subJob.acquisition }}</div></div>
-        <div class="db-section"><span class="db-label">转职路线</span><div class="db-text">{{ viewingPlan.subJob.classTree }}</div></div>
-      </div>
-
+      <div class="detail-block"><div class="db-title"><span class="db-icon">🌍</span>副职业（副本职业）</div><div class="db-row"><span class="db-label">职业名称</span><span class="db-value">{{ viewingPlan.subJob.name }}</span></div><div class="db-row"><span class="db-label">稀有度</span><span class="db-value">{{ viewingPlan.subJob.rarity }}</span></div><div class="db-row"><span class="db-label">来源世界</span><span class="db-value">{{ viewingPlan.subJob.world }}</span></div><div class="db-row"><span class="db-label">属性倾向</span><span class="db-value">{{ viewingPlan.subJob.attributeTendency }}</span></div><div class="db-section"><span class="db-label">获取方法</span><div class="db-text">{{ viewingPlan.subJob.acquisition }}</div></div><div class="db-section"><span class="db-label">转职路线</span><div class="db-text">{{ viewingPlan.subJob.classTree }}</div></div></div>
       <!-- 相性分析 -->
-      <div class="detail-block">
-        <div class="db-title"><span class="db-icon">🔗</span>相性分析</div>
-        <div class="db-row"><span class="db-label">判定结果</span><span class="db-value affinity-high">{{ viewingPlan.affinity.result }}</span></div>
-        <div class="db-section"><span class="db-label">判定理由</span><div class="db-text">{{ viewingPlan.affinity.reasons }}</div></div>
-      </div>
-
+      <div class="detail-block"><div class="db-title"><span class="db-icon">🔗</span>相性分析</div><div class="db-row"><span class="db-label">判定结果</span><span class="db-value affinity-high">{{ viewingPlan.affinity.result }}</span></div><div class="db-section"><span class="db-label">判定理由</span><div class="db-text">{{ viewingPlan.affinity.reasons }}</div></div></div>
       <!-- 进化路线 -->
-      <div class="detail-block">
-        <div class="db-title"><span class="db-icon">⬆️</span>进化路线图</div>
-        <div class="db-section"><span class="db-label">一转</span><div class="db-text">{{ viewingPlan.evolution.firstClass }}</div></div>
-        <div class="db-section"><span class="db-label">二转</span><div class="db-text">{{ viewingPlan.evolution.secondClass }}</div></div>
-        <div class="db-section"><span class="db-label">三转</span><div class="db-text">{{ viewingPlan.evolution.thirdClass }}</div></div>
-      </div>
-
-      <!-- 第二轮细节（仅已完成方案显示） -->
+      <div class="detail-block"><div class="db-title"><span class="db-icon">⬆️</span>进化路线图</div><div class="db-section"><span class="db-label">一转</span><div class="db-text">{{ viewingPlan.evolution.firstClass }}</div></div><div class="db-section"><span class="db-label">二转</span><div class="db-text">{{ viewingPlan.evolution.secondClass }}</div></div><div class="db-section"><span class="db-label">三转</span><div class="db-text">{{ viewingPlan.evolution.thirdClass }}</div></div></div>
+      <!-- 第二轮细节 -->
       <template v-if="viewingPlan.phase==='complete'">
-        <div class="detail-block">
-          <div class="db-title"><span class="db-icon">📜</span>主职业技能树</div>
-          <div class="db-text">{{ viewingPlan.mainSkillTree }}</div>
-        </div>
-        <div class="detail-block">
-          <div class="db-title"><span class="db-icon">📜</span>副职业核心技能</div>
-          <div class="db-text">{{ viewingPlan.subSkillTree }}</div>
-        </div>
-        <div class="detail-block">
-          <div class="db-title"><span class="db-icon">✨</span>主职业被动特性</div>
-          <div class="db-text">{{ viewingPlan.mainPassives }}</div>
-        </div>
-        <div class="detail-block">
-          <div class="db-title"><span class="db-icon">✨</span>副职业被动特性</div>
-          <div class="db-text">{{ viewingPlan.subPassives }}</div>
-        </div>
-        <div class="detail-block">
-          <div class="db-title"><span class="db-icon">📊</span>融合后属性加成</div>
-          <div class="db-text">{{ viewingPlan.combinedAttributes }}</div>
-        </div>
-        <div class="detail-block">
-          <div class="db-title"><span class="db-icon">🛡️</span>装备适性</div>
-          <div class="db-text">{{ viewingPlan.equipmentFit }}</div>
-        </div>
-        <div class="detail-block">
-          <div class="db-title"><span class="db-icon">🗺️</span>分步获取指南</div>
-          <div v-for="(step, si) in viewingPlan.stepGuide" :key="si" class="step-item"><span class="step-num">{{ si + 1 }}</span><span class="step-text">{{ step }}</span></div>
-        </div>
-        <div class="detail-block warning">
-          <div class="db-title"><span class="db-icon">⚠️</span>风险提示</div>
-          <div class="db-text">{{ viewingPlan.risks }}</div>
-        </div>
+        <div class="detail-block"><div class="db-title"><span class="db-icon">📜</span>主职业技能树</div><div class="db-text">{{ viewingPlan.mainSkillTree }}</div></div>
+        <div class="detail-block"><div class="db-title"><span class="db-icon">📜</span>副职业核心技能</div><div class="db-text">{{ viewingPlan.subSkillTree }}</div></div>
+        <div class="detail-block"><div class="db-title"><span class="db-icon">✨</span>主职业被动特性</div><div class="db-text">{{ viewingPlan.mainPassives }}</div></div>
+        <div class="detail-block"><div class="db-title"><span class="db-icon">✨</span>副职业被动特性</div><div class="db-text">{{ viewingPlan.subPassives }}</div></div>
+        <div class="detail-block"><div class="db-title"><span class="db-icon">📊</span>融合后属性加成</div><div class="db-text">{{ viewingPlan.combinedAttributes }}</div></div>
+        <div class="detail-block"><div class="db-title"><span class="db-icon">🛡️</span>装备适性</div><div class="db-text">{{ viewingPlan.equipmentFit }}</div></div>
+        <div class="detail-block"><div class="db-title"><span class="db-icon">🗺️</span>分步获取指南</div><div v-for="(step, si) in viewingPlan.stepGuide" :key="si" class="step-item"><span class="step-num">{{ si + 1 }}</span><span class="step-text">{{ step }}</span></div></div>
+        <div class="detail-block warning"><div class="db-title"><span class="db-icon">⚠️</span>风险提示</div><div class="db-text">{{ viewingPlan.risks }}</div></div>
       </template>
-
-      <!-- 未完成方案：继续生成按钮 -->
+      <!-- V1 操作 -->
       <div v-if="viewingPlan.phase==='v1'" class="detail-footer">
         <button class="confirm-btn" @click="onConfirmPlan(viewingPlan)" :disabled="careerStore.generatingV2">{{ careerStore.generatingV2 ? '生成中...' : '继续生成细节' }}</button>
-        <div class="confirm-hint">当前仅有框架信息，点击上方按钮由 AI 补充完整技能树、属性、获取指南和风险提示</div>
+        <button class="confirm-btn modify" @click="onModifyClick(viewingPlan)" :disabled="careerStore.generatingV1">修改方案</button>
+        <div class="confirm-hint">当前仅有框架信息。可继续生成细节，或点击「修改方案」提出调整意见后重新生成框架</div>
+      </div>
+    </div>
+  </template>
+</div>
+
+<!-- ============ 生涯规划详情页 ============ -->
+<div v-if="currentView==='career'&&careerView==='detail'&&viewingRoadmap&&!viewingPlan" class="app-page">
+  <div class="app-header">
+    <button class="hdr-btn" @click="careerView='list';viewingRoadmap=null"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>
+    <span class="hdr-title">{{ viewingRoadmap.title }}</span>
+    <button class="hdr-btn del" @click="deleteTargetId=viewingRoadmap.id" title="删除方案"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+  </div>
+
+  <div v-if="careerStore.generatingV2" class="gen-overlay"><div class="gen-spinner"></div><span>AI 正在生成规划细节...</span></div>
+
+  <template v-else>
+    <div v-if="careerStore.lastError" class="refresh-err">{{ careerStore.lastError }}</div>
+    <div class="scroll-area detail-scroll">
+      <!-- 路线概览 -->
+      <div class="detail-block"><div class="db-title"><span class="db-icon">🎯</span>路线概览</div><div class="db-row"><span class="db-label">路线标题</span><span class="db-value">{{ viewingRoadmap.title }}</span></div></div>
+      <!-- 当前状况 -->
+      <div class="detail-block"><div class="db-title"><span class="db-icon">📋</span>当前状况分析</div><div class="db-text">{{ viewingRoadmap.currentState }}</div></div>
+      <!-- 推荐方向 -->
+      <div class="detail-block"><div class="db-title"><span class="db-icon">🧭</span>推荐发展方向</div><div class="db-text">{{ viewingRoadmap.recommendedDirection }}</div></div>
+      <!-- 目标世界 -->
+      <div class="detail-block"><div class="db-title"><span class="db-icon">🌍</span>建议进入的副本世界</div><div v-for="(w, wi) in viewingRoadmap.targetWorlds" :key="wi" class="step-item"><span class="step-num">{{ wi + 1 }}</span><span class="step-text">{{ w }}</span></div></div>
+      <!-- 融合建议 -->
+      <div class="detail-block"><div class="db-title"><span class="db-icon">🔀</span>融合建议</div><div class="db-text">{{ viewingRoadmap.fusionAdvice }}</div></div>
+      <!-- 转职路线 -->
+      <div class="detail-block"><div class="db-title"><span class="db-icon">⬆️</span>转职路线</div><div class="db-text">{{ viewingRoadmap.evolutionPath }}</div></div>
+      <!-- 第二轮细节 -->
+      <template v-if="viewingRoadmap.phase==='complete'">
+        <div class="detail-block"><div class="db-title"><span class="db-icon">🗺️</span>分步执行计划</div><div v-for="(step, si) in viewingRoadmap.stepPlan" :key="si" class="step-item"><span class="step-num">{{ si + 1 }}</span><span class="step-text">{{ step }}</span></div></div>
+        <div class="detail-block"><div class="db-title"><span class="db-icon">⚡</span>技能构筑建议</div><div class="db-text">{{ viewingRoadmap.skillAdvice }}</div></div>
+        <div class="detail-block"><div class="db-title"><span class="db-icon">🛡️</span>装备构筑建议</div><div class="db-text">{{ viewingRoadmap.equipmentAdvice }}</div></div>
+        <div class="detail-block warning"><div class="db-title"><span class="db-icon">⚠️</span>风险提示</div><div class="db-text">{{ viewingRoadmap.risks }}</div></div>
+      </template>
+      <!-- V1 操作 -->
+      <div v-if="viewingRoadmap.phase==='v1'" class="detail-footer">
+        <button class="confirm-btn" @click="onConfirmRoadmap(viewingRoadmap)" :disabled="careerStore.generatingV2">{{ careerStore.generatingV2 ? '生成中...' : '继续生成细节' }}</button>
+        <div class="confirm-hint">当前仅有框架信息，点击上方按钮由 AI 补充执行步骤、技能/装备构筑建议和风险提示</div>
       </div>
     </div>
   </template>
@@ -307,10 +305,8 @@
 </template>
 
 <script setup lang="ts">
-import { useForumStore } from './store'
-import { useCareerStore } from './store'
-import { SECTIONS, RANK_BOARDS, type ForumThread } from './data'
-import { type CareerPlan } from './data'
+import { useForumStore, useCareerStore } from './store'
+import { SECTIONS, RANK_BOARDS, type ForumThread, type CareerPlan, type CareerRoadmap } from './data'
 import ApiFields from './ApiFields.vue'
 
 const store = useForumStore()
@@ -346,9 +342,17 @@ const deviceMode = ref('desktop')
 const userDragged = ref(false)
 const careerView = ref<'list' | 'detail'>('list')
 const viewingPlan = ref<CareerPlan | null>(null)
+const viewingRoadmap = ref<CareerRoadmap | null>(null)
 const newPlanKeywords = ref('')
 const showNewDialog = ref(false)
+const showModifyDialog = ref(false)
 const deleteTargetId = ref(0)
+
+const dialogPlaceholder = computed(() => {
+  if (showModifyDialog.value) return '输入修改意见...\n例如：把稀有度改成蓝色、副职业换成忍者相关的...'
+  if (careerStore.activePlanType === 'roadmap') return '输入发展方向...\n例如：我想往暗杀方向发展、我想进火影世界拿写轮眼...\n（将自动读取你当前持有的职业数据）'
+  return '输入关键词或想法...\n例如：我想要一个暗杀型的职业，最好结合忍者元素...'
+})
 
 function defaultBottom(){return Math.max(8,(getVH()-64)/2)}
 const btnBottom = ref(defaultBottom())
@@ -437,19 +441,36 @@ async function sendReply(){
 }
 function toggleWb(name:string){const i=store.settings.selectedWorldbooks.indexOf(name);if(i>=0)store.settings.selectedWorldbooks.splice(i,1);else store.settings.selectedWorldbooks.push(name)}
 async function onRefresh(){lastErrorSection.value=store.activeSection;await store.refreshSection(store.activeSection)}
-function openCareer() { currentView.value = 'career'; careerView.value = 'list'; viewingPlan.value = null; careerStore.lastError = '' }
+function openCareer() { currentView.value = 'career'; careerView.value = 'list'; viewingPlan.value = null; viewingRoadmap.value = null; careerStore.lastError = '' }
 async function onNewPlan() {
   if (!newPlanKeywords.value.trim()) return
   showNewDialog.value = false
   const kw = newPlanKeywords.value.trim()
   newPlanKeywords.value = ''
-  await careerStore.createPlan(kw)
+  if (showModifyDialog.value) {
+    // 修改模式：通过 modifyPlanId 找到方案并重新生成 V1
+    showModifyDialog.value = false
+    if (viewingPlan.value) await careerStore.modifyPlan(viewingPlan.value.id, kw)
+    // 刷新 viewingPlan 指向 store 中更新后的方案
+    if (viewingPlan.value) viewingPlan.value = careerStore.plans.find(p => p.id === viewingPlan.value!.id) || viewingPlan.value
+  } else if (careerStore.activePlanType === 'roadmap') {
+    await careerStore.createRoadmap(kw)
+  } else {
+    await careerStore.createPlan(kw)
+  }
 }
 async function onConfirmPlan(plan: CareerPlan) { viewingPlan.value = plan; await careerStore.confirmPlan(plan.id); viewingPlan.value = careerStore.plans.find(p => p.id === plan.id) || viewingPlan.value }
+async function onConfirmRoadmap(roadmap: CareerRoadmap) { viewingRoadmap.value = roadmap; await careerStore.confirmRoadmap(roadmap.id); viewingRoadmap.value = careerStore.roadmaps.find(r => r.id === roadmap.id) || viewingRoadmap.value }
+function onModifyClick(plan: CareerPlan) { showModifyDialog.value = true; showNewDialog.value = true; newPlanKeywords.value = '' }
 function onDeletePlan() {
   if (deleteTargetId.value) {
-    careerStore.deletePlan(deleteTargetId.value)
-    if (viewingPlan.value && viewingPlan.value.id === deleteTargetId.value) { viewingPlan.value = null; careerView.value = 'list' }
+    if (careerStore.activePlanType === 'roadmap') {
+      careerStore.deleteRoadmap(deleteTargetId.value)
+      if (viewingRoadmap.value && viewingRoadmap.value.id === deleteTargetId.value) { viewingRoadmap.value = null; careerView.value = 'list' }
+    } else {
+      careerStore.deletePlan(deleteTargetId.value)
+      if (viewingPlan.value && viewingPlan.value.id === deleteTargetId.value) { viewingPlan.value = null; careerView.value = 'list' }
+    }
     deleteTargetId.value = 0
   }
 }
@@ -647,7 +668,7 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .step-num{width:20px;height:20px;flex-shrink:0;background:rgba(240,208,128,0.15);border:1px solid rgba(240,208,128,0.3);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--amber);font-weight:600}
 .step-text{font-size:11px;color:var(--chalk);line-height:1.5;flex:1}
 .detail-footer{padding:16px 12px 24px;text-align:center}
-.confirm-btn{width:100%;padding:12px;background:rgba(180,40,40,0.2);border:1px solid rgba(180,40,40,0.4);color:var(--amber);font-size:13px;border-radius:8px;cursor:pointer;letter-spacing:1px;transition:all 0.2s;&:hover{background:rgba(180,40,40,0.35)}&:disabled{opacity:0.3;cursor:default}}
+.confirm-btn{width:100%;padding:12px;background:rgba(180,40,40,0.2);border:1px solid rgba(180,40,40,0.4);color:var(--amber);font-size:13px;border-radius:8px;cursor:pointer;letter-spacing:1px;transition:all 0.2s;&:hover{background:rgba(180,40,40,0.35)}&:disabled{opacity:0.3;cursor:default}&.modify{background:rgba(100,140,180,0.15);border-color:rgba(100,140,180,0.3);color:#90c0e0;margin-top:6px;&:hover{background:rgba(100,140,180,0.3)}}}
 .confirm-hint{font-size:10px;color:var(--chalk-d);margin-top:8px;opacity:0.6;line-height:1.4}
 .hdr-btn.del{svg{color:rgba(200,80,60,0.7)}&:hover{background:rgba(180,40,40,0.2);svg{color:#f06050}}}
 </style>

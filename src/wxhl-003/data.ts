@@ -316,6 +316,32 @@ export interface CareerPlan {
   risks?: string
 }
 
+/** 统一的方案类型 */
+export type PlanType = 'fusion' | 'roadmap'
+
+/** 基于现有职业的生涯规划方案 */
+export interface CareerRoadmap {
+  id: number
+  createdAt: string
+  keywords: string
+  phase: 'v1' | 'complete'
+  planType: 'roadmap'
+
+  // === 第一轮：框架 ===
+  title: string
+  currentState: string
+  recommendedDirection: string
+  targetWorlds: string[]
+  fusionAdvice: string
+  evolutionPath: string
+
+  // === 第二轮：细节 ===
+  stepPlan?: string[]
+  skillAdvice?: string
+  equipmentAdvice?: string
+  risks?: string
+}
+
 /** 职业系统规则原文（嵌入 AI prompt） */
 export const CAREER_SYSTEM_RULES = `# 职业系统:
   ## 核心定义:
