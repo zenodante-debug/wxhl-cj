@@ -342,6 +342,45 @@ export interface CareerRoadmap {
   risks?: string
 }
 
+/** 阵营偏向 */
+export type Faction = '正道' | '邪道' | '中立'
+
+/** 攻略模式 */
+export type DungeonMode = 'goal' | 'speedrun' | 'perfect' | 'deep' | 'fun'
+
+/** 副本攻略方案 */
+export interface DungeonStrategy {
+  id: number
+  createdAt: string
+  phase: 'v1' | 'complete'
+
+  // 输入条件
+  faction: Faction
+  mode: DungeonMode
+  playerGoal: string
+
+  // === 第一轮：框架 ===
+  dungeonName: string
+  routeOverview: string
+  questExecution: string
+  achievementPlan: string
+  hiddenQuestStrategy: string
+
+  // === 第二轮：细节 ===
+  stepPlan?: string[]
+  combatAdvice?: string
+  resourceAdvice?: string
+  risks?: string
+}
+
+/** 攻略模式显示信息 */
+export const DUNGEON_MODES: { key: DungeonMode; label: string; icon: string; desc: string }[] = [
+  { key: 'speedrun', label: '速通', icon: '⚡', desc: '最快通关主线和支线' },
+  { key: 'perfect', label: '完美通关', icon: '🌟', desc: '完成主线、支线、隐藏任务和全部成就' },
+  { key: 'deep', label: '深度挖掘', icon: '⛏️', desc: '挖掘隐藏力量、道具，面对隐藏BOSS，介入世界事件' },
+  { key: 'fun', label: '搞耍', icon: '🎭', desc: '乐子人玩法' },
+]
+
 /** 职业系统规则原文（嵌入 AI prompt） */
 export const CAREER_SYSTEM_RULES = `# 职业系统:
   ## 核心定义:

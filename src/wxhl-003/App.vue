@@ -22,6 +22,7 @@
       <div class="app-icon-wrapper" @click="openForum"><div class="app-icon forum-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="14" rx="2"/><path d="M7 7h10M7 11h8M7 15h4"/></svg></div><span class="app-label">回廊论坛</span></div>
       <div class="app-icon-wrapper" @click="openSettings"><div class="app-icon settings-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></div><span class="app-label">终端设置</span></div>
 <div class="app-icon-wrapper" @click="openCareer"><div class="app-icon career-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><span class="app-label">职业规划</span></div>
+      <div class="app-icon-wrapper" @click="openDungeon"><div class="app-icon dungeon-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L20 6v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg></div><span class="app-label">副本攻略</span></div>
     </div>
     <div class="desktop-footer"><span>◆ 无 限 回 廊 ◆</span></div>
   </div>
@@ -302,16 +303,157 @@
   </template>
 </div>
 
+<!-- ============ 副本攻略向导对话框 ============ -->
+<div v-if="currentView==='dungeon'&&showDungeonWizard" class="dialog-mask" @click.self="showDungeonWizard=false">
+  <div class="dialog-box">
+    <!-- 第1步：选阵营 -->
+    <template v-if="dungeonStep==='faction'">
+      <div class="dialog-title">选择阵营偏向</div>
+      <div class="dungeon-faction-row">
+        <button v-for="f in ['正道','邪道','中立']" :key="f" class="faction-btn" :class="{active:dungeonFaction===f}" @click="dungeonFaction=f as Faction">{{ f }}</button>
+      </div>
+      <div class="dialog-btns">
+        <button class="dialog-btn cancel" @click="showDungeonWizard=false">取消</button>
+        <button class="dialog-btn confirm" @click="dungeonStep='choice'">下一步</button>
+      </div>
+    </template>
+    <!-- 第2步：目标 or AI攻略 -->
+    <template v-else-if="dungeonStep==='choice'">
+      <div class="dialog-title">选择生成方式</div>
+      <button class="dungeon-choice-btn" @click="dungeonStep='goal'">🎯 目标输入</button>
+      <button class="dungeon-choice-btn" @click="dungeonStep='mode'">🧠 AI攻略</button>
+      <div class="dialog-btns">
+        <button class="dialog-btn cancel" @click="dungeonStep='faction'">上一步</button>
+      </div>
+    </template>
+    <!-- 第3a步：目标输入 -->
+    <template v-else-if="dungeonStep==='goal'">
+      <div class="dialog-title">输入世界目标</div>
+      <textarea v-model="dungeonGoal" class="dialog-input" placeholder="想在这个世界获得什么？力量、职业、装备、道具，甚至攻略对象都可以..." rows="4"></textarea>
+      <div class="dialog-btns">
+        <button class="dialog-btn cancel" @click="dungeonStep='choice'">上一步</button>
+        <button class="dialog-btn confirm" @click="dungeonMode='goal';confirmDungeonWizard()" :disabled="!dungeonGoal.trim()||dungeonStore.generatingV1">{{ dungeonStore.generatingV1?'生成中...':'生成攻略' }}</button>
+      </div>
+    </template>
+    <!-- 第3b步：选模式 -->
+    <template v-else-if="dungeonStep==='mode'">
+      <div class="dialog-title">选择攻略模式</div>
+      <button v-for="m in DUNGEON_MODES" :key="m.key" class="dungeon-mode-btn" :class="{active:dungeonMode===m.key}" @click="dungeonMode=m.key">
+        <span class="dm-icon">{{ m.icon }}</span><span class="dm-text"><b>{{ m.label }}</b><i>{{ m.desc }}</i></span>
+      </button>
+      <div class="dialog-btns">
+        <button class="dialog-btn cancel" @click="dungeonStep='choice'">上一步</button>
+        <button class="dialog-btn confirm" @click="confirmDungeonWizard()" :disabled="dungeonStore.generatingV1">{{ dungeonStore.generatingV1?'生成中...':'生成攻略' }}</button>
+      </div>
+    </template>
+  </div>
+</div>
+
+<!-- 删除确认对话框 -->
+<div v-if="currentView==='dungeon'&&deleteTargetId" class="dialog-mask" @click.self="deleteTargetId=0">
+  <div class="dialog-box">
+    <div class="dialog-title">确认删除</div>
+    <div class="dialog-body">确定要删除这个副本攻略吗？此操作不可撤销。</div>
+    <div class="dialog-btns">
+      <button class="dialog-btn cancel" @click="deleteTargetId=0">取消</button>
+      <button class="dialog-btn danger" @click="onDeleteDungeon">删除</button>
+    </div>
+  </div>
+</div>
+
+<!-- 副本攻略列表页 -->
+<div v-if="currentView==='dungeon'&&dungeonView==='list'" class="app-page">
+  <div class="app-header"><button class="hdr-btn" @click="goDesktop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button><span class="hdr-title">副本攻略</span><span class="hdr-spacer"></span></div>
+
+  <div v-if="dungeonStore.generatingV1" class="gen-overlay"><div class="gen-spinner"></div><span>AI 正在规划副本攻略...</span></div>
+
+  <template v-else>
+    <div v-if="dungeonStore.lastError" class="refresh-err">{{ dungeonStore.lastError }} <button class="retry-link" @click="openDungeonWizard">重试</button></div>
+
+    <div v-if="dungeonStore.dungeons.length===0" class="empty-state">
+      <div class="empty-icon">🗡️</div>
+      <div class="empty-text">尚未生成副本攻略</div>
+      <div class="empty-sub">选择阵营偏向和攻略模式，AI 将通读副本与玩家数据生成完整路线</div>
+    </div>
+
+    <div v-else class="scroll-area">
+      <div v-for="d in dungeonStore.dungeons" :key="d.id" class="plan-card" @click="viewingDungeon=d;dungeonView='detail'">
+        <div class="pc-top">
+          <span class="pc-name">{{ d.dungeonName }}</span>
+          <span class="pc-tag">{{ d.faction }}</span>
+          <span v-if="d.mode==='goal'" class="pc-tag">🎯目标</span>
+          <span v-else class="pc-tag">{{ DUNGEON_MODES.find(m=>m.key===d.mode)?.label || d.mode }}</span>
+        </div>
+        <div class="pc-concept">{{ d.routeOverview }}</div>
+        <div class="pc-meta">
+          <span class="pc-time">{{ d.createdAt }}</span>
+          <span v-if="d.phase==='v1'" class="pc-phase pending">未完成</span>
+          <span v-else class="pc-phase done">已完成</span>
+        </div>
+      </div>
+    </div>
+
+    <div class="career-fab">
+      <button class="fab-btn" @click="openDungeonWizard">＋ 新建攻略</button>
+    </div>
+  </template>
+</div>
+
+<!-- 副本攻略详情页 -->
+<div v-if="currentView==='dungeon'&&dungeonView==='detail'&&viewingDungeon" class="app-page">
+  <div class="app-header">
+    <button class="hdr-btn" @click="dungeonView='list';viewingDungeon=null"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button>
+    <span class="hdr-title">{{ viewingDungeon.dungeonName }}</span>
+    <button class="hdr-btn del" @click="deleteTargetId=viewingDungeon.id" title="删除攻略"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"/></svg></button>
+  </div>
+
+  <div v-if="dungeonStore.generatingV2" class="gen-overlay"><div class="gen-spinner"></div><span>AI 正在生成攻略细节...</span></div>
+
+  <template v-else>
+    <div v-if="dungeonStore.lastError" class="refresh-err">{{ dungeonStore.lastError }}</div>
+    <div class="scroll-area detail-scroll">
+      <!-- 概览 -->
+      <div class="detail-block">
+        <div class="db-title"><span class="db-icon">🗡️</span>攻略概览</div>
+        <div class="db-row"><span class="db-label">阵营偏向</span><span class="db-value">{{ viewingDungeon.faction }}</span></div>
+        <div class="db-row"><span class="db-label">攻略模式</span><span class="db-value">{{ viewingDungeon.mode==='goal' ? '目标导向：'+viewingDungeon.playerGoal : (DUNGEON_MODES.find(m=>m.key===viewingDungeon.mode)?.label || viewingDungeon.mode) }}</span></div>
+        <div class="db-section"><span class="db-label">路线总览</span><div class="db-text">{{ viewingDungeon.routeOverview }}</div></div>
+      </div>
+      <!-- 主线支线 -->
+      <div class="detail-block"><div class="db-title"><span class="db-icon">📜</span>主线与支线执行计划</div><div class="db-text">{{ viewingDungeon.questExecution }}</div></div>
+      <!-- 成就 -->
+      <div class="detail-block"><div class="db-title"><span class="db-icon">🏆</span>成就达成方案</div><div class="db-text">{{ viewingDungeon.achievementPlan }}</div></div>
+      <!-- 隐藏任务 -->
+      <div class="detail-block"><div class="db-title"><span class="db-icon">🔍</span>隐藏任务攻略</div><div class="db-text">{{ viewingDungeon.hiddenQuestStrategy }}</div></div>
+      <!-- 第二轮细节 -->
+      <template v-if="viewingDungeon.phase==='complete'">
+        <div class="detail-block"><div class="db-title"><span class="db-icon">🗺️</span>分步执行路线</div><div v-for="(step, si) in viewingDungeon.stepPlan" :key="si" class="step-item"><span class="step-num">{{ si + 1 }}</span><span class="step-text">{{ step }}</span></div></div>
+        <div class="detail-block"><div class="db-title"><span class="db-icon">⚔️</span>战斗建议</div><div class="db-text">{{ viewingDungeon.combatAdvice }}</div></div>
+        <div class="detail-block"><div class="db-title"><span class="db-icon">🎒</span>资源优先级</div><div class="db-text">{{ viewingDungeon.resourceAdvice }}</div></div>
+        <div class="detail-block warning"><div class="db-title"><span class="db-icon">⚠️</span>风险与预案</div><div class="db-text">{{ viewingDungeon.risks }}</div></div>
+      </template>
+      <!-- V1 操作 -->
+      <div v-if="viewingDungeon.phase==='v1'" class="detail-footer">
+        <button class="confirm-btn" @click="onConfirmDungeon(viewingDungeon)" :disabled="dungeonStore.generatingV2">{{ dungeonStore.generatingV2 ? '生成中...' : '继续生成细节' }}</button>
+        <button class="confirm-btn modify" @click="onModifyDungeonClick(viewingDungeon)" :disabled="dungeonStore.generatingV1">修改方案</button>
+        <button class="confirm-btn reroll" @click="onRerollDungeon(viewingDungeon)" :disabled="dungeonStore.generatingV1">{{ dungeonStore.generatingV1 ? '生成中...' : '🔄 重roll' }}</button>
+        <div class="confirm-hint">当前仅有框架信息。可继续生成细节、修改方案，或用相同条件重新生成</div>
+      </div>
+    </div>
+  </template>
+</div>
+
 </div></div></Transition>
 </template>
 
 <script setup lang="ts">
-import { useForumStore, useCareerStore } from './store'
-import { SECTIONS, RANK_BOARDS, type ForumThread, type CareerPlan, type CareerRoadmap } from './data'
+import { useForumStore, useCareerStore, useDungeonStore } from './store'
+import { SECTIONS, RANK_BOARDS, type ForumThread, type CareerPlan, type CareerRoadmap, type DungeonStrategy, type Faction, type DungeonMode, DUNGEON_MODES } from './data'
 import ApiFields from './ApiFields.vue'
 
 const store = useForumStore()
 const careerStore = useCareerStore()
+const dungeonStore = useDungeonStore()
 const SK = 'wxhl003_btn_pos'
 
 // ============ 视口尺寸（visualViewport → 自身 → 父窗口回退）============
@@ -334,7 +476,7 @@ function getVH():number{
 
 // ============ 状态 ============
 const expanded = ref(false)
-const currentView = ref<'desktop'|'forum'|'settings'|'career'>('desktop')
+const currentView = ref<'desktop'|'forum'|'settings'|'career'|'dungeon'>('desktop')
 const settingsPage = ref('')
 const activeThread = ref<ForumThread|null>(null)
 const replyDraft = ref('')
@@ -348,6 +490,16 @@ const newPlanKeywords = ref('')
 const showNewDialog = ref(false)
 const showModifyDialog = ref(false)
 const deleteTargetId = ref(0)
+
+// ============ 副本攻略状态 ============
+const dungeonView = ref<'list' | 'detail'>('list')
+const viewingDungeon = ref<DungeonStrategy | null>(null)
+const showDungeonWizard = ref(false)
+const dungeonFaction = ref<Faction>('中立')
+const dungeonStep = ref<'faction' | 'choice' | 'goal' | 'mode'>('faction')
+const dungeonGoal = ref('')
+const dungeonMode = ref<DungeonMode>('speedrun')
+const dungeonModifyId = ref(0)
 
 const dialogPlaceholder = computed(() => {
   if (showModifyDialog.value) return '输入修改意见...\n例如：把稀有度改成蓝色、副职业换成忍者相关的...'
@@ -443,6 +595,57 @@ async function sendReply(){
 function toggleWb(name:string){const i=store.settings.selectedWorldbooks.indexOf(name);if(i>=0)store.settings.selectedWorldbooks.splice(i,1);else store.settings.selectedWorldbooks.push(name)}
 async function onRefresh(){lastErrorSection.value=store.activeSection;await store.refreshSection(store.activeSection)}
 function openCareer() { currentView.value = 'career'; careerView.value = 'list'; viewingPlan.value = null; viewingRoadmap.value = null; careerStore.lastError = '' }
+function openDungeon() { currentView.value = 'dungeon'; dungeonView.value = 'list'; viewingDungeon.value = null; dungeonStore.lastError = '' }
+// ============ 副本攻略向导 ============
+function openDungeonWizard() {
+  dungeonStep.value = 'faction'
+  dungeonFaction.value = '中立'
+  dungeonGoal.value = ''
+  dungeonMode.value = 'speedrun'
+  dungeonModifyId.value = 0
+  showDungeonWizard.value = true
+}
+function startDungeonCreate() {
+  // 从 choice 进入：选目标或模式
+  // goal 或 mode 都会在确认时生成
+  if (dungeonStep.value === 'choice') return
+  showDungeonWizard.value = false
+  dungeonStep.value = 'faction'
+}
+async function confirmDungeonWizard() {
+  showDungeonWizard.value = false
+  if (dungeonModifyId.value) {
+    await dungeonStore.modifyDungeon(dungeonModifyId.value, dungeonGoal.value)
+    if (viewingDungeon.value) viewingDungeon.value = dungeonStore.dungeons.find(d => d.id === dungeonModifyId.value) || viewingDungeon.value
+    dungeonModifyId.value = 0
+  } else {
+    await dungeonStore.createDungeon(dungeonFaction.value, dungeonMode.value, dungeonGoal.value)
+  }
+}
+function onModifyDungeonClick(d: DungeonStrategy) {
+  openDungeonWizard()
+  dungeonModifyId.value = d.id
+  dungeonFaction.value = d.faction
+  dungeonStep.value = 'goal'   // 修改模式直接进入目标输入
+}
+async function onRerollDungeon(d: DungeonStrategy) {
+  if (dungeonStore.generatingV1) return
+  const idx = dungeonStore.dungeons.findIndex(x => x.id === d.id)
+  if (idx >= 0) {
+    const src = dungeonStore.dungeons[idx]
+    await dungeonStore.createDungeon(src.faction, src.mode, src.playerGoal)
+    // 刷新 viewingDungeon 指向最新
+    viewingDungeon.value = dungeonStore.dungeons[0] || viewingDungeon.value
+  }
+}
+async function onConfirmDungeon(d: DungeonStrategy) { viewingDungeon.value = d; await dungeonStore.confirmDungeon(d.id); viewingDungeon.value = dungeonStore.dungeons.find(x => x.id === d.id) || viewingDungeon.value }
+function onDeleteDungeon() {
+  if (deleteTargetId.value) {
+    dungeonStore.deleteDungeon(deleteTargetId.value)
+    if (viewingDungeon.value && viewingDungeon.value.id === deleteTargetId.value) { viewingDungeon.value = null; dungeonView.value = 'list' }
+    deleteTargetId.value = 0
+  }
+}
 async function onNewPlan() {
   if (!newPlanKeywords.value.trim()) return
   showNewDialog.value = false
@@ -630,6 +833,7 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 
 // ============ CAREER ICON ============
 .career-icon{background:linear-gradient(135deg,#2a2010,#1a1008);border:1.5px solid rgba(200,180,100,0.25)}
+.dungeon-icon{background:linear-gradient(135deg,#1a1420,#0c0810);border:1.5px solid rgba(140,100,200,0.25)}
 
 // ============ DIALOG ============
 .dialog-mask{position:absolute;inset:0;z-index:30;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center}
@@ -639,6 +843,12 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .dialog-input{width:100%;padding:10px;background:rgba(16,12,8,0.8);border:1px solid rgba(80,40,20,0.4);border-radius:8px;color:var(--chalk);font-size:11px;resize:none;outline:none;font-family:inherit;&::placeholder{color:var(--chalk-d);opacity:0.5}&:focus{border-color:rgba(180,40,40,0.5)}}
 .dialog-btns{display:flex;gap:8px;margin-top:12px;justify-content:flex-end}
 .dialog-btn{padding:7px 18px;border-radius:6px;font-size:11px;cursor:pointer;border:1px solid transparent;transition:all 0.2s;&.cancel{background:transparent;color:var(--chalk-d);border-color:rgba(80,40,20,0.3);&:hover{color:var(--chalk)}}&.confirm{background:rgba(180,40,40,0.2);border-color:rgba(180,40,40,0.4);color:var(--amber);&:hover{background:rgba(180,40,40,0.35)}&:disabled{opacity:0.3;cursor:default}}&.danger{background:rgba(180,40,40,0.3);border-color:rgba(180,40,40,0.5);color:#f06050;&:hover{background:rgba(180,40,40,0.5)}}}
+
+// ============ DUNGEON WIZARD ============
+.dungeon-faction-row{display:flex;gap:6px;margin-bottom:4px}
+.faction-btn{flex:1;padding:10px 0;background:rgba(16,12,8,0.7);border:1px solid rgba(80,40,20,0.3);color:var(--chalk-d);font-size:12px;border-radius:6px;cursor:pointer;transition:all 0.2s;&:hover{color:var(--chalk)}&.active{background:rgba(240,208,128,0.15);border-color:rgba(240,208,128,0.5);color:var(--amber);font-weight:600}}
+.dungeon-choice-btn{display:block;width:100%;padding:12px;margin-bottom:8px;background:rgba(30,18,12,0.5);border:1px solid rgba(80,40,20,0.3);border-radius:8px;color:var(--chalk);font-size:13px;cursor:pointer;transition:all 0.2s;&:hover{background:rgba(180,40,40,0.12);border-color:rgba(180,40,40,0.4)}}
+.dungeon-mode-btn{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;margin-bottom:6px;background:rgba(16,12,8,0.7);border:1px solid rgba(80,40,20,0.3);border-radius:8px;color:var(--chalk);font-size:12px;cursor:pointer;text-align:left;transition:all 0.2s;&:hover{border-color:rgba(180,40,40,0.4)}&.active{background:rgba(180,40,40,0.15);border-color:rgba(180,40,40,0.5)}.dm-icon{font-size:18px;flex-shrink:0}.dm-text{display:flex;flex-direction:column;gap:2px}b{font-size:12px;color:var(--chalk)}i{font-size:10px;color:var(--chalk-d);font-style:normal}}
 
 // ============ CAREER LIST ============
 .empty-state{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:30px 20px;text-align:center}
@@ -673,7 +883,7 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .step-num{width:20px;height:20px;flex-shrink:0;background:rgba(240,208,128,0.15);border:1px solid rgba(240,208,128,0.3);border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:10px;color:var(--amber);font-weight:600}
 .step-text{font-size:11px;color:var(--chalk);line-height:1.5;flex:1}
 .detail-footer{padding:16px 12px 24px;text-align:center}
-.confirm-btn{width:100%;padding:12px;background:rgba(180,40,40,0.2);border:1px solid rgba(180,40,40,0.4);color:var(--amber);font-size:13px;border-radius:8px;cursor:pointer;letter-spacing:1px;transition:all 0.2s;&:hover{background:rgba(180,40,40,0.35)}&:disabled{opacity:0.3;cursor:default}&.modify{background:rgba(100,140,180,0.15);border-color:rgba(100,140,180,0.3);color:#90c0e0;margin-top:6px;&:hover{background:rgba(100,140,180,0.3)}}}
+.confirm-btn{width:100%;padding:12px;background:rgba(180,40,40,0.2);border:1px solid rgba(180,40,40,0.4);color:var(--amber);font-size:13px;border-radius:8px;cursor:pointer;letter-spacing:1px;transition:all 0.2s;&:hover{background:rgba(180,40,40,0.35)}&:disabled{opacity:0.3;cursor:default}&.modify{background:rgba(100,140,180,0.15);border-color:rgba(100,140,180,0.3);color:#90c0e0;margin-top:6px;&:hover{background:rgba(100,140,180,0.3)}}&.reroll{background:rgba(160,120,40,0.15);border-color:rgba(160,120,40,0.3);color:#d0b070;margin-top:6px;&:hover{background:rgba(160,120,40,0.3)}}}
 .confirm-hint{font-size:10px;color:var(--chalk-d);margin-top:8px;opacity:0.6;line-height:1.4}
 .hdr-btn.del{svg{color:rgba(200,80,60,0.7)}&:hover{background:rgba(180,40,40,0.2);svg{color:#f06050}}}
 </style>

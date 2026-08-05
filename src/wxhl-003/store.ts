@@ -1,4 +1,4 @@
-import { type ForumThread, type ForumPost, INITIAL_THREADS, RANK_BOARDS, type CareerPlan, type CareerRoadmap, type PlanType, CAREER_SYSTEM_RULES, WORLD_SUMMARY } from './data'
+import { type ForumThread, type ForumPost, INITIAL_THREADS, RANK_BOARDS, type CareerPlan, type CareerRoadmap, type PlanType, type DungeonStrategy, type Faction, type DungeonMode, CAREER_SYSTEM_RULES, WORLD_SUMMARY } from './data'
 
 const SK = 'wxhl003_settings'
 
@@ -1007,5 +1007,302 @@ export const useCareerStore = defineStore('career', () => {
     plans, roadmaps, activePlanType, generatingV1, generatingV2, lastError,
     createPlan, modifyPlan, confirmPlan, deletePlan,
     createRoadmap, modifyRoadmap, confirmRoadmap, deleteRoadmap,
+  }
+})
+
+// ================================================================
+// 副本攻略
+// ================================================================
+const DG_SK = 'wxhl003_dungeon_strategies'
+
+function loadDungeons(): DungeonStrategy[] {
+  try {
+    const r = localStorage.getItem(DG_SK)
+    if (r) return JSON.parse(r)
+  } catch (_) {}
+  return []
+}
+
+function saveDungeons(dungeons: DungeonStrategy[]) {
+  try { localStorage.setItem(DG_SK, JSON.stringify(dungeons)) } catch (_) {}
+}
+
+const DUNGEON_V1_SCHEMA = {
+  name: 'dungeon_strategy_v1',
+  value: {
+    type: 'object',
+    properties: {
+      dungeonName: { type: 'string' },
+      routeOverview: { type: 'string' },
+      questExecution: { type: 'string' },
+      achievementPlan: { type: 'string' },
+      hiddenQuestStrategy: { type: 'string' },
+    },
+    required: ['dungeonName', 'routeOverview', 'questExecution', 'achievementPlan', 'hiddenQuestStrategy'],
+  },
+}
+
+const DUNGEON_V2_SCHEMA = {
+  name: 'dungeon_strategy_v2',
+  value: {
+    type: 'object',
+    properties: {
+      stepPlan: { type: 'array', items: { type: 'string' } },
+      combatAdvice: { type: 'string' },
+      resourceAdvice: { type: 'string' },
+      risks: { type: 'string' },
+    },
+    required: ['stepPlan', 'combatAdvice', 'resourceAdvice', 'risks'],
+  },
+}
+
+function buildModeDesc(mode: DungeonMode): string {
+  switch (mode) {
+    case 'goal': return '以契约者输入的目标为首要目标，围绕它规划整趟副本'
+    case 'speedrun': return '速通：最快通关主线和支线'
+    case 'perfect': return '完美通关：完成主线、支线、隐藏任务和全部成就'
+    case 'deep': return '深度挖掘：挖掘隐藏力量、道具，面对隐藏BOSS，主动介入世界事件'
+    case 'fun': return '搞耍：乐子人玩法，怎么有趣怎么来'
+  }
+}
+
+function buildDungeonV1Prompt(faction: Faction, mode: DungeonMode, playerGoal: string, statData: string, worldbookText: string): string {
+  const worldCtx = worldbookText ? '\n【世界观参考】\n' + worldbookText : ''
+  const goalCtx = mode === 'goal' ? `\n【契约者的目标】\n${playerGoal}\n` : ''
+  return `你是无限回廊的副本攻略AI。请为契约者生成一份针对当前副本的完整攻略路线。
+
+${worldCtx}
+
+【副本与玩家数据】
+${statData || '（未读取到数据）'}
+${goalCtx}
+【阵营偏向】
+${faction}
+
+【攻略模式】
+${buildModeDesc(mode)}
+
+【任务要求】
+通读副本数据（含主线任务、支线任务、成就、隐藏任务线索）和玩家状态（职业、等级、技能、装备、属性），生成一份攻略框架：
+
+1. dungeonName: 副本名称
+2. routeOverview: 路线总览。一句话概括这条路线怎么走，能达成哪些目标
+3. questExecution: 主线与支线任务执行计划。按照副本里的实际任务安排先后顺序，标注关键点
+4. achievementPlan: 成就达成方案。副本里的成就逐个说明达成条件和方法
+5. hiddenQuestStrategy: 隐藏任务攻略。副本开局会给一条隐藏任务的线索，结合这条线索推测隐藏任务的触发方式并给出执行方案`
+}
+
+function buildDungeonV2Prompt(dungeon: DungeonStrategy, statData: string, worldbookText: string): string {
+  const worldCtx = worldbookText ? '\n【世界观参考】\n' + worldbookText : ''
+  return `你是无限回廊的副本攻略AI。你已为契约者生成了副本攻略框架，现在需要补充具体执行细节。
+
+${worldCtx}
+
+【副本与玩家数据】
+${statData || '（未读取到数据）'}
+
+【已确认的攻略框架】
+- 副本名称: ${dungeon.dungeonName}
+- 阵营偏向: ${dungeon.faction}
+- 路线总览: ${dungeon.routeOverview}
+- 主线支线执行: ${dungeon.questExecution}
+- 成就方案: ${dungeon.achievementPlan}
+- 隐藏任务: ${dungeon.hiddenQuestStrategy}
+
+【任务要求】
+在框架基础上生成具体执行细节：
+
+1. stepPlan: 分步执行路线。从副本开局到结束，每一步具体做什么，覆盖主线、支线、成就、隐藏任务
+2. combatAdvice: 针对玩家当前职业和技能的战斗建议。针对副本中的关键战斗，说明怎么利用现有技能、装备、特性应对
+3. resourceAdvice: 资源与道具优先级建议。副本中可能获得或消耗的道具、消耗品，哪些值得保留/使用
+4. risks: 风险提示与翻车预案。这条路线容易翻车的环节，以及对应的应对预案`
+}
+
+function readPlayerData(): string {
+  try {
+    let vars: any = {}
+    try {
+      const mid = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : -1
+      if (mid && mid !== -1) vars = getVariables?.({ type: 'message', message_id: mid }) ?? {}
+    } catch (_) {}
+    if (!vars?.stat_data) {
+      try { vars = getVariables?.({ type: 'message', message_id: -1 }) ?? {} } catch (_) {}
+    }
+    if (!vars?.stat_data) {
+      try { vars = getVariables?.({ type: 'chat' }) ?? {} } catch (_) {}
+    }
+    const stat = vars?.stat_data
+    if (!stat) return '（未找到角色数据）'
+    return JSON.stringify(stat)
+  } catch (_) {
+    return '（读取角色数据时出错）'
+  }
+}
+
+export const useDungeonStore = defineStore('dungeon', () => {
+  const dungeons = ref<DungeonStrategy[]>(loadDungeons())
+  const generatingV1 = ref(false)
+  const generatingV2 = ref(false)
+  const lastError = ref('')
+
+  watchEffect(() => saveDungeons(dungeons.value))
+
+  function getForumStore() {
+    return useForumStore()
+  }
+
+  /** 第一轮生成：攻略框架 */
+  async function createDungeon(faction: Faction, mode: DungeonMode, playerGoal: string) {
+    const forumStore = getForumStore()
+    const cfg = getActiveCfg(forumStore.settings)
+    if (!cfg.url || !cfg.apiKey) { lastError.value = '请先在终端设置中配置 API'; return }
+
+    generatingV1.value = true
+    lastError.value = ''
+    try {
+      const wb = await forumStore.getWorldbookContent()
+      const statData = readPlayerData()
+      const prompt = buildDungeonV1Prompt(faction, mode, playerGoal, statData, wb)
+      const raw = await aiGenerate(cfg, prompt, DUNGEON_V1_SCHEMA)
+      const data = extractJSON(raw)
+
+      const now = new Date()
+      const ts = now.getFullYear() + '-' +
+        String(now.getMonth() + 1).padStart(2, '0') + '-' +
+        String(now.getDate()).padStart(2, '0') + ' ' +
+        String(now.getHours()).padStart(2, '0') + ':' +
+        String(now.getMinutes()).padStart(2, '0')
+
+      const maxId = dungeons.value.reduce((m, d) => Math.max(m, d.id), 0)
+      const dungeon: DungeonStrategy = {
+        id: maxId + 1,
+        createdAt: ts,
+        phase: 'v1',
+        faction,
+        mode,
+        playerGoal,
+        dungeonName: data.dungeonName || '未命名副本',
+        routeOverview: data.routeOverview || '',
+        questExecution: data.questExecution || '',
+        achievementPlan: data.achievementPlan || '',
+        hiddenQuestStrategy: data.hiddenQuestStrategy || '',
+      }
+      dungeons.value.unshift(dungeon)
+    } catch (e: any) {
+      lastError.value = e.message || '生成失败'
+    } finally {
+      generatingV1.value = false
+    }
+  }
+
+  /** 修改 V1（按反馈重新生成） */
+  async function modifyDungeon(id: number, feedback: string) {
+    if (generatingV1.value) return
+    const idx = dungeons.value.findIndex(d => d.id === id)
+    if (idx < 0) return
+
+    const forumStore = getForumStore()
+    const cfg = getActiveCfg(forumStore.settings)
+    if (!cfg.url || !cfg.apiKey) { lastError.value = '请先在终端设置中配置 API'; return }
+
+    generatingV1.value = true
+    lastError.value = ''
+    try {
+      const dungeon = dungeons.value[idx]
+      const wb = await forumStore.getWorldbookContent()
+      const statData = readPlayerData()
+      const prompt = `你是无限回廊的副本攻略AI。契约者对已生成的副本攻略提出了修改意见，请根据意见重新生成攻略框架。
+
+【副本与玩家数据】
+${statData}
+
+${wb ? '\n【世界观参考】\n' + wb : ''}
+
+【当前攻略框架】
+- 副本名称: ${dungeon.dungeonName}
+- 阵营偏向: ${dungeon.faction}
+- 路线总览: ${dungeon.routeOverview}
+- 主线支线执行: ${dungeon.questExecution}
+- 成就方案: ${dungeon.achievementPlan}
+- 隐藏任务: ${dungeon.hiddenQuestStrategy}
+
+【修改意见】
+${feedback}
+
+【任务要求】
+根据修改意见重新生成完整攻略框架（所有字段）。保留修改意见认可的部分，只改动需要调整的地方。`
+      const raw = await aiGenerate(cfg, prompt, DUNGEON_V1_SCHEMA)
+      const data = extractJSON(raw)
+
+      const latestIdx = dungeons.value.findIndex(d => d.id === id)
+      if (latestIdx < 0) return
+      dungeons.value[latestIdx] = {
+        ...dungeons.value[latestIdx],
+        dungeonName: data.dungeonName || dungeons.value[latestIdx].dungeonName,
+        routeOverview: data.routeOverview || dungeons.value[latestIdx].routeOverview,
+        questExecution: data.questExecution || dungeons.value[latestIdx].questExecution,
+        achievementPlan: data.achievementPlan || dungeons.value[latestIdx].achievementPlan,
+        hiddenQuestStrategy: data.hiddenQuestStrategy || dungeons.value[latestIdx].hiddenQuestStrategy,
+      }
+    } catch (e: any) {
+      lastError.value = e.message || '修改失败'
+    } finally {
+      generatingV1.value = false
+    }
+  }
+
+  /** 重roll：用原条件重新生成 V1 */
+  async function rerollDungeon(id: number) {
+    if (generatingV1.value) return
+    const idx = dungeons.value.findIndex(d => d.id === id)
+    if (idx < 0) return
+    const dungeon = dungeons.value[idx]
+    await createDungeon(dungeon.faction, dungeon.mode, dungeon.playerGoal)
+  }
+
+  /** 第二轮生成：细节 */
+  async function confirmDungeon(id: number) {
+    if (generatingV2.value) return
+    const idx = dungeons.value.findIndex(d => d.id === id)
+    if (idx < 0) return
+
+    const forumStore = getForumStore()
+    const cfg = getActiveCfg(forumStore.settings)
+    if (!cfg.url || !cfg.apiKey) { lastError.value = '请先在终端设置中配置 API'; return }
+
+    generatingV2.value = true
+    lastError.value = ''
+    try {
+      const dungeon = dungeons.value[idx]
+      const wb = await forumStore.getWorldbookContent()
+      const statData = readPlayerData()
+      const prompt = buildDungeonV2Prompt(dungeon, statData, wb)
+      const raw = await aiGenerate(cfg, prompt, DUNGEON_V2_SCHEMA)
+      const data = extractJSON(raw)
+
+      const latestIdx = dungeons.value.findIndex(d => d.id === id)
+      if (latestIdx < 0) return
+      dungeons.value[latestIdx] = {
+        ...dungeons.value[latestIdx],
+        phase: 'complete',
+        stepPlan: Array.isArray(data.stepPlan) ? data.stepPlan : [],
+        combatAdvice: data.combatAdvice || '',
+        resourceAdvice: data.resourceAdvice || '',
+        risks: data.risks || '',
+      }
+    } catch (e: any) {
+      lastError.value = e.message || '生成细节失败'
+    } finally {
+      generatingV2.value = false
+    }
+  }
+
+  function deleteDungeon(id: number) {
+    dungeons.value = dungeons.value.filter(d => d.id !== id)
+  }
+
+  return {
+    dungeons, generatingV1, generatingV2, lastError,
+    createDungeon, modifyDungeon, rerollDungeon, confirmDungeon, deleteDungeon,
   }
 })
