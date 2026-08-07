@@ -35,6 +35,7 @@
       <div class="section-tabs">
         <button v-for="sec in SECTIONS" :key="sec.key" class="section-tab" :class="{active:store.activeSection===sec.key}" @click="store.activeSection=sec.key"><span class="tab-icon">{{ sec.icon }}</span><span class="tab-label">{{ sec.label }}</span></button>
         <button v-if="store.activeSection!=='rank'" class="section-tab refresh-tab" @click="onRefresh" :disabled="store.refreshing"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{spinning:store.refreshing}"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg><span class="tab-label">{{ store.refreshing?'生成中...':'刷新' }}</span></button>
+        <button v-if="store.activeSection!=='rank'" class="section-tab influence-tab" @click="onExtractInfluence" :disabled="store.influenceAnalyzing" :class="{hasEvents:store.influenceEvents.length>0}"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{spinning:store.influenceAnalyzing}"><path d="M12 2l3 7 7 .9-5.3 4.6 1.6 6.9L12 18.7 5.7 21.4l1.6-6.9L2 9.9l7-.9z"/></svg><span class="tab-label">{{ store.influenceAnalyzing?'分析中...':'玩家影响' }}</span><span v-if="store.influenceEvents.length>0" class="influence-badge">{{ store.influenceEvents.length }}</span></button>
       </div>
       <template v-if="store.activeSection==='rank'">
         <div class="rank-tabs">
@@ -60,9 +61,18 @@
       </template>
       <template v-else>
         <div class="scroll-area">
+          <div v-if="store.influenceError" class="refresh-err">{{ store.influenceError }}</div>
+          <div v-if="store.influenceEvents.length>0" class="influence-panel">
+            <div class="infl-title"><span>📰 玩家影响事件</span><button class="infl-clear" @click="store.clearInfluence()">清除</button></div>
+            <div v-for="(ev, ei) in store.influenceEvents" :key="ei" class="infl-item"><span class="infl-dot">●</span><span class="infl-text">{{ ev.event }}</span><span class="infl-impact">{{ ev.impact }}</span></div>
+            <div class="infl-hint">这些大事会在刷新时融入论坛帖子</div>
+          </div>
           <div v-if="store.lastError&&store.activeSection===lastErrorSection" class="refresh-err">{{ store.lastError }}</div>
-          <div v-for="t in sectionThreads" :key="t.id" class="thread-card" @click="openThread(t)"><div class="tc-top"><span class="tc-title">{{ t.title }}</span><span class="tc-replies">{{ t.replies }}回</span></div><div class="tc-preview">{{ t.preview }}</div><div class="tc-meta"><span>{{ t.author }}</span><span>{{ t.time }}</span></div><div class="tc-hot"><span class="hot-label">🔥</span><span class="hot-author">{{ t.hotAuthor }}</span>: {{ t.hotComment }} <span class="hot-likes">👍{{ t.hotLikes }}</span></div></div>
+          <div v-for="t in sectionThreads" :key="t.id" class="thread-card" :class="{mine:t.author==='我'}" @click="openThread(t)"><div class="tc-top"><span class="tc-title">{{ t.title }}</span><span class="tc-replies">{{ t.replies }}回</span></div><div class="tc-preview">{{ t.preview }}</div><div class="tc-meta"><span>{{ t.author }}</span><span>{{ t.time }}</span></div><div class="tc-hot"><span class="hot-label">🔥</span><span class="hot-author">{{ t.hotAuthor }}</span>: {{ t.hotComment }} <span class="hot-likes">👍{{ t.hotLikes }}</span></div></div>
           <div v-if="sectionThreads.length===0" class="empty-msg">暂无帖子 · 点击「刷新」由AI生成</div>
+        </div>
+        <div class="post-bar">
+          <button class="post-btn" @click="showPostDialog=true">✏️ 发帖</button>
         </div>
       </template>
     </template>
@@ -85,6 +95,19 @@
         </div>
       </template>
     </template>
+
+    <!-- 发帖对话框 -->
+    <div v-if="showPostDialog" class="dialog-mask" @click.self="showPostDialog=false">
+      <div class="dialog-box">
+        <div class="dialog-title">发帖 · {{ sectionName }}</div>
+        <input v-model="postTitle" class="dialog-input single" placeholder="标题..." maxlength="40"/>
+        <textarea v-model="postContent" class="dialog-input" placeholder="正文..." rows="4"></textarea>
+        <div class="dialog-btns">
+          <button class="dialog-btn cancel" @click="showPostDialog=false">取消</button>
+          <button class="dialog-btn confirm" @click="onPost" :disabled="!postTitle.trim()||!postContent.trim()">发布</button>
+        </div>
+      </div>
+    </div>
   </div>
 
   <!-- ============ SETTINGS MENU ============ -->
@@ -480,6 +503,9 @@ const currentView = ref<'desktop'|'forum'|'settings'|'career'|'dungeon'>('deskto
 const settingsPage = ref('')
 const activeThread = ref<ForumThread|null>(null)
 const replyDraft = ref('')
+const showPostDialog = ref(false)
+const postTitle = ref('')
+const postContent = ref('')
 const isDragging = ref(false)
 const deviceMode = ref('desktop')
 const userDragged = ref(false)
@@ -535,6 +561,7 @@ const presetWallpapers = [
 ]
 
 const sectionThreads = computed(() => store.threads.filter(t=>t.section===store.activeSection))
+const sectionName = computed(() => SECTIONS.find(s=>s.key===store.activeSection)?.label || store.activeSection)
 const playerTier = computed(() => {
   const pr = store.playerRank; if (!pr) return -1
   const lv = Number(pr.lv); if (lv<=20) return 0; if (lv<=40) return 1; if (lv<=60) return 2; if (lv<=80) return 3; return 4
@@ -594,6 +621,13 @@ async function sendReply(){
 }
 function toggleWb(name:string){const i=store.settings.selectedWorldbooks.indexOf(name);if(i>=0)store.settings.selectedWorldbooks.splice(i,1);else store.settings.selectedWorldbooks.push(name)}
 async function onRefresh(){lastErrorSection.value=store.activeSection;await store.refreshSection(store.activeSection)}
+async function onExtractInfluence(){await store.extractInfluence()}
+function onPost(){
+  if(!postTitle.value.trim()||!postContent.value.trim()||!store.activeSection)return
+  const thread = store.createThread(store.activeSection, postTitle.value, postContent.value)
+  postTitle.value='';postContent.value='';showPostDialog.value=false
+  activeThread.value=thread
+}
 function openCareer() { currentView.value = 'career'; careerView.value = 'list'; viewingPlan.value = null; viewingRoadmap.value = null; careerStore.lastError = '' }
 function openDungeon() { currentView.value = 'dungeon'; dungeonView.value = 'list'; viewingDungeon.value = null; dungeonStore.lastError = '' }
 // ============ 副本攻略向导 ============
@@ -736,7 +770,7 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .corridor-end{position:absolute;top:30%;left:25%;right:25%;bottom:25%;background:radial-gradient(ellipse at center,rgba(200,40,25,0.2),transparent 70%);animation:endBreathe 3s ease-in-out infinite}
 @keyframes fleshPulse{0%,100%{opacity:0.7}50%{opacity:1}}
 @keyframes endBreathe{0%,100%{opacity:0.5;transform:scale(1)}50%{opacity:0.9;transform:scale(1.03)}}
-.app-grid{position:relative;z-index:2;display:flex;justify-content:center;gap:36px;padding-top:80px;}
+.app-grid{position:relative;z-index:2;display:flex;flex-wrap:wrap;justify-content:center;align-content:flex-start;gap:20px 28px;padding:60px 20px 0;}
 .app-icon-wrapper{display:flex;flex-direction:column;align-items:center;gap:8px;cursor:pointer;transition:transform 0.15s;&:active{transform:scale(0.88)}}
 .app-icon{width:60px;height:60px;border-radius:15px;display:flex;align-items:center;justify-content:center;box-shadow:0 6px 20px rgba(0,0,0,0.5);transition:box-shadow 0.2s;.app-icon-wrapper:hover &{box-shadow:0 8px 30px rgba(0,0,0,0.7),0 0 20px rgba(180,40,40,0.35)}svg{width:28px;height:28px;color:var(--amber-d)}}
 .forum-icon{background:linear-gradient(135deg,#3a1a10,#201008);border:1.5px solid rgba(240,208,128,0.25)}
@@ -758,6 +792,15 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .section-tabs{display:flex;gap:2px;padding:6px 4px;flex-shrink:0;overflow-x:auto;flex-wrap:wrap;&::-webkit-scrollbar{height:2px}&::-webkit-scrollbar-thumb{background:rgba(120,80,40,0.4)}}
 .section-tab{flex-shrink:0;display:flex;align-items:center;gap:3px;padding:5px 8px;border:1px solid transparent;background:transparent;color:var(--chalk-d);font-size:10px;cursor:pointer;border-radius:4px;transition:all 0.2s;white-space:nowrap;&:hover{color:var(--chalk);border-color:rgba(120,80,40,0.25)}&.active{color:var(--amber);background:rgba(180,40,40,0.12);border-color:rgba(180,40,40,0.3)}.tab-icon{font-size:12px}.tab-label{font-size:10px}}
 .refresh-tab{border-color:rgba(100,140,180,0.3);color:#8ab4d8;&:hover{border-color:rgba(100,140,180,0.6);color:#a0c8e8}&:disabled{opacity:0.4}}
+.influence-tab{border-color:rgba(240,200,80,0.3);color:#d8c060;&:hover{border-color:rgba(240,200,80,0.6);color:#f0d080}&:disabled{opacity:0.4}&.hasEvents{border-color:rgba(240,200,80,0.6);background:rgba(240,200,80,0.12);color:#f0d080}.influence-badge{background:rgba(240,200,80,0.25);color:#f0d080;font-size:9px;border-radius:8px;padding:0 5px;line-height:14px}}
+.influence-panel{padding:8px 10px;margin:4px 8px;background:rgba(240,200,80,0.06);border:1px solid rgba(240,200,80,0.25);border-radius:8px}
+.infl-title{display:flex;justify-content:space-between;align-items:center;font-size:11px;color:#f0d080;margin-bottom:6px;font-weight:600}
+.infl-clear{background:transparent;border:none;color:#d8c060;font-size:10px;cursor:pointer;&:hover{color:#f0d080;text-decoration:underline}}
+.infl-item{display:flex;align-items:flex-start;gap:6px;padding:3px 0;font-size:11px;color:var(--chalk);line-height:1.4}
+.infl-dot{color:#f0d080;font-size:8px;margin-top:4px}
+.infl-text{flex:1}
+.infl-impact{font-size:9px;color:#d8c060;white-space:nowrap;margin-top:2px}
+.infl-hint{font-size:10px;color:var(--chalk-d);opacity:0.6;margin-top:4px}
 .spinning{animation:spin 1s linear infinite}@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 
 // ============ THREAD CARDS ============
@@ -769,6 +812,10 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .tc-meta{display:flex;gap:10px;font-size:10px;color:var(--chalk-d);margin-bottom:4px}
 .tc-hot{font-size:10px;color:var(--amber-d);background:rgba(180,40,40,0.08);padding:4px 8px;border-radius:4px;line-height:1.4;border-left:2px solid rgba(180,40,40,0.35)}
 .hot-label{margin-right:4px}.hot-author{color:var(--amber);font-weight:500}.hot-likes{margin-left:6px;color:var(--chalk-d)}
+.thread-card.mine{background:rgba(240,200,80,0.07);border-left:2px solid rgba(240,200,80,0.5);.tc-title{color:#f0d080}}
+.post-bar{flex-shrink:0;padding:8px 12px;display:flex;justify-content:center;background:rgba(30,20,14,0.6)}
+.post-btn{width:100%;padding:9px;background:rgba(240,200,80,0.12);border:1px solid rgba(240,200,80,0.3);color:#d8c060;font-size:12px;border-radius:8px;cursor:pointer;letter-spacing:1px;transition:all 0.2s;&:hover{background:rgba(240,200,80,0.22);border-color:rgba(240,200,80,0.5)}}
+.dialog-input.single{margin-bottom:8px;height:36px;resize:none}
 
 // ============ RANKINGS ============
 .rank-tabs{display:flex;gap:4px;padding:6px 8px;flex-shrink:0}

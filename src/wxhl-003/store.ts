@@ -70,6 +70,19 @@ const REPLY_LIST_SCHEMA = {
   }
 }
 
+// 玩家影响事件筛选
+const INFLUENCE_SCHEMA = {
+  name: 'player_influence', value: {
+    type:'object', properties:{ events:{ type:'array', items:{ type:'object', properties:{
+      event:{type:'string'},        // 事件一句话描述
+      impact:{type:'string'},       // 影响力评估
+      section:{type:'string'},      // 建议影响的论坛分区
+      nickname:{type:'string'},     // 其他契约者对该玩家的称呼/称号
+    }, required:['event','impact','section'] } } },
+    required:['events']
+  }
+}
+
 // ================================================================
 // JSON 提取：支持直接、markdown 代码块、裸 JSON
 // ================================================================
@@ -174,6 +187,9 @@ export const useForumStore = defineStore('forum', () => {
   const loadingModels = ref(false)
   const allWorldbookNames = ref<string[]>([])
   const worldbookLoaded = ref(false)
+  const influenceEvents = ref<{event:string,impact:string,section:string,nickname?:string}[]>([])
+  const influenceAnalyzing = ref(false)
+  const influenceError = ref('')
 
   // ---- Models & Test ----
   async function fetchModels(cfg: ApiConfig) {
@@ -222,6 +238,85 @@ export const useForumStore = defineStore('forum', () => {
     return parts.join('\n\n')
   }
 
+  // ---- 读取玩家变量 ----
+  function readPlayerData(): string {
+    try {
+      let vars: any = {}
+      try { const mid = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : -1; if (mid && mid !== -1) vars = getVariables?.({ type:'message', message_id:mid }) ?? {} } catch (_) {}
+      if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type:'message', message_id:-1 }) ?? {} } catch (_) {} }
+      if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type:'chat' }) ?? {} } catch (_) {} }
+      const character = vars?.stat_data?.契约者
+      if (!character) return ''
+
+      const parts: string[] = []
+      const h = character?.头部
+      if (h?.姓名) parts.push('契约者: ' + h.姓名)
+      if (h?.等级) parts.push('等级: Lv.' + h.等级)
+      if (h?.阶位) parts.push('阶位: ' + h.阶位)
+      if (h?.所属势力) parts.push('势力: ' + h.所属势力)
+      if (character?.职业?.名称) parts.push('职业: ' + character.职业.名称 + (character.职业.稀有度 ? '('+character.职业.稀有度+')' : ''))
+      if (character?.属性) parts.push('属性: ' + JSON.stringify(character.属性))
+      if (character?.称号) parts.push('称号: ' + JSON.stringify(character.称号))
+      return parts.join('\n')
+    } catch (_) { return '' }
+  }
+
+  // ---- 读取最近聊天记录 ----
+  function readRecentChat(count = 20): string {
+    try {
+      if (typeof getChatMessages !== 'function') return ''
+      const msgs = getChatMessages(-count)
+      if (!msgs || msgs.length === 0) return ''
+      const lines = msgs.map(m => {
+        const role = m.role === 'user' ? '玩家' : (m.role === 'system' ? '系统' : m.name || 'AI')
+        const text = (m.message || '').replace(/<[^>]*>/g, '').slice(0, 500)
+        return '[' + role + ']: ' + text
+      })
+      return lines.join('\n')
+    } catch (_) { return '' }
+  }
+
+  // ---- 提取玩家影响事件 ----
+  async function extractInfluence() {
+    const cfg = getActiveCfg(settings)
+    if (!cfg.url || !cfg.apiKey) { influenceError.value = '请先在设置中配置API'; return }
+    influenceAnalyzing.value = true; influenceError.value = ''
+    try {
+      const playerData = readPlayerData()
+      const chat = readRecentChat(20)
+      const wb = await getWorldbookContent()
+      const prompt = `你是无限回廊论坛的情报分析师。契约者最近在回廊中经历了一些事件，你需要判断哪些事件值得在论坛上被其他契约者讨论。
+
+【玩家当前状态】
+${playerData || '（未检测到）'}
+
+【最近剧情记录】
+${chat || '（未检测到）'}
+
+【世界观参考】
+${wb || WORLD_SUMMARY}
+
+【判断标准】
+- 只提取"够格上论坛"的事件：重大战绩/惨败、影响势力格局、稀有掉落、隐藏任务突破、晋升阶位、获得稀有职业、出名或丢人的事迹等
+- 排除日常琐事：买了个普通装备、吃了顿饭、普通对话、日常练级等鸡毛蒜皮的事
+- 如果最近没有值得讨论的事件，返回空数组 events
+
+【任务要求】
+返回JSON，events数组，每个元素包含：
+- event: 事件一句话描述（第三人称，站在其他契约者视角）
+- impact: 影响力评估（大/中/小 + 一句话理由）
+- section: 最适合讨论该事件的分区（complaints/intel/dungeon/build/trade 之一）
+- nickname: 其他契约者可能因此给该玩家起的称呼或称号（可选）`
+      const raw = await aiGenerate(cfg, prompt, INFLUENCE_SCHEMA)
+      const data = extractJSON(raw)
+      const events: any[] = Array.isArray(data) ? data : (data.events || [])
+      influenceEvents.value = events.filter(e => e && e.event && e.section)
+    } catch (e: any) { influenceError.value = e.message || '分析失败' }
+    finally { influenceAnalyzing.value = false }
+  }
+
+  function clearInfluence() { influenceEvents.value = []; influenceError.value = '' }
+
   // ---- Section refresh ----
   const secNames: Record<string,string> = {
     complaints:'契约者吐槽区', intel:'势力情报分享区', dungeon:'副本经历分享区', build:'构筑分享区', trade:'装备道具交易区',
@@ -231,17 +326,25 @@ export const useForumStore = defineStore('forum', () => {
 
   function buildRefreshPrompt(sectionKey: string, worldbookText: string): string {
     const worldCtx = worldbookText || ''
+    // 玩家影响注入
+    let influenceCtx = ''
+    if (influenceEvents.value.length > 0) {
+      const relevant = influenceEvents.value.filter(e => !e.section || e.section === sectionKey)
+      if (relevant.length > 0) {
+        influenceCtx = '\n【最近圈内大事】\n' + relevant.map(e => '- ' + e.event + (e.impact ? '（影响力：' + e.impact + '）' : '') + (e.nickname ? '——契约者被称作「' + e.nickname + '」' : '')).join('\n') + '\n请让生成的帖子自然地讨论这些事件，可以有部分帖子围绕这些大事展开。'
+      }
+    }
 
     const prompts: Record<string, string> = {
-      complaints: '你是无限回廊论坛「契约者吐槽区」的活跃用户。以不同契约者口吻生成8条吐槽帖。\n必须遵守：每条帖子涉及不同的主模块或副模块，8条覆盖至少6个不同模块。吐槽要有具体场景：被投进【赛博朋克】+【绝症倒计时】差点嗑药嗑死、在【洪荒神话】+【全员禁魔】被凡人追着砍。也可吐槽势力、CR系统、队友。语气真实接地气，像论坛骂街，严禁重复。作者昵称要有创意。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY,
+      complaints: '你是无限回廊论坛「契约者吐槽区」的活跃用户。以不同契约者口吻生成8条吐槽帖。\n必须遵守：每条帖子涉及不同的主模块或副模块，8条覆盖至少6个不同模块。吐槽要有具体场景：被投进【赛博朋克】+【绝症倒计时】差点嗑药嗑死、在【洪荒神话】+【全员禁魔】被凡人追着砍。也可吐槽势力、CR系统、队友。语气真实接地气，像论坛骂街，严禁重复。作者昵称要有创意。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY + influenceCtx,
 
-      intel: '你是无限回廊论坛「势力情报分享区」的资深分析员。以不同契约者口吻生成8条情报帖。\n必须遵守：每条分析不同的势力动态、模块策略或系统机制。情报要有具体数据。可分析特定模块组合的最优策略。语气理性客观，热评要有质疑或补充。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY,
+      intel: '你是无限回廊论坛「势力情报分享区」的资深分析员。以不同契约者口吻生成8条情报帖。\n必须遵守：每条分析不同的势力动态、模块策略或系统机制。情报要有具体数据。可分析特定模块组合的最优策略。语气理性客观，热评要有质疑或补充。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY + influenceCtx,
 
-      dungeon: '你是无限回廊论坛「副本经历分享区」的闯关者。以不同契约者口吻生成8条副本经历帖。\n必须遵守：每条帖子=一个具体副本经历，8条覆盖至少6个不同主模块。必须包含：副本来源(具体作品名)、主模块类型、副模块、副本类型、具体战斗/解谜过程、奖励收获。经历要有戏剧性。严禁重复相同副本来源。语气像亲身经历。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY,
+      dungeon: '你是无限回廊论坛「副本经历分享区」的闯关者。以不同契约者口吻生成8条副本经历帖。\n必须遵守：每条帖子=一个具体副本经历，8条覆盖至少6个不同主模块。必须包含：副本来源(具体作品名)、主模块类型、副模块、副本类型、具体战斗/解谜过程、奖励收获。经历要有戏剧性。严禁重复相同副本来源。语气像亲身经历。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY + influenceCtx,
 
-      build: '你是无限回廊论坛「构筑分享区」的配装研究者。以不同契约者口吻生成8条构筑帖。\n必须遵守：每条讨论针对特定模块类型的构筑方案。必须包含属性分配/推荐职业/核心装备/适合模块类型/实战测试数据。覆盖不同流派。数据要具体，流派间要有争论，热评要有反驳。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY,
+      build: '你是无限回廊论坛「构筑分享区」的配装研究者。以不同契约者口吻生成8条构筑帖。\n必须遵守：每条讨论针对特定模块类型的构筑方案。必须包含属性分配/推荐职业/核心装备/适合模块类型/实战测试数据。覆盖不同流派。数据要具体，流派间要有争论，热评要有反驳。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY + influenceCtx,
 
-      trade: '你是无限回廊论坛「装备道具交易区」的买卖双方。以不同契约者口吻生成8条交易帖。\n必须遵守：一半出售一半求购。物品要具体且来源明确。必须包含物品名称+品质+属性加成+来源副本+价格(UP币)。评论要有砍价竞价。语气真实。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY,
+      trade: '你是无限回廊论坛「装备道具交易区」的买卖双方。以不同契约者口吻生成8条交易帖。\n必须遵守：一半出售一半求购。物品要具体且来源明确。必须包含物品名称+品质+属性加成+来源副本+价格(UP币)。评论要有砍价竞价。语气真实。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY + influenceCtx,
     }
     return prompts[sectionKey] || ''
   }
@@ -338,14 +441,37 @@ export const useForumStore = defineStore('forum', () => {
     finally{rankRefreshing.value=false}
   }
 
+  // ---- 玩家发帖 ----
+  function createThread(sectionKey: string, title: string, content: string) {
+    const now = Date.now()
+    const d = new Date(now)
+    const time = d.getMonth()+1+'月'+d.getDate()+'日 '+String(d.getHours()).padStart(2,'0')+':'+String(d.getMinutes()).padStart(2,'0')
+    const thread: ForumThread = {
+      id: now,
+      section: sectionKey,
+      title: title.trim(),
+      preview: content.trim().slice(0, 80),
+      author: '我',
+      replies: 0,
+      time,
+      hotComment: '', hotAuthor: '', hotLikes: 0,
+      posts: [{ id: now+1, floor: 1, author: '我', time, content: content.trim(), depth: 0 }],
+    }
+    // 插入到该分区列表顶部
+    threads.value = [thread, ...threads.value]
+    return thread
+  }
+
   function init() { loadWorldbookList() }
 
   return {
     settings, activeSection, threads, rankIndex, playerRank, rankRefreshing,
     refreshing, generating, replying, lastError,
     testing, testResult, models, loadingModels, allWorldbookNames, worldbookLoaded,
+    influenceEvents, influenceAnalyzing, influenceError,
     init, loadWorldbookList, fetchModels, testConnection,
     refreshSection, refreshRankings, generateThreadDetail, generateReplies, getWorldbookContent,
+    extractInfluence, clearInfluence, createThread,
   }
 })
 
