@@ -1,6 +1,6 @@
 import { type ForumThread, type ForumPost, INITIAL_THREADS, RANK_BOARDS, type CareerPlan, type CareerRoadmap, type PlanType, type DungeonStrategy, type Faction, type DungeonMode, CAREER_SYSTEM_RULES, WORLD_SUMMARY } from './data'
 import { WORKSHOP_WORLDBOOK_NAME, PvPSaveSchema, type WorkshopCard, type PvPSave } from './data'
-import { extractContractSave, buildIntroPrompt, tierOf } from './workshop'
+import { extractContractSave, buildIntroPrompt, tierOf, generateDefaultAppearance, buildBattleIntroMessage } from './workshop'
 
 const SK = 'wxhl003_settings'
 
@@ -1546,9 +1546,85 @@ export const useWorkshopStore = defineStore('workshop', () => {
     }
   }
 
+  // ---- 作者收录 ----
+  const authorDraft = ref('')
+  const previewSave = ref<PvPSave | null>(null)
+  const authorError = ref('')
+
+  function previewPaste(text: string) {
+    authorDraft.value = text
+    authorError.value = ''
+    previewSave.value = null
+    try {
+      previewSave.value = PvPSaveSchema.parse(JSON.parse(text))
+    } catch (e: any) {
+      authorError.value = '存档 JSON 解析失败: ' + (e?.message || e)
+    }
+  }
+
+  async function writeToWorldbook(): Promise<boolean> {
+    if (!previewSave.value) { authorError.value = '请先校验存档'; return false }
+    try {
+      const save = previewSave.value
+      const name = save.契约者.头部.姓名 || '未命名契约者'
+      await createWorldbookEntries(WORKSHOP_WORLDBOOK_NAME, [{
+        name,
+        enabled: false,
+        content: JSON.stringify(save),
+      }])
+      toastr.success('已收录契约者「' + name + '」')
+      previewSave.value = null
+      authorDraft.value = ''
+      await loadContracts()
+      return true
+    } catch (e: any) {
+      authorError.value = '写入世界书失败: ' + (e?.message || e)
+      return false
+    }
+  }
+
+  async function removeContract(name: string) {
+    try {
+      await deleteWorldbookEntries(WORKSHOP_WORLDBOOK_NAME, entry => entry.name === name)
+      toastr.success('已移除契约者「' + name + '」')
+      await loadContracts()
+    } catch (e: any) {
+      toastr.error('移除失败: ' + (e?.message || e))
+    }
+  }
+
+  // ---- 发起对战 ----
+  async function startBattle(card: WorkshopCard): Promise<boolean> {
+    try {
+      await waitGlobalInitialized('Mvu')
+      const enemy = {
+        外貌: card.外貌 || generateDefaultAppearance(card.save.契约者.装备),
+        头部: card.save.契约者.头部,
+        属性: card.save.契约者.属性,
+        衍生属性: card.save.契约者.衍生属性,
+        职业: card.save.契约者.职业,
+        通用技能: card.save.契约者.通用技能,
+        装备: card.save.契约者.装备,
+      }
+      // 用当前楼层（与 readPlayerData 探测模式一致；脚本环境 getCurrentMessageId 可用）
+      const message_id = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : 'latest'
+      const mvu = Mvu.getMvuData({ type: 'message', message_id })
+      _.set(mvu, 'stat_data.契约者.当前敌人.' + card.name, enemy)
+      await Mvu.replaceMvuData(mvu, { type: 'message', message_id })
+      await createChatMessages([{ role: 'assistant', message: buildBattleIntroMessage(card) }])
+      toastr.success('对战开始！对手已写入')
+      return true
+    } catch (e: any) {
+      toastr.error('发起对战失败: ' + (e?.message || e))
+      return false
+    }
+  }
+
   return {
     contracts, loadingContracts, worldbookError, mySave, extracting,
     aiIntroEnabled, introGenerating,
     loadContracts, extractMySave, generateIntro, downloadMySave,
+    authorDraft, previewSave, authorError,
+    previewPaste, writeToWorldbook, removeContract, startBattle,
   }
 })
