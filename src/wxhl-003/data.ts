@@ -222,7 +222,7 @@ export const RANK_BOARDS: RankBoard[] = [
   {
     key: '玄榜', title: '玄榜（三阶 Lv.41~60）· 第21赛季',
     items: [
-      { rank:'1', name:'「雷切」', lv:'60', team:'APJC' },
+      { rank:'1', name:'「玄榜之首·绝剑道子」', lv:'60', team:'特管局' },
       { rank:'2', name:'「黄金猎犬」', lv:'60', team:'瑞辰基金会' },
       { rank:'3', name:'「暴风突击」', lv:'60', team:'OETA' },
       { rank:'4', name:'「铁壁」', lv:'60', team:'特管局' },
@@ -629,3 +629,70 @@ export const CAREER_SYSTEM_RULES = `# 职业系统:
 
 /** 世界观模块摘要（与论坛共享） */
 export const WORLD_SUMMARY = '无限回廊副本系统（40主模块×40副模块×3副本类型）：主模块: 低武江湖/高武大荒/古典修仙/洪荒神话/东方志异/诡异民俗/日常都市/都市异能/黑帮谍战/智斗博弈/现代怪异/超凡竞技/硬核科幻/太空歌剧/赛博朋克/废土生存/机甲巨兽/末日生化/智械危机/星际虫灾/低魔中世纪/高魔史诗/蒸汽维多利亚/暗黑魂系/暗黑哥特/魔法学院/克苏鲁神话/异常收容/规则怪谈/梦核超现实/童话反转/阈限空间/VR游戏/历史演义/美漫超英/Galgame向/深渊地狱/热血王道/黄文里番/荒诞喜剧。副模块: 大逃杀/绝境求生/天灾降临/绝症倒计时/狩猎靶标/狼人背叛/卧底潜伏/声望崩塌/阵营对抗/禁止杀戮/密室解谜/时间轮回/叙述诡计/连环凶案/因果逆转/据点塔防/两军对垒/斩首行动/护送任务/资源争夺/地牢深潜/巨物围猎/碎片拼凑/怪物图鉴/遗迹破译/全员禁魔/科技锁死/属性压制/原著附身/多方乱战/白手起家/权欲交易/领地建设/表里世界/移动迷宫/寻宝竞速/信仰掠夺/身份替换/筹码赌局/剧本演出。副本类型: 和平/阵营/血腥。CR难度: 漠视→观察→关注→重视→期待→炼狱。势力: 特管局/恶魔旅团/方舟集团/瑞辰基金会/神圣教会/零号局/OETA/APJC/EJSSA。奖励: UP货币/EXP/装备(白蓝紫金)/技能卷轴/RP/职业书/称号'
+
+// ================================================================
+// PvP 竞技场 · 创意工坊
+// ================================================================
+export const WORKSHOP_WORLDBOOK_NAME = '契约者角色库'
+export const CONTRACT_SAVE_KEYS = ['头部','属性','衍生属性','职业','通用技能','装备'] as const
+export const TIER_ORDER = ['1阶','2阶','3阶','4阶','5阶','超脱'] as const
+
+// 四维属性（基础/加成/自定义/实际共用结构）
+const PvpAttr = z.object({
+  STR: z.coerce.number().prefault(0),
+  AGI: z.coerce.number().prefault(0),
+  CON: z.coerce.number().prefault(0),
+  PER: z.coerce.number().prefault(0),
+}).prefault({})
+
+/** PvP 存档校验 schema：六字段 + 外貌/简介/上传者，属性.实际自动重算 */
+export const PvPSaveSchema = z.object({
+  契约者: z.looseObject({
+    头部: z.looseObject({
+      姓名: z.string().prefault(''),
+      等级: z.coerce.number().prefault(1),
+      阶位: z.string().prefault('一阶'),
+      军衔: z.string().prefault('列兵'),
+      CR: z.coerce.number().prefault(3),
+    }).prefault({}),
+    属性: z.looseObject({
+      基础: PvpAttr,
+      加成: PvpAttr,
+      自定义加成: PvpAttr,
+    }).prefault({}).transform(d => ({
+      ...d,
+      实际: {
+        STR: (d.基础?.STR || 0) + (d.加成?.STR || 0) + (d.自定义加成?.STR || 0),
+        AGI: (d.基础?.AGI || 0) + (d.加成?.AGI || 0) + (d.自定义加成?.AGI || 0),
+        CON: (d.基础?.CON || 0) + (d.加成?.CON || 0) + (d.自定义加成?.CON || 0),
+        PER: (d.基础?.PER || 0) + (d.加成?.PER || 0) + (d.自定义加成?.PER || 0),
+      },
+    })),
+    衍生属性: z.looseObject({}).prefault({}),
+    职业: z.looseObject({
+      名称: z.string().prefault('无'),
+      稀有度: z.string().prefault('无'),
+      转职阶段: z.string().prefault('无'),
+      职业等级: z.coerce.number().prefault(0),
+    }).prefault({}),
+    通用技能: z.record(z.string(), z.any()).prefault({}),
+    装备: z.looseObject({}).prefault({}),
+  }).prefault({}),
+  外貌: z.string().prefault(''),
+  简介: z.string().prefault(''),
+  上传者: z.string().prefault(''),
+})
+export type PvPSave = z.output<typeof PvPSaveSchema>
+
+/** 竞技场列表展示用契约者卡片 */
+export interface WorkshopCard {
+  name: string
+  阶位: string
+  等级: number
+  军衔: string
+  职业: string
+  简介: string
+  上传者: string
+  外貌: string
+  save: PvPSave
+}
