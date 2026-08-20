@@ -1,4 +1,6 @@
 import { type ForumThread, type ForumPost, INITIAL_THREADS, RANK_BOARDS, type CareerPlan, type CareerRoadmap, type PlanType, type DungeonStrategy, type Faction, type DungeonMode, CAREER_SYSTEM_RULES, WORLD_SUMMARY } from './data'
+import { WORKSHOP_WORLDBOOK_NAME, PvPSaveSchema, type WorkshopCard, type PvPSave } from './data'
+import { extractContractSave, buildIntroPrompt, tierOf } from './workshop'
 
 const SK = 'wxhl003_settings'
 
@@ -1430,5 +1432,123 @@ ${feedback}
   return {
     dungeons, generatingV1, generatingV2, lastError,
     createDungeon, modifyDungeon, rerollDungeon, confirmDungeon, deleteDungeon,
+  }
+})
+
+// ================================================================
+// PvP 竞技场 · 创意工坊
+// ================================================================
+
+export const useWorkshopStore = defineStore('workshop', () => {
+  const contracts = ref<WorkshopCard[]>([])
+  const loadingContracts = ref(false)
+  const worldbookError = ref('')
+  const mySave = ref<PvPSave | null>(null)
+  const extracting = ref(false)
+  const aiIntroEnabled = ref(true)
+  const introGenerating = ref(false)
+
+  /** 读世界书「契约者角色库」→ 解析为卡片列表（按阶位分组、组内等级降序） */
+  async function loadContracts() {
+    loadingContracts.value = true
+    worldbookError.value = ''
+    try {
+      // 注意：条目 enabled 字段不影响读取——契约者库条目按设计均为 enabled:false（不进 AI 上下文），但 getWorldbook 会返回全部条目
+      const entries = await getWorldbook(WORKSHOP_WORLDBOOK_NAME)
+      const cards: WorkshopCard[] = []
+      let bad = 0
+      for (const e of entries) {
+        try {
+          const save = PvPSaveSchema.parse(JSON.parse(e.content))
+          const h = save.契约者.头部
+          const 职 = save.契约者.职业
+          cards.push({
+            name: h.姓名 || e.name || '未知契约者',
+            阶位: h.阶位 || '一阶',
+            等级: h.等级 || 1,
+            军衔: h.军衔 || '列兵',
+            职业: 职.名称 || '无',
+            简介: save.简介 || '',
+            上传者: save.上传者 || '',
+            外貌: save.外貌 || '',
+            save,
+          })
+        } catch (_) { bad++ }
+      }
+      if (bad > 0) toastr.warning(`契约者角色库有 ${bad} 条条目损坏，已跳过`)
+      contracts.value = cards.sort((a, b) => {
+        const t = tierOf(a.阶位) - tierOf(b.阶位)
+        return t !== 0 ? t : b.等级 - a.等级
+      })
+    } catch (e: any) {
+      // 世界书尚不存在（新装）→ 视为空库，显示空态引导
+      contracts.value = []
+      worldbookError.value = ''
+    } finally { loadingContracts.value = false }
+  }
+
+  /** 读取当前玩家契约者 → 摘六字段为我的构筑 */
+  async function extractMySave(): Promise<boolean> {
+    extracting.value = true
+    try {
+      let vars: any = {}
+      try {
+        const mid = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : -1
+        if (mid && mid !== -1) vars = getVariables?.({ type: 'message', message_id: mid }) ?? {}
+      } catch (_) {}
+      if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type: 'message', message_id: -1 }) ?? {} } catch (_) {} }
+      if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type: 'chat' }) ?? {} } catch (_) {} }
+      const character = vars?.stat_data?.契约者
+      if (!character) { toastr.warning('未检测到玩家契约者数据'); return false }
+      // extractContractSave 返回顶层六字段 {头部,...}，需包进 {契约者:{...}} 才能被 PvPSaveSchema 解析
+      const save = PvPSaveSchema.parse({ 契约者: extractContractSave(character) })
+      mySave.value = save
+      return true
+    } catch (e: any) {
+      toastr.error('提取构筑失败: ' + (e?.message || e))
+      return false
+    } finally { extracting.value = false }
+  }
+
+  /** AI 生成一句话简介写入 mySave.简介 */
+  async function generateIntro() {
+    const save = mySave.value
+    if (!save) return
+    const forumStore = useForumStore()
+    const cfg = getActiveCfg(forumStore.settings)
+    if (!cfg.url || !cfg.apiKey) { toastr.warning('请先在终端设置中配置 API'); return }
+    introGenerating.value = true
+    try {
+      const raw = await aiGenerate(cfg, buildIntroPrompt(save))
+      save.简介 = (typeof raw === 'string' ? raw : (raw as any).content || '').trim().slice(0, 60)
+    } catch (e: any) {
+      toastr.error('生成简介失败: ' + (e?.message || e))
+    } finally { introGenerating.value = false }
+  }
+
+  /** 校验后下载存档为 .json 文件 */
+  function downloadMySave() {
+    if (!mySave.value) return
+    try {
+      const validated = PvPSaveSchema.parse(mySave.value)
+      const blob = new Blob([JSON.stringify(validated, null, 2)], { type: 'application/json' })
+      const url = URL.createObjectURL(blob)
+      const a = document.createElement('a')
+      a.href = url
+      a.download = (validated.契约者.头部.姓名 || '契约者') + '_构筑存档.json'
+      document.body.appendChild(a)
+      a.click()
+      document.body.removeChild(a)
+      URL.revokeObjectURL(url)
+      toastr.success('构筑存档已下载')
+    } catch (e: any) {
+      toastr.error('存档校验失败: ' + (e?.message || e))
+    }
+  }
+
+  return {
+    contracts, loadingContracts, worldbookError, mySave, extracting,
+    aiIntroEnabled, introGenerating,
+    loadContracts, extractMySave, generateIntro, downloadMySave,
   }
 })
