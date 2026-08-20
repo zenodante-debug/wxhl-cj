@@ -468,12 +468,86 @@
 </div>
 
 </div></div></Transition>
+
+  <!-- ============ PVP ARENA ============ -->
+  <div v-if="currentView==='arena'&&arenaView==='list'" class="app-page">
+    <div class="app-header"><button class="hdr-btn" @click="goDesktop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button><span class="hdr-title">PvP竞技场</span><span class="hdr-spacer"></span></div>
+
+    <!-- 我的构筑区 -->
+    <div class="scroll-area arena-my">
+      <div class="set-block">
+        <div class="set-label">我的构筑</div>
+        <div v-if="workshopStore.mySave" class="my-save-preview">
+          <div class="ms-name">{{ workshopStore.mySave.契约者.头部.姓名 || '未命名' }} · Lv.{{ workshopStore.mySave.契约者.头部.等级 ?? 0 }}</div>
+          <div class="ms-meta">{{ workshopStore.mySave.契约者.头部.阶位 || '一阶' }} · {{ workshopStore.mySave.契约者.职业.名称 || '无职业' }}</div>
+        </div>
+        <div class="set-row arena-actions">
+          <button class="fab-btn arena-upload" @click="onExtractSave" :disabled="workshopStore.extracting">{{ workshopStore.extracting ? '提取中...' : '上传角色构筑' }}</button>
+          <button v-if="workshopStore.mySave" class="fab-btn arena-edit" @click="openArenaEdit()">编辑构筑</button>
+          <button v-if="workshopStore.mySave" class="fab-btn arena-dl" @click="workshopStore.downloadMySave()">下载存档</button>
+        </div>
+      </div>
+      <div class="set-block">
+        <div class="set-label">AI 生成简介</div>
+        <label class="wb-row toggle-row"><input type="checkbox" v-model="workshopStore.aiIntroEnabled"/><span>提取后自动生成一句话简介（可关）</span></label>
+      </div>
+    </div>
+
+    <!-- 对手列表 -->
+    <div class="arena-section-label">契约者对手库</div>
+    <div v-if="workshopStore.loadingContracts" class="gen-overlay"><div class="gen-spinner"></div><span>读取契约者角色库...</span></div>
+    <template v-else>
+      <div v-if="workshopStore.worldbookError" class="refresh-err">{{ workshopStore.worldbookError }}</div>
+      <div v-else-if="workshopStore.contracts.length===0" class="empty-state">
+        <div class="empty-icon">⚔️</div>
+        <div class="empty-text">契约者角色库为空</div>
+        <div class="empty-sub">作者可在「终端设置 → 收录契约者」添加对手；或玩家先上传自己的构筑发给作者</div>
+      </div>
+      <div v-else class="scroll-area">
+        <template v-for="g in tieredContracts" :key="g.tier">
+          <div class="tier-label">{{ g.label }}</div>
+          <div v-for="c in g.cards" :key="c.name" class="contract-card" @click="viewingCard=c;arenaView='detail'">
+            <div class="cc-top"><span class="cc-name">{{ c.name }}</span><span class="cc-lv">Lv.{{ c.等级 }}</span></div>
+            <div class="cc-meta">{{ c.军衔 }} · {{ c.职业 }}</div>
+            <div v-if="c.简介" class="cc-intro">{{ c.简介 }}</div>
+            <div class="cc-foot"><span>{{ c.上传者 || '匿名' }}</span><span class="cc-tag">{{ c.阶位 }}</span></div>
+          </div>
+        </template>
+      </div>
+    </template>
+  </div>
+
+  <!-- 构筑编辑页（模块化结构化表单） -->
+  <div v-if="currentView==='arena'&&arenaView==='edit'&&workshopStore.mySave" class="app-page">
+    <div class="app-header"><button class="hdr-btn" @click="arenaView='list'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button><span class="hdr-title">编辑构筑</span><span class="hdr-spacer"></span></div>
+    <div class="scroll-area arena-edit-form">
+      <!-- 外貌栏（可选） -->
+      <div class="set-block">
+        <div class="set-label">外貌（可选，不填则对战时自动用装备生成）</div>
+        <textarea v-model="workshopStore.mySave.外貌" class="dialog-input" rows="2" placeholder="如：身披黑色风衣、腰间别着长刀的冷面契约者"></textarea>
+      </div>
+      <!-- 简介栏 -->
+      <div class="set-block">
+        <div class="set-label">简介（可手改 AI 生成结果）</div>
+        <textarea v-model="workshopStore.mySave.简介" class="dialog-input" rows="2" placeholder="一句话卖点"></textarea>
+      </div>
+      <!-- 六模块表单 -->
+      <div v-for="mod in editModules" :key="mod.key" class="set-block edit-module">
+        <div class="set-label">{{ mod.label }}</div>
+        <EditableObject :value="workshopStore.mySave.契约者[mod.key]" @update:value="v => (workshopStore.mySave.契约者[mod.key] = v)"/>
+      </div>
+      <div class="set-row arena-actions" style="margin-top:12px">
+        <button class="fab-btn arena-dl" @click="workshopStore.downloadMySave()">校验并下载</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
 import { useForumStore, useCareerStore, useDungeonStore, useWorkshopStore } from './store'
-import { SECTIONS, RANK_BOARDS, type ForumThread, type CareerPlan, type CareerRoadmap, type DungeonStrategy, type Faction, type DungeonMode, type WorkshopCard, DUNGEON_MODES } from './data'
+import { SECTIONS, RANK_BOARDS, type ForumThread, type CareerPlan, type CareerRoadmap, type DungeonStrategy, type Faction, type DungeonMode, type WorkshopCard, DUNGEON_MODES, TIER_ORDER } from './data'
 import ApiFields from './ApiFields.vue'
+import EditableObject from './EditableObject.vue'
 
 const store = useForumStore()
 const careerStore = useCareerStore()
@@ -532,6 +606,30 @@ const dungeonModifyId = ref(0)
 // ============ 竞技场状态 ============
 const arenaView = ref<'list' | 'detail' | 'edit'>('list')
 const viewingCard = ref<WorkshopCard | null>(null)
+
+// ============ 构筑编辑 · 六字段模块 ============
+const editModules = [
+  { key: '头部', label: '头部' },
+  { key: '属性', label: '属性' },
+  { key: '衍生属性', label: '衍生属性' },
+  { key: '职业', label: '职业' },
+  { key: '通用技能', label: '通用技能' },
+  { key: '装备', label: '装备' },
+]
+// 存档 schema 的 阶位 prefault 为中文「一阶」，而 TIER_ORDER 用阿拉伯数字「1阶」；
+// 归一化后再分组，避免默认「一阶」卡被归到末尾（tierOf('一阶') 落在数组尾）
+const CN_TIER: Record<string, string> = { '一阶': '1阶', '二阶': '2阶', '三阶': '3阶', '四阶': '4阶', '五阶': '5阶' }
+const normTier = (t: string) => CN_TIER[t] || t
+const tieredContracts = computed(() => {
+  const map: Record<string, WorkshopCard[]> = {}
+  for (const c of workshopStore.contracts) { (map[normTier(c.阶位)] ||= []).push(c) }
+  return TIER_ORDER.map((label, i) => ({ label, tier: i, cards: map[label] || [] })).filter(g => g.cards.length > 0)
+})
+async function onExtractSave() {
+  const ok = await workshopStore.extractMySave()
+  if (ok && workshopStore.aiIntroEnabled) await workshopStore.generateIntro()
+  if (ok) arenaView.value = 'edit'
+}
 
 const dialogPlaceholder = computed(() => {
   if (showModifyDialog.value) return '输入修改意见...\n例如：把稀有度改成蓝色、副职业换成忍者相关的...'
@@ -942,4 +1040,26 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .confirm-btn{width:100%;padding:12px;background:rgba(180,40,40,0.2);border:1px solid rgba(180,40,40,0.4);color:var(--amber);font-size:13px;border-radius:8px;cursor:pointer;letter-spacing:1px;transition:all 0.2s;&:hover{background:rgba(180,40,40,0.35)}&:disabled{opacity:0.3;cursor:default}&.modify{background:rgba(100,140,180,0.15);border-color:rgba(100,140,180,0.3);color:#90c0e0;margin-top:6px;&:hover{background:rgba(100,140,180,0.3)}}&.reroll{background:rgba(160,120,40,0.15);border-color:rgba(160,120,40,0.3);color:#d0b070;margin-top:6px;&:hover{background:rgba(160,120,40,0.3)}}}
 .confirm-hint{font-size:10px;color:var(--chalk-d);margin-top:8px;opacity:0.6;line-height:1.4}
 .hdr-btn.del{svg{color:rgba(200,80,60,0.7)}&:hover{background:rgba(180,40,40,0.2);svg{color:#f06050}}}
+
+// ============ PVP ARENA ============
+.arena-my{padding:12px}
+.arena-actions{flex-wrap:wrap}
+.arena-upload{background:rgba(180,40,40,0.15);border-color:rgba(180,40,40,0.35)}
+.arena-edit{background:rgba(120,80,40,0.15);border-color:rgba(140,100,40,0.35)}
+.arena-dl{background:rgba(40,120,80,0.15);border-color:rgba(60,140,100,0.35)}
+.arena-section-label{font-size:11px;color:var(--amber);padding:8px 12px 4px;letter-spacing:1px}
+.tier-label{font-size:10px;color:var(--chalk-d);padding:8px 12px 4px;opacity:0.8}
+.contract-card{padding:12px 14px;cursor:pointer;border-bottom:1px solid rgba(80,40,20,0.18);transition:background 0.1s;&:hover{background:rgba(255,255,255,0.03)}}
+.cc-top{display:flex;justify-content:space-between;align-items:center}
+.cc-name{font-size:13px;color:var(--chalk);font-weight:600}
+.cc-lv{font-size:10px;color:var(--amber)}
+.cc-meta{font-size:10px;color:var(--chalk-d);margin-top:2px}
+.cc-intro{font-size:11px;color:var(--chalk);margin-top:4px;line-height:1.4}
+.cc-foot{display:flex;justify-content:space-between;font-size:10px;color:var(--chalk-d);margin-top:6px;opacity:0.7}
+.cc-tag{color:var(--amber)}
+.my-save-preview{background:rgba(40,120,80,0.1);border:1px solid rgba(60,140,100,0.3);border-radius:8px;padding:8px 10px;margin-bottom:8px}
+.ms-name{font-size:13px;color:var(--chalk);font-weight:600}
+.ms-meta{font-size:10px;color:var(--chalk-d);margin-top:2px}
+.toggle-row{cursor:pointer;display:flex;align-items:center;gap:6px;color:var(--chalk-d);font-size:11px}
+.edit-module{margin-bottom:14px}
 </style>
