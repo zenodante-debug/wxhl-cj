@@ -23,6 +23,7 @@
       <div class="app-icon-wrapper" @click="openSettings"><div class="app-icon settings-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="12" cy="12" r="3"/><path d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"/></svg></div><span class="app-label">终端设置</span></div>
 <div class="app-icon-wrapper" @click="openCareer"><div class="app-icon career-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><span class="app-label">职业规划</span></div>
       <div class="app-icon-wrapper" @click="openDungeon"><div class="app-icon dungeon-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L20 6v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg></div><span class="app-label">副本攻略</span></div>
+      <div class="app-icon-wrapper" @click="openArena"><div class="app-icon arena-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 3L3 7v6l4 4h6l4-4V7l-4-4H7z"/><path d="M7 7l3 3m2-3l3 3"/><path d="M12 10l3 6M12 10l-3 6"/></svg></div><span class="app-label">PvP竞技场</span></div>
     </div>
     <div class="desktop-footer"><span>◆ 无 限 回 廊 ◆</span></div>
   </div>
@@ -470,13 +471,14 @@
 </template>
 
 <script setup lang="ts">
-import { useForumStore, useCareerStore, useDungeonStore } from './store'
-import { SECTIONS, RANK_BOARDS, type ForumThread, type CareerPlan, type CareerRoadmap, type DungeonStrategy, type Faction, type DungeonMode, DUNGEON_MODES } from './data'
+import { useForumStore, useCareerStore, useDungeonStore, useWorkshopStore } from './store'
+import { SECTIONS, RANK_BOARDS, type ForumThread, type CareerPlan, type CareerRoadmap, type DungeonStrategy, type Faction, type DungeonMode, type WorkshopCard, DUNGEON_MODES } from './data'
 import ApiFields from './ApiFields.vue'
 
 const store = useForumStore()
 const careerStore = useCareerStore()
 const dungeonStore = useDungeonStore()
+const workshopStore = useWorkshopStore()
 const SK = 'wxhl003_btn_pos'
 
 // ============ 视口尺寸（visualViewport → 自身 → 父窗口回退）============
@@ -499,7 +501,7 @@ function getVH():number{
 
 // ============ 状态 ============
 const expanded = ref(false)
-const currentView = ref<'desktop'|'forum'|'settings'|'career'|'dungeon'>('desktop')
+const currentView = ref<'desktop'|'forum'|'settings'|'career'|'dungeon'|'arena'>('desktop')
 const settingsPage = ref('')
 const activeThread = ref<ForumThread|null>(null)
 const replyDraft = ref('')
@@ -526,6 +528,10 @@ const dungeonStep = ref<'faction' | 'choice' | 'goal' | 'mode'>('faction')
 const dungeonGoal = ref('')
 const dungeonMode = ref<DungeonMode>('speedrun')
 const dungeonModifyId = ref(0)
+
+// ============ 竞技场状态 ============
+const arenaView = ref<'list' | 'detail' | 'edit'>('list')
+const viewingCard = ref<WorkshopCard | null>(null)
 
 const dialogPlaceholder = computed(() => {
   if (showModifyDialog.value) return '输入修改意见...\n例如：把稀有度改成蓝色、副职业换成忍者相关的...'
@@ -630,6 +636,8 @@ function onPost(){
 }
 function openCareer() { currentView.value = 'career'; careerView.value = 'list'; viewingPlan.value = null; viewingRoadmap.value = null; careerStore.lastError = '' }
 function openDungeon() { currentView.value = 'dungeon'; dungeonView.value = 'list'; viewingDungeon.value = null; dungeonStore.lastError = '' }
+function openArena() { currentView.value = 'arena'; arenaView.value = 'list'; viewingCard.value = null; workshopStore.worldbookError = ''; workshopStore.loadContracts() }
+function openArenaEdit() { currentView.value = 'arena'; arenaView.value = 'edit' }
 // ============ 副本攻略向导 ============
 function openDungeonWizard() {
   dungeonStep.value = 'faction'
@@ -881,6 +889,7 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 // ============ CAREER ICON ============
 .career-icon{background:linear-gradient(135deg,#2a2010,#1a1008);border:1.5px solid rgba(200,180,100,0.25)}
 .dungeon-icon{background:linear-gradient(135deg,#1a1420,#0c0810);border:1.5px solid rgba(140,100,200,0.25)}
+.arena-icon{background:linear-gradient(135deg,#1a2220,#0c1210);border:1.5px solid rgba(120,180,200,0.25)}
 
 // ============ DIALOG ============
 .dialog-mask{position:absolute;inset:0;z-index:30;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center}
