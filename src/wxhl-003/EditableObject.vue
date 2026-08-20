@@ -4,8 +4,17 @@ defineOptions({ name: 'EditableObject' })
 const props = defineProps<{ value: any }>()
 const emit = defineEmits<{ (e: 'update:value', v: any): void }>()
 const local = ref(klona(props.value ?? {}))
-watch(() => props.value, v => { local.value = klona(v ?? {}) })
-watch(local, v => emit('update:value', klona(v)), { deep: true })
+watch(() => props.value, v => {
+  // 仅在内容真正变化时重同步，避免回写后 props 引用变化再次触发深监听 → 死循环
+  const next = klona(v ?? {})
+  if (!_.isEqual(local.value, next)) local.value = next
+})
+watch(local, v => {
+  // 若本轮内容与 props 一致，说明变化来自 props 重同步而非用户编辑，跳过上行
+  const next = klona(v)
+  if (_.isEqual(next, props.value)) return
+  emit('update:value', next)
+}, { deep: true })
 function isObj(v: any) { return v && typeof v === 'object' && !Array.isArray(v) }
 function isNum(v: any) { return typeof v === 'number' }
 function set(path: string[], val: any) {

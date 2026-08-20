@@ -623,6 +623,8 @@ const normTier = (t: string) => CN_TIER[t] || t
 const tieredContracts = computed(() => {
   const map: Record<string, WorkshopCard[]> = {}
   for (const c of workshopStore.contracts) { (map[normTier(c.阶位)] ||= []).push(c) }
+  // 组内按等级降序（store 的 tierOf('一阶')=6 会把默认中文阶位卡排到末尾，重新分组后需组内重排）
+  for (const k of Object.keys(map)) map[k].sort((a, b) => b.等级 - a.等级)
   return TIER_ORDER.map((label, i) => ({ label, tier: i, cards: map[label] || [] })).filter(g => g.cards.length > 0)
 })
 async function onExtractSave() {
