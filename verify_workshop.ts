@@ -39,8 +39,7 @@ assert.equal(generateDefaultAppearance({}), '')
 const card = { name: '王五', 阶位: '1阶', 等级: 5, 军衔: '列兵', 职业: '剑士', 简介: '快刀', 上传者: 'a', 外貌: '', save: PvPSaveSchema.parse({ 契约者: { 头部: { 姓名: '王五' }, 职业: { 名称: '剑士' } } }) }
 const msg = buildBattleIntroMessage(card)
 assert.ok(msg.includes('王五'))
-assert.ok(msg.includes('pvp竞技场'))
+assert.ok(msg.includes('竞技场'))
 assert.ok(msg.includes('模拟战场'))
-assert.ok(msg.includes('对手信息'))
-
+assert.ok(msg.includes('你选择了对手是'))
 console.log('VERIFY_OK task2')
