@@ -1606,8 +1606,13 @@ export const useWorkshopStore = defineStore('workshop', () => {
         通用技能: card.save.契约者.通用技能,
         装备: card.save.契约者.装备,
       }
-      // 用当前楼层（与 readPlayerData 探测模式一致；脚本环境 getCurrentMessageId 可用）
-      const message_id = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : 'latest'
+      // 用当前楼层（与 extractMySave/readPlayerData 探测模式一致）。全局脚本 iframe 无楼层上下文，
+      // getCurrentMessageId() 调用会抛错 → try/catch 吞掉后回退 -1（最新楼层）
+      let message_id: number | 'latest' = -1
+      try {
+        const mid = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : -1
+        if (mid && mid !== -1) message_id = mid
+      } catch (_) {}
       const mvu = Mvu.getMvuData({ type: 'message', message_id })
       // 数组路径：每个元素都是字面量 key，名字含「.」（如 J.K.罗琳）不会被 lodash 当作层级分隔，且只写这一条路径（不清空不覆盖）
       _.set(mvu, ['stat_data', '契约者', '当前敌人', card.name], enemy)
