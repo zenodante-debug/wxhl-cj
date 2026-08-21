@@ -492,8 +492,6 @@
   </template>
 </div>
 
-</div></div></Transition>
-
   <!-- ============ PVP ARENA ============ -->
   <div v-if="currentView==='arena'&&arenaView==='list'" class="app-page">
     <div class="app-header"><button class="hdr-btn" @click="goDesktop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button><span class="hdr-title">PvP竞技场</span><span class="hdr-spacer"></span></div>
@@ -609,6 +607,8 @@
       </div>
     </div>
   </div>
+
+</div></div></Transition>
 </template>
 
 <script setup lang="ts">
