@@ -118,6 +118,7 @@
       <button class="menu-btn" @click="settingsPage='api'"><span class="menu-icon">🔌</span><span>API 设置</span><span class="menu-arrow">›</span></button>
       <button class="menu-btn" @click="settingsPage='worldbook'"><span class="menu-icon">📖</span><span>世界书设置</span><span class="menu-arrow">›</span></button>
       <button class="menu-btn" @click="settingsPage='wallpaper'"><span class="menu-icon">🖼️</span><span>壁纸设置</span><span class="menu-arrow">›</span></button>
+      <button class="menu-btn" @click="settingsPage='workshop-author'"><span class="menu-icon">🗃️</span><span>收录契约者</span><span class="menu-arrow">›</span></button>
     </div>
   </div>
 
@@ -159,6 +160,30 @@
             <span class="wp-preset-label">{{ wp.name }}</span>
           </div>
         </div>
+      </div>
+    </div>
+  </div>
+
+  <div v-if="currentView==='settings'&&settingsPage==='workshop-author'" class="app-page">
+    <div class="app-header"><button class="hdr-btn" @click="settingsPage=''"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button><span class="hdr-title">收录契约者</span><span class="hdr-spacer"></span></div>
+    <div class="scroll-area settings-inner">
+      <div class="set-block">
+        <div class="set-label">粘贴玩家存档 JSON</div>
+        <textarea v-model="workshopStore.authorDraft" class="dialog-input" rows="8" placeholder='{"契约者":{...},"外貌":"...","简介":"...","上传者":"..."}' @input="workshopStore.previewPaste(workshopStore.authorDraft)"></textarea>
+        <div v-if="workshopStore.authorError" class="set-err">{{ workshopStore.authorError }}</div>
+        <div v-if="workshopStore.previewSave" class="author-preview">
+          <div class="ap-name">{{ workshopStore.previewSave.契约者.头部.姓名 }} · Lv.{{ workshopStore.previewSave.契约者.头部.等级 }} · {{ workshopStore.previewSave.契约者.头部.阶位 }}</div>
+          <div class="ap-meta">{{ workshopStore.previewSave.契约者.职业.名称 || '无职业' }}</div>
+        </div>
+        <button class="test-btn" @click="workshopStore.writeToWorldbook()" :disabled="!workshopStore.previewSave">写入世界书</button>
+      </div>
+      <div class="set-block">
+        <div class="set-label">当前契约者库</div>
+        <div v-for="c in workshopStore.contracts" :key="c.name" class="wb-row">
+          <span class="wb-name">{{ c.name }} · {{ c.阶位 }} · Lv.{{ c.等级 }}</span>
+          <button class="author-del" @click="onRemoveContract(c.name)">移除</button>
+        </div>
+        <button class="wb-load-btn" @click="workshopStore.loadContracts()">🔄 刷新列表</button>
       </div>
     </div>
   </div>
@@ -541,6 +566,49 @@
       </div>
     </div>
   </div>
+
+  <!-- 对手详情页 -->
+  <div v-if="currentView==='arena'&&arenaView==='detail'&&viewingCard" class="app-page">
+    <div class="app-header"><button class="hdr-btn" @click="arenaView='list'"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button><span class="hdr-title">{{ viewingCard.name }}</span><span class="hdr-spacer"></span></div>
+    <div class="scroll-area arena-detail">
+      <div class="set-block">
+        <div class="set-label">契约者信息</div>
+        <div class="cd-name">{{ viewingCard.name }} <span class="cd-tag">{{ viewingCard.阶位 }}</span></div>
+        <div class="cd-meta">Lv.{{ viewingCard.等级 }} · {{ viewingCard.军衔 }} · {{ viewingCard.职业 }}</div>
+        <div v-if="viewingCard.外貌" class="cd-appearance">外貌：{{ viewingCard.外貌 }}</div>
+        <div v-if="viewingCard.简介" class="cd-intro">{{ viewingCard.简介 }}</div>
+        <div class="cd-foot">上传者：{{ viewingCard.上传者 || '匿名' }}</div>
+      </div>
+      <div v-if="viewingCard.save.契约者.职业.名称" class="set-block">
+        <div class="set-label">职业</div>
+        <div class="cd-job">{{ viewingCard.save.契约者.职业.名称 }}（{{ viewingCard.save.契约者.职业.稀有度 || '未知' }}）</div>
+        <div v-if="viewingCard.save.契约者.职业.转职阶段" class="cd-sub">{{ viewingCard.save.契约者.职业.转职阶段 }}</div>
+      </div>
+      <div v-if="viewingCard.save.契约者.属性.实际" class="set-block">
+        <div class="set-label">属性</div>
+        <div class="cd-attrs"><span>STR {{ viewingCard.save.契约者.属性.实际.STR ?? 0 }}</span><span>AGI {{ viewingCard.save.契约者.属性.实际.AGI ?? 0 }}</span><span>CON {{ viewingCard.save.契约者.属性.实际.CON ?? 0 }}</span><span>PER {{ viewingCard.save.契约者.属性.实际.PER ?? 0 }}</span></div>
+      </div>
+      <div v-if="Object.keys(viewingCard.save.契约者.装备||{}).length" class="set-block">
+        <div class="set-label">装备</div>
+        <div v-for="(slot,sk) in viewingCard.save.契约者.装备" :key="sk" class="cd-slot"><span class="cd-slot-name">{{ sk }}</span><span>{{ slot?.名称 || '无' }}</span></div>
+      </div>
+    </div>
+    <div class="arena-bottom-bar">
+      <button class="fab-btn arena-battle" @click="showBattleConfirm=true">⚔️ 发起对战</button>
+    </div>
+  </div>
+
+  <!-- 对战确认弹窗 -->
+  <div v-if="currentView==='arena'&&showBattleConfirm" class="dialog-mask" @click.self="showBattleConfirm=false">
+    <div class="dialog-box">
+      <div class="dialog-title">发起对战</div>
+      <div class="dialog-body">将把「{{ viewingCard?.name }}」写入当前敌人数据，并开始对战。确定吗？</div>
+      <div class="dialog-btns">
+        <button class="dialog-btn cancel" @click="showBattleConfirm=false">取消</button>
+        <button class="dialog-btn confirm" @click="onStartBattle">发起</button>
+      </div>
+    </div>
+  </div>
 </template>
 
 <script setup lang="ts">
@@ -606,6 +674,15 @@ const dungeonModifyId = ref(0)
 // ============ 竞技场状态 ============
 const arenaView = ref<'list' | 'detail' | 'edit'>('list')
 const viewingCard = ref<WorkshopCard | null>(null)
+const showBattleConfirm = ref(false)
+async function onStartBattle() {
+  if (!viewingCard.value) return
+  const ok = await workshopStore.startBattle(viewingCard.value)
+  if (ok) { showBattleConfirm.value = false; collapse() }
+}
+async function onRemoveContract(name: string) {
+  if (window.confirm('确认移除契约者「' + name + '」？')) await workshopStore.removeContract(name)
+}
 
 // ============ 构筑编辑 · 六字段模块 ============
 const editModules = [
@@ -1064,4 +1141,24 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .ms-meta{font-size:10px;color:var(--chalk-d);margin-top:2px}
 .toggle-row{cursor:pointer;display:flex;align-items:center;gap:6px;color:var(--chalk-d);font-size:11px}
 .edit-module{margin-bottom:14px}
+
+// ============ ARENA DETAIL / AUTHOR ============
+.arena-detail{padding:12px}
+.cd-name{font-size:15px;color:var(--chalk);font-weight:700;display:flex;align-items:center;gap:6px}
+.cd-tag{font-size:10px;color:var(--amber);border:1px solid rgba(180,40,40,0.4);border-radius:3px;padding:1px 5px}
+.cd-meta{font-size:11px;color:var(--chalk-d);margin-top:4px}
+.cd-appearance{font-size:11px;color:var(--chalk);margin-top:6px;line-height:1.4}
+.cd-intro{font-size:12px;color:var(--chalk);margin-top:8px;padding:8px;background:rgba(180,40,40,0.08);border-radius:6px}
+.cd-foot{font-size:10px;color:var(--chalk-d);margin-top:6px;opacity:0.7}
+.cd-job{font-size:12px;color:var(--chalk);font-weight:500}
+.cd-sub{font-size:11px;color:var(--chalk-d);margin-top:2px}
+.cd-attrs{display:flex;gap:10px;flex-wrap:wrap;font-size:12px;color:var(--chalk)}
+.cd-slot{display:flex;justify-content:space-between;font-size:11px;color:var(--chalk-d);padding:2px 0;border-bottom:1px dashed rgba(80,40,20,0.15)}
+.cd-slot-name{color:var(--amber)}
+.arena-bottom-bar{padding:8px 12px;flex-shrink:0;background:rgba(30,20,14,0.95);border-top:1px solid rgba(80,40,20,0.35)}
+.arena-battle{width:100%;background:rgba(180,40,40,0.2);border-color:rgba(180,40,40,0.5);font-size:14px}
+.author-preview{background:rgba(40,120,80,0.1);border:1px solid rgba(60,140,100,0.3);border-radius:6px;padding:8px 10px;margin:8px 0}
+.ap-name{font-size:13px;color:var(--chalk);font-weight:600}
+.ap-meta{font-size:10px;color:var(--chalk-d);margin-top:2px}
+.author-del{background:none;border:1px solid rgba(180,40,40,0.4);color:#d06050;border-radius:4px;font-size:10px;padding:2px 8px;cursor:pointer;margin-left:auto}
 </style>
