@@ -1617,7 +1617,8 @@ export const useWorkshopStore = defineStore('workshop', () => {
       // 数组路径：每个元素都是字面量 key，名字含「.」（如 J.K.罗琳）不会被 lodash 当作层级分隔，且只写这一条路径（不清空不覆盖）
       _.set(mvu, ['stat_data', '契约者', '当前敌人', card.name], enemy)
       await Mvu.replaceMvuData(mvu, { type: 'message', message_id })
-      await createChatMessages([{ role: 'assistant', message: buildBattleIntroMessage(card) }])
+      // 以玩家身份发送挑战消息（player 视角引导 AI 抽取副本作为模拟战场）
+      await createChatMessages([{ role: 'user', message: buildBattleIntroMessage(card) }])
       toastr.success('对战开始！对手已写入')
       return true
     } catch (e: any) {

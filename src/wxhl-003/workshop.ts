@@ -46,18 +46,19 @@ export function buildIntroPrompt(save: any): string {
 【属性】STR${attr.STR ?? 0} / AGI${attr.AGI ?? 0} / CON${attr.CON ?? 0} / PER${attr.PER ?? 0}`
 }
 
-/** 发起对战时插入正文的对手登场描述 */
+/** 发起对战时玩家发出的挑战消息（player 视角，引导 AI 抽取副本作为模拟战场） */
 export function buildBattleIntroMessage(card: WorkshopCard): string {
   const h = card.save?.契约者?.头部 || {}
   const 职 = card.save?.契约者?.职业 || {}
   const lines = [
-    '在回廊主城的 PvP 竞技场，一名契约者向你发起了挑战！',
+    `你进入了回廊主城的pvp竞技场，选择了契约者「${card.name}」作为你的对手，请从副本生成模块里抽取一个副本作为模拟战场，只作为模拟战场环境而不是作为副本：`,
     '',
-    `【对手：${card.name}】${h.阶位 ? '（' + h.阶位 + '）' : ''}`,
+    '【对手信息】',
+    `姓名：${card.name}（${h.阶位 || '一阶'}）`,
+    `等级：Lv.${h.等级 ?? 0} · ${h.军衔 || '列兵'}`,
   ]
-  if (card.外貌) lines.push('外貌：' + card.外貌)
   if (职.名称) lines.push('职业：' + 职.名称 + (职.稀有度 && 职.稀有度 !== '无' ? '（' + 职.稀有度 + '）' : ''))
+  if (card.外貌) lines.push('外貌：' + card.外貌)
   if (card.简介) lines.push('简介：' + card.简介)
-  lines.push('', '对战开始！')
   return lines.join('\n')
 }
