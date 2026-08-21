@@ -56,7 +56,7 @@ export function buildBattleIntroMessage(card: WorkshopCard): string {
     `【对手：${card.name}】${h.阶位 ? '（' + h.阶位 + '）' : ''}`,
   ]
   if (card.外貌) lines.push('外貌：' + card.外貌)
-  if (职.名称) lines.push('职业：' + 职.名称 + (职.稀有度 ? '（' + 职.稀有度 + '）' : ''))
+  if (职.名称) lines.push('职业：' + 职.名称 + (职.稀有度 && 职.稀有度 !== '无' ? '（' + 职.稀有度 + '）' : ''))
   if (card.简介) lines.push('简介：' + card.简介)
   lines.push('', '对战开始！')
   return lines.join('\n')

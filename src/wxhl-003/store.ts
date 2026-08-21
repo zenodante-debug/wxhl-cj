@@ -1481,9 +1481,9 @@ export const useWorkshopStore = defineStore('workshop', () => {
         return t !== 0 ? t : b.等级 - a.等级
       })
     } catch (e: any) {
-      // 世界书尚不存在（新装）→ 视为空库，显示空态引导
+      // 读取失败：保留空库并透出真实错误（世界书不存在 / API / 权限等），避免误判为「契约者角色库为空」
       contracts.value = []
-      worldbookError.value = ''
+      worldbookError.value = e?.message || '读取世界书失败'
     } finally { loadingContracts.value = false }
   }
 
@@ -1609,7 +1609,8 @@ export const useWorkshopStore = defineStore('workshop', () => {
       // 用当前楼层（与 readPlayerData 探测模式一致；脚本环境 getCurrentMessageId 可用）
       const message_id = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : 'latest'
       const mvu = Mvu.getMvuData({ type: 'message', message_id })
-      _.set(mvu, 'stat_data.契约者.当前敌人.' + card.name, enemy)
+      // 数组路径：每个元素都是字面量 key，名字含「.」（如 J.K.罗琳）不会被 lodash 当作层级分隔，且只写这一条路径（不清空不覆盖）
+      _.set(mvu, ['stat_data', '契约者', '当前敌人', card.name], enemy)
       await Mvu.replaceMvuData(mvu, { type: 'message', message_id })
       await createChatMessages([{ role: 'assistant', message: buildBattleIntroMessage(card) }])
       toastr.success('对战开始！对手已写入')

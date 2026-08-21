@@ -702,7 +702,10 @@ const tieredContracts = computed(() => {
   for (const c of workshopStore.contracts) { (map[normTier(c.阶位)] ||= []).push(c) }
   // 组内按等级降序（store 的 tierOf('一阶')=6 会把默认中文阶位卡排到末尾，重新分组后需组内重排）
   for (const k of Object.keys(map)) map[k].sort((a, b) => b.等级 - a.等级)
-  return TIER_ORDER.map((label, i) => ({ label, tier: i, cards: map[label] || [] })).filter(g => g.cards.length > 0)
+  // 已知阶位按 TIER_ORDER 顺序排列；未知阶位（如未来新增的六阶/试炼阶等）追加为末尾「其他」组，避免契约者被静默丢弃
+  const tiered = TIER_ORDER.map((label, i) => ({ label, tier: i, cards: map[label] || [] })).filter(g => g.cards.length > 0)
+  const rest = Object.keys(map).filter(k => !TIER_ORDER.includes(k))
+  return tiered.concat(rest.map(k => ({ label: k, tier: TIER_ORDER.length, cards: map[k] })))
 })
 async function onExtractSave() {
   const ok = await workshopStore.extractMySave()
