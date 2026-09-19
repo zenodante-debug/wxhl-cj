@@ -24,6 +24,7 @@
 <div class="app-icon-wrapper" @click="openCareer"><div class="app-icon career-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg></div><span class="app-label">职业规划</span></div>
       <div class="app-icon-wrapper" @click="openDungeon"><div class="app-icon dungeon-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L20 6v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg></div><span class="app-label">副本攻略</span></div>
       <div class="app-icon-wrapper" @click="openArena"><div class="app-icon arena-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 3L3 7v6l4 4h6l4-4V7l-4-4H7z"/><path d="M7 7l3 3m2-3l3 3"/><path d="M12 10l3 6M12 10l-3 6"/></svg></div><span class="app-label">PvP竞技场</span></div>
+      <div class="app-icon-wrapper" @click="openDungeonRoll"><div class="app-icon dungeonroll-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.3"/><circle cx="15.5" cy="8.5" r="1.3"/><circle cx="8.5" cy="15.5" r="1.3"/><circle cx="15.5" cy="15.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/></svg></div><span class="app-label">副本生成</span></div>
     </div>
     <div class="desktop-footer"><span>◆ 无 限 回 廊 ◆</span></div>
   </div>
@@ -492,6 +493,52 @@
   </template>
 </div>
 
+<!-- ============ 副本生成 ============ -->
+<div v-if="currentView==='dungeonRoll'" class="app-page">
+  <div class="app-header"><button class="hdr-btn" @click="goDesktop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button><span class="hdr-title">副本生成</span><span class="hdr-spacer"></span></div>
+
+  <div class="scroll-area">
+    <div v-if="dungeonGenStore.lastError" class="refresh-err">{{ dungeonGenStore.lastError }}</div>
+
+    <div v-if="playerCycleLabel" class="roll-cycle">{{ playerCycleLabel }}</div>
+
+    <button class="roll-btn" :disabled="dungeonGenStore.rolling" @click="onRollDungeon">
+      {{ dungeonGenStore.rolling ? '掷骰中...' : '🎲 掷骰' }}
+    </button>
+
+    <template v-if="dungeonGenStore.latest">
+      <div class="roll-section">
+        <div class="roll-section-title">世界底色与局势</div>
+        <div v-for="r in dungeonGenStore.latest.buildRecords" :key="r.标签" class="roll-row">
+          <span class="roll-label">{{ r.标签 }}</span>
+          <span class="roll-expr">{{ r.表达式 }}</span>
+          <span class="roll-value">{{ r.骰值 }}</span>
+          <span class="roll-map">{{ r.映射 }}</span>
+        </div>
+      </div>
+      <div class="roll-section">
+        <div class="roll-section-title">奖励骰（{{ dungeonGenStore.latest.rewardRecords.length }} 个）</div>
+        <div v-for="r in dungeonGenStore.latest.rewardRecords" :key="r.标签" class="roll-row">
+          <span class="roll-label">{{ r.标签 }}</span>
+          <span class="roll-expr">{{ r.表达式 }}</span>
+          <span class="roll-value">{{ r.骰值 }}</span>
+          <span class="roll-map">{{ r.映射 }}</span>
+        </div>
+      </div>
+      <button class="confirm-btn" :disabled="dungeonGenStore.generating" @click="onGenerateDungeon">
+        {{ dungeonGenStore.generating ? '生成中...' : '生成副本' }}
+      </button>
+    </template>
+
+    <div v-else class="empty-state">
+      <div class="empty-text">尚未掷骰</div>
+      <div class="empty-sub">点上面的按钮掷出副本类型、世界底色、局势、IP 热度与全部奖励骰</div>
+    </div>
+  </div>
+
+  <div v-if="dungeonGenStore.generating" class="gen-overlay"><div class="gen-spinner"></div><span>AI 正在构建副本...</span></div>
+</div>
+
   <!-- ============ PVP ARENA ============ -->
   <div v-if="currentView==='arena'&&arenaView==='list'" class="app-page">
     <div class="app-header"><button class="hdr-btn" @click="goDesktop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button><span class="hdr-title">PvP竞技场</span><span class="hdr-spacer"></span></div>
@@ -612,7 +659,7 @@
 </template>
 
 <script setup lang="ts">
-import { useForumStore, useCareerStore, useDungeonStore, useWorkshopStore } from './store'
+import { useForumStore, useCareerStore, useDungeonStore, useWorkshopStore, useDungeonGenStore } from './store'
 import { SECTIONS, RANK_BOARDS, type ForumThread, type CareerPlan, type CareerRoadmap, type DungeonStrategy, type Faction, type DungeonMode, type WorkshopCard, DUNGEON_MODES, TIER_ORDER } from './data'
 import ApiFields from './ApiFields.vue'
 import EditableObject from './EditableObject.vue'
@@ -621,6 +668,7 @@ const store = useForumStore()
 const careerStore = useCareerStore()
 const dungeonStore = useDungeonStore()
 const workshopStore = useWorkshopStore()
+const dungeonGenStore = useDungeonGenStore()
 const SK = 'wxhl003_btn_pos'
 
 // ============ 视口尺寸（visualViewport → 自身 → 父窗口回退）============
@@ -643,7 +691,7 @@ function getVH():number{
 
 // ============ 状态 ============
 const expanded = ref(false)
-const currentView = ref<'desktop'|'forum'|'settings'|'career'|'dungeon'|'arena'>('desktop')
+const currentView = ref<'desktop'|'forum'|'settings'|'career'|'dungeon'|'arena'|'dungeonRoll'>('desktop')
 const settingsPage = ref('')
 const activeThread = ref<ForumThread|null>(null)
 const replyDraft = ref('')
@@ -683,6 +731,36 @@ async function onStartBattle() {
 async function onRemoveContract(name: string) {
   if (window.confirm('确认移除契约者「' + name + '」？')) await workshopStore.removeContract(name)
 }
+
+// ============ 副本生成 ============
+const playerCycle = ref<number>(1)
+const playerCycleLabel = computed(() =>
+  playerCycle.value === 1
+    ? '当前副本周期 1 · 新手副本 · 强制和平 · 仅 1 名 IP 队友'
+    : `当前副本周期 ${playerCycle.value} · 常规副本`,
+)
+
+function refreshPlayerCycle() {
+  try {
+    let vars: any = {}
+    try {
+      const mid = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : -1
+      if (mid && mid !== -1) vars = getVariables?.({ type: 'message', message_id: mid }) ?? {}
+    } catch (_) {}
+    if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type: 'message', message_id: -1 }) ?? {} } catch (_) {} }
+    if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type: 'chat' }) ?? {} } catch (_) {} }
+    playerCycle.value = Number(vars?.stat_data?.契约者?.赛季信息?.当前副本周期) || 1
+  } catch (_) { playerCycle.value = 1 }
+}
+
+function openDungeonRoll() {
+  currentView.value = 'dungeonRoll'
+  dungeonGenStore.lastError = ''
+  refreshPlayerCycle()
+}
+
+function onRollDungeon() { dungeonGenStore.doRoll() }
+async function onGenerateDungeon() { await dungeonGenStore.generate() }
 
 // ============ 构筑编辑 · 六字段模块 ============
 const editModules = [
@@ -1164,4 +1242,16 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .ap-name{font-size:13px;color:var(--chalk);font-weight:600}
 .ap-meta{font-size:10px;color:var(--chalk-d);margin-top:2px}
 .author-del{background:none;border:1px solid rgba(180,40,40,0.4);color:#d06050;border-radius:4px;font-size:10px;padding:2px 8px;cursor:pointer;margin-left:auto}
+
+// ============ DUNGEON ROLL ============
+.roll-cycle{font-size:11px;color:var(--chalk-d);text-align:center;padding:8px 0}
+.roll-btn{display:block;width:calc(100% - 24px);margin:8px 12px;padding:14px;border:none;border-radius:10px;background:linear-gradient(135deg,#7c3aed,#4c1d95);color:#fff;font-size:15px;font-weight:700;letter-spacing:2px;cursor:pointer;&:disabled{opacity:.5}}
+.roll-section{margin:10px 12px;border:1px solid rgba(120,80,40,.3);border-radius:8px;overflow:hidden}
+.roll-section-title{padding:6px 8px;background:rgba(120,80,40,.18);font-size:11px;font-weight:700}
+.roll-row{display:grid;grid-template-columns:1fr auto auto 1fr;gap:6px;align-items:center;padding:4px 8px;font-size:11px;border-top:1px solid rgba(120,80,40,.12)}
+.roll-label{color:var(--chalk-d);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.roll-expr{color:var(--chalk-d);font-family:monospace;font-size:10px}
+.roll-value{font-weight:700;color:#f0c674;font-family:monospace}
+.roll-map{text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.dungeonroll-icon{background:linear-gradient(135deg,#7c3aed,#4c1d95)}
 </style>
