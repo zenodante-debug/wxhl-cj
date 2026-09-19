@@ -261,6 +261,12 @@ describe('computeSettlement · 第 2 轮补钉', () => {
     expect(() => computeSettlement({ ...基准输入, 阶位: '' }, 满骰())).toThrow();
   });
 
+  it('阶位先 trim（纯空白不该挡掉整次结算）; 「第三阶」不在词汇表里, 仍抛错', () => {
+    expect(computeSettlement({ ...基准输入, 阶位: ' 三阶 ' }, 满骰()).位阶修正).toBe(3);
+    expect(computeSettlement({ ...基准输入, 阶位: '五阶\n' }, 满骰()).位阶修正).toBe(5);
+    expect(() => computeSettlement({ ...基准输入, 阶位: '第三阶' }, 满骰())).toThrow();
+  });
+
   it('评价等级 F 直接抛错（主线失败 = 抹杀, 不进入结算流程）', () => {
     expect(() => computeSettlement({ ...基准输入, 评价等级: 'F' }, 满骰())).toThrow(/抹杀/);
   });

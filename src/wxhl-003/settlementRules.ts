@@ -148,14 +148,17 @@ const 阶位别名: Record<string, string> = {
 const 阶数表: Record<string, number> = { 一阶: 1, 二阶: 2, 三阶: 3, 四阶: 4, 五阶: 5 };
 
 /**
- * 阶位 → 阶数。先归一别名（汉字 / `N阶` / 裸数字 `N`）, **归一后仍不认识就抛错**。
+ * 阶位 → 阶数。先 `trim`、再归一别名（汉字 / `N阶` / 裸数字 `N`）, **归一后仍不认识就抛错**。
+ *
+ * 这里比 `enemyRules.ts:归一位阶` 多一个 `trim`: 那边不 trim 的失败模式是**面板印 `—`**（局部降级,
+ * 记录为 deferred minor）, 这边是**整次结算被挡住** —— 同样的宽容度在两种后果下不是同一个取舍。
+ * `trim` 不可能把合法阶位变成非法（单调安全）, 只会救回纯空白造成的误挡。
  *
  * 绝不 `?? 1` 静默按一阶算 —— 五阶真实是 ×5, 按 ×1 算会让**写进存档的最终 EXP/UP 差 5 倍**,
- * 而玩家拿到的是一个「像真的」的数。口径与 `enemyRules.ts:归一位阶` 一致（那里不可识别时
- * 印 `—`）; 这里更重(它决定存档数值), 所以直接挡住整次结算。
+ * 而玩家拿到的是一个「像真的」的数。
  */
 function 阶数(阶位: string): number {
-  const 归一 = typeof 阶位 === 'string' ? 阶位别名[阶位] : undefined;
+  const 归一 = 阶位别名[String(阶位 ?? '').trim()];
   const n = 归一 === undefined ? undefined : 阶数表[归一];
   if (n === undefined) {
     throw new Error(
