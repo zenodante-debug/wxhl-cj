@@ -12,7 +12,7 @@
 <div v-if="expanded" class="panel-overlay" @click.self="collapse">
 <div ref="panelRef" class="phone-frame" :style="panelAnimStyle">
 
-  <div class="status-bar"><span class="status-time">{{ clockTime }}</span><span class="status-label">◆ 回廊终端</span></div>
+  <div class="status-bar"><span class="status-time">{{ clockTime }}</span><span class="status-label">◆ 回廊终端 · v2</span></div>
   <button class="minimize-btn" @click.stop="collapse"><span></span></button>
 
   <!-- ============ DESKTOP ============ -->
@@ -728,6 +728,7 @@ import { useForumStore, useCareerStore, useDungeonStore, useWorkshopStore, useDu
 import { SECTIONS, RANK_BOARDS, type ForumThread, type CareerPlan, type CareerRoadmap, type DungeonStrategy, type Faction, type DungeonMode, type WorkshopCard, DUNGEON_MODES, TIER_ORDER } from './data'
 import ApiFields from './ApiFields.vue'
 import EditableObject from './EditableObject.vue'
+import { isNewbieDungeon } from './dice'
 
 const store = useForumStore()
 const careerStore = useCareerStore()
@@ -799,8 +800,10 @@ async function onRemoveContract(name: string) {
 
 // ============ 副本生成 ============
 const playerCycle = ref<number>(1)
+// 注: 不能叫 playerTier —— 该名已被下方排行榜的 computed 占用
+const playerTierName = ref<string>('一阶')
 const playerCycleLabel = computed(() =>
-  playerCycle.value === 1
+  isNewbieDungeon(playerCycle.value, playerTierName.value)
     ? '当前副本周期 1 · 新手副本 · 强制和平 · 仅 1 名 IP 队友'
     : `当前副本周期 ${playerCycle.value} · 常规副本`,
 )
@@ -815,8 +818,9 @@ function refreshPlayerCycle() {
     if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type: 'message', message_id: -1 }) ?? {} } catch (_) {} }
     if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type: 'chat' }) ?? {} } catch (_) {} }
     playerCycle.value = Number(vars?.stat_data?.契约者?.赛季信息?.当前副本周期) || 1
+    playerTierName.value = String(vars?.stat_data?.契约者?.头部?.阶位 ?? '') || '一阶'
     playerLevel.value = Number(vars?.stat_data?.契约者?.头部?.等级) || 1
-  } catch (_) { playerCycle.value = 1 }
+  } catch (_) { playerCycle.value = 1; playerTierName.value = '一阶' }
 }
 
 function openDungeonRoll() {

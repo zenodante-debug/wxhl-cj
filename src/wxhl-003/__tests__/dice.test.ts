@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FEATURE_TAGS, SUB_MODULES, ipHeatOf, rollBuild, rollDie } from '../dice';
+import { FEATURE_TAGS, SUB_MODULES, ipHeatOf, rollBuild, rollDie, tierIndexOf } from '../dice';
 
 describe('rollDie', () => {
   it('始终落在 1..faces 内', () => {
@@ -53,7 +53,7 @@ describe('ipHeatOf', () => {
 describe('rollBuild', () => {
   it('新手副本（周期 1）强制和平且不掷副本类型骰', () => {
     for (let i = 0; i < 200; i++) {
-      const { build, records } = rollBuild(1);
+      const { build, records } = rollBuild(1, '一阶');
       expect(build.是新手副本).toBe(true);
       expect(build.副本类型).toBe('和平');
       expect(build.副本类型骰).toBeUndefined();
@@ -64,7 +64,7 @@ describe('rollBuild', () => {
   it('非新手副本会掷副本类型骰，1=和平 2=阵营 3~4=血腥', () => {
     const seen = new Set<string>();
     for (let i = 0; i < 3000; i++) {
-      const { build } = rollBuild(2);
+      const { build } = rollBuild(2, '一阶');
       expect(build.是新手副本).toBe(false);
       expect(build.副本类型骰).toBeGreaterThanOrEqual(1);
       expect(build.副本类型骰).toBeLessThanOrEqual(4);
@@ -83,7 +83,7 @@ describe('rollBuild', () => {
 
   it('日常副本（特色标签 41~50）强制视为和平', () => {
     for (let i = 0; i < 20000; i++) {
-      const { build } = rollBuild(2);
+      const { build } = rollBuild(2, '一阶');
       if (build.是日常副本) {
         expect(build.核心特色标签骰).toBeGreaterThanOrEqual(41);
         expect(build.副本类型).toBe('和平');
@@ -95,16 +95,43 @@ describe('rollBuild', () => {
 
   it('时间限制落在 3~14 天', () => {
     for (let i = 0; i < 2000; i++) {
-      const { build } = rollBuild(3);
+      const { build } = rollBuild(3, '一阶');
       expect(build.时间限制天).toBeGreaterThanOrEqual(3);
       expect(build.时间限制天).toBeLessThanOrEqual(14);
     }
   });
 
   it('记录的骰值与其映射一致', () => {
-    const { build, records } = rollBuild(5);
+    const { build, records } = rollBuild(5, '一阶');
     const tag = records.find(r => r.标签 === '核心特色标签')!;
     expect(tag.骰值).toBe(build.核心特色标签骰);
     expect(tag.映射).toBe(build.核心特色标签);
+  });
+
+  it('周期为 1 但已非一阶 → 不是新手副本', () => {
+    for (let i = 0; i < 200; i++) {
+      const { build } = rollBuild(1, '二阶');
+      expect(build.是新手副本).toBe(false);
+      expect(build.副本类型骰).toBeGreaterThanOrEqual(1);   // 会正常掷 D4
+    }
+  });
+
+  it('一阶但周期不为 1 → 不是新手副本', () => {
+    for (let i = 0; i < 200; i++) {
+      expect(rollBuild(2, '一阶').build.是新手副本).toBe(false);
+    }
+  });
+
+  it('阶位写成 1阶 也认', () => {
+    expect(rollBuild(1, '1阶').build.是新手副本).toBe(true);
+  });
+
+  it('tierIndexOf 归一两种写法, 未知返回 -1', () => {
+    expect(tierIndexOf('一阶')).toBe(0);
+    expect(tierIndexOf('1阶')).toBe(0);
+    expect(tierIndexOf('五阶')).toBe(4);
+    expect(tierIndexOf('5阶')).toBe(4);
+    expect(tierIndexOf('超脱')).toBe(-1);
+    expect(tierIndexOf('')).toBe(-1);
   });
 });

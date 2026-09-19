@@ -101,14 +101,35 @@ export interface BuildRoll {
   是日常副本: boolean;
 }
 
+/** 阶位的两种写法: schema 用汉字, TIER_ORDER 用阿拉伯数字 */
+const TIER_NAMES = ['一阶', '二阶', '三阶', '四阶', '五阶'];
+const TIER_NAMES_ARABIC = ['1阶', '2阶', '3阶', '4阶', '5阶'];
+
+/**
+ * 阶位写法归一: schema 用「一阶」, TIER_ORDER 用「1阶」; 返回 0..4, 未知返回 -1
+ */
+export function tierIndexOf(阶位: string): number {
+  const i = TIER_NAMES.indexOf(阶位);
+  return i !== -1 ? i : TIER_NAMES_ARABIC.indexOf(阶位);
+}
+
+/**
+ * 新手副本判定: 副本周期为 1 **且** 契约者为一阶。
+ * 只看周期会把「已升阶、刚开始新一轮」的老玩家误判为新人。
+ */
+export function isNewbieDungeon(副本周期: number, 阶位: string): boolean {
+  return 副本周期 === 1 && tierIndexOf(阶位) === 0;
+}
+
 /**
  * 掷出全部「构建骰」。
  * 顺序与规则一致: 副本类型 → 媒介来源 → 题材大类 → 时代背景 → 核心特色标签 → 副模块 → IP热度 → 时间限制。
- * @param 副本周期 stat_data.契约者.赛季信息.当前副本周期, ===1 时是新手副本
+ * @param 副本周期 stat_data.契约者.赛季信息.当前副本周期
+ * @param 阶位 stat_data.契约者.头部.阶位, 与副本周期共同决定是否新手副本
  */
-export function rollBuild(副本周期: number): { build: BuildRoll; records: RollRecord[] } {
+export function rollBuild(副本周期: number, 阶位: string): { build: BuildRoll; records: RollRecord[] } {
   const records: RollRecord[] = [];
-  const 是新手副本 = 副本周期 === 1;
+  const 是新手副本 = isNewbieDungeon(副本周期, 阶位);
 
   // ① 副本类型 (D4) —— 新手副本强制和平且不投骰
   let 副本类型骰: number | undefined;

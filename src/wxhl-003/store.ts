@@ -1757,8 +1757,8 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     // 掷骰是「新一次副本」的入口: 清掉历史选中, 否则卡片仍停留在旧条目、看不到刚掷出的骰值
     selectedId.value = null
     try {
-      const { 副本周期 } = readPlayerBrief()
-      const { build, records: buildRecords } = rollBuild(副本周期)
+      const { 副本周期, player } = readPlayerBrief()
+      const { build, records: buildRecords } = rollBuild(副本周期, player.阶位)
       const { rewards, records: rewardRecords } = rollRewards()
       const maxId = rolledDungeons.value.reduce((m, d) => Math.max(m, d.id), 0)
       const entry: RolledDungeon = {
