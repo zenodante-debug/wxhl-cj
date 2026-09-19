@@ -137,9 +137,44 @@
   <div v-if="currentView==='settings'&&settingsPage==='worldbook'" class="app-page">
     <div class="app-header"><button class="hdr-btn" @click="settingsPage=''"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button><span class="hdr-title">世界书设置</span><span class="hdr-spacer"></span></div>
     <div class="scroll-area settings-inner">
+      <div class="set-block">
+        <div class="set-label">世界书方案</div>
+        <div class="set-row">
+          <select class="prof-select" :value="store.settings.activeWorldbookProfile" @change="applyWorldbookProfile(($event.target as HTMLSelectElement).value)">
+            <option value="">（未使用方案）</option>
+            <option v-for="p in store.settings.worldbookProfiles" :key="p.name" :value="p.name">{{ p.name }}</option>
+          </select>
+          <button class="test-btn" @click="saveWorldbookProfile">保存为方案</button>
+          <button class="test-btn" @click="store.settings.activeWorldbookProfile && deleteWorldbookProfile(store.settings.activeWorldbookProfile)">删除方案</button>
+        </div>
+      </div>
       <div class="set-block"><div class="set-label">选择用于AI生成的世界书</div><button class="wb-load-btn" @click="store.loadWorldbookList()">🔄 刷新列表</button>
+        <div class="wb-search-row">
+          <input v-model="wbSearch" type="text" class="wb-search" placeholder="搜索条目名…（100+ 条目时用）"/>
+          <button v-if="wbSearch" class="wb-mini" @click="wbSearch=''">清空</button>
+        </div>
+
         <div v-if="store.allWorldbookNames.length===0" class="set-hint">未检测到世界书</div>
-        <div v-for="name in store.allWorldbookNames" :key="name" class="wb-row" @click="toggleWb(name)"><span class="wb-check" :class="{on:store.settings.selectedWorldbooks.includes(name)}">{{ store.settings.selectedWorldbooks.includes(name)?'☑':'☐' }}</span><span class="wb-name">{{ name }}</span></div>
+        <div v-for="name in store.allWorldbookNames" :key="name" class="wb-block">
+          <div class="wb-row" @click="toggleWb(name)">
+            <span class="wb-check" :class="{on: store.settings.selectedWorldbooks.includes(name)}">{{ store.settings.selectedWorldbooks.includes(name)?'☑':'☐' }}</span>
+            <span class="wb-name">{{ name }}</span>
+            <button class="wb-expand" @click.stop="toggleWbExpand(name)">{{ wbExpanded[name] ? '▾' : '▸' }}</button>
+          </div>
+          <div v-if="wbExpanded[name]" class="wb-entries">
+            <div class="wb-entry-actions">
+              <button class="wb-mini" @click="setVisibleWbEntries(name, wbVisibleEntries(name).map(e=>e.name), true)">全选{{ wbSearch ? '（搜索结果）' : '' }}</button>
+              <button class="wb-mini" @click="setVisibleWbEntries(name, wbVisibleEntries(name).map(e=>e.name), false)">全不选{{ wbSearch ? '（搜索结果）' : '' }}</button>
+              <span class="wb-count">{{ wbVisibleEntries(name).length }} / {{ (wbEntries[name]||[]).length }} 条</span>
+            </div>
+            <div v-if="(wbEntries[name]||[]).length===0" class="set-hint">（该世界书没有条目或读取失败）</div>
+            <div v-else-if="wbVisibleEntries(name).length===0" class="set-hint">（没有匹配「{{ wbSearch }}」的条目）</div>
+            <div v-for="e in wbVisibleEntries(name)" :key="e.name" class="wb-entry" @click="toggleWbEntry(name, e.name)">
+              <span class="wb-check" :class="{on: wbEntryChecked(name, e.name)}">{{ wbEntryChecked(name, e.name)?'☑':'☐' }}</span>
+              <span class="wb-entry-name">{{ e.name }}</span>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
   </div>
@@ -976,6 +1011,94 @@ async function sendReply(){
   await store.generateReplies(activeThread.value)
 }
 function toggleWb(name:string){const i=store.settings.selectedWorldbooks.indexOf(name);if(i>=0)store.settings.selectedWorldbooks.splice(i,1);else store.settings.selectedWorldbooks.push(name)}
+
+// ============ 世界书：条目级勾选 + 搜索 + 方案 ============
+// 条目懒加载：展开某个世界书时才去取它的条目标题（getWorldbook 是异步的）
+const wbEntries = ref<Record<string, { name: string }[]>>({})
+const wbExpanded = ref<Record<string, boolean>>({})
+
+async function toggleWbExpand(name: string) {
+  wbExpanded.value[name] = !wbExpanded.value[name]
+  if (wbExpanded.value[name] && !wbEntries.value[name]) {
+    try {
+      const es = await getWorldbook(name)
+      wbEntries.value[name] = (es || []).map((e: any) => ({ name: e.name }))
+    } catch (_) { wbEntries.value[name] = [] }
+  }
+}
+
+/** null = 整本全取; 数组 = 只取这些 */
+function wbEntryChecked(wb: string, entry: string): boolean {
+  const f = store.settings.worldbookEntryFilter?.[wb]
+  return !f || f.includes(entry)
+}
+
+// ---- 搜索（世界书可能有 100+ 条目，必须能搜）----
+// 语义：一个搜索框全局共用，作用于当前展开的那个世界书的条目列表；
+// 匹配方式为不区分大小写的子串匹配（中文与 <XX系统> 这类都适用）。
+const wbSearch = ref('')
+
+/** 当前显示的条目 = 全部条目按关键词过滤（不区分大小写的子串匹配） */
+function wbVisibleEntries(wb: string): { name: string }[] {
+  const all = wbEntries.value[wb] || []
+  const q = wbSearch.value.trim().toLowerCase()
+  if (!q) return all
+  return all.filter(e => e.name.toLowerCase().includes(q))
+}
+
+function toggleWbEntry(wb: string, entry: string) {
+  if (!store.settings.worldbookEntryFilter) store.settings.worldbookEntryFilter = {}
+  const all = (wbEntries.value[wb] || []).map(e => e.name)
+  const cur = store.settings.worldbookEntryFilter?.[wb]
+  const next = cur ? [...cur] : [...all]          // 从「整本」进入精确模式时，先把当前全选展开
+  const i = next.indexOf(entry)
+  if (i >= 0) next.splice(i, 1); else next.push(entry)
+  // 与全选等价时就退回「整本」，避免存一堆无意义的数组
+  store.settings.worldbookEntryFilter[wb] = next.length === all.length ? null : next
+}
+
+/**
+ * 全选 / 全不选。
+ * ⚠️ 作用对象是**当前搜索过滤后可见的条目**，不是整本 —— 这样「搜关键词 → 全选」可以批量勾选。
+ * @param visible 当前可见的条目名列表
+ */
+function setVisibleWbEntries(wb: string, visible: string[], on: boolean) {
+  if (!store.settings.worldbookEntryFilter) store.settings.worldbookEntryFilter = {}
+  const all = (wbEntries.value[wb] || []).map(e => e.name)
+  const cur = store.settings.worldbookEntryFilter?.[wb]
+  const base = cur ? [...cur] : [...all]          // 从「整本」进入精确模式时先展开成全选
+  const set = new Set(base)
+  for (const n of visible) { if (on) set.add(n); else set.delete(n) }
+  const next = [...set]
+  store.settings.worldbookEntryFilter[wb] = next.length === all.length ? null : next
+}
+
+// ---- 世界书方案（快照 = selectedWorldbooks + worldbookEntryFilter）----
+function saveWorldbookProfile() {
+  const name = prompt('方案名称', '方案 ' + (store.settings.worldbookProfiles.length + 1))
+  if (!name) return
+  const value = {
+    selectedWorldbooks: [...store.settings.selectedWorldbooks],
+    worldbookEntryFilter: JSON.parse(JSON.stringify(store.settings.worldbookEntryFilter ?? {})),
+  }
+  const i = store.settings.worldbookProfiles.findIndex(p => p.name === name)
+  if (i >= 0) store.settings.worldbookProfiles[i] = { name, value }
+  else store.settings.worldbookProfiles.push({ name, value })
+  store.settings.activeWorldbookProfile = name
+}
+
+function applyWorldbookProfile(name: string) {
+  const p = store.settings.worldbookProfiles.find(x => x.name === name)
+  if (!p) return
+  store.settings.selectedWorldbooks = [...p.value.selectedWorldbooks]
+  store.settings.worldbookEntryFilter = JSON.parse(JSON.stringify(p.value.worldbookEntryFilter))
+  store.settings.activeWorldbookProfile = name
+}
+
+function deleteWorldbookProfile(name: string) {
+  store.settings.worldbookProfiles = store.settings.worldbookProfiles.filter(p => p.name !== name)
+  if (store.settings.activeWorldbookProfile === name) store.settings.activeWorldbookProfile = ''
+}
 async function onRefresh(){lastErrorSection.value=store.activeSection;await store.refreshSection(store.activeSection)}
 async function onExtractInfluence(){await store.extractInfluence()}
 function onPost(){
@@ -1214,6 +1337,18 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .wb-row{display:flex;align-items:center;gap:6px;padding:5px 8px;cursor:pointer;border-radius:4px;transition:background 0.1s;&:hover{background:rgba(255,255,255,0.03)}}
 .wb-check{font-size:12px;color:var(--chalk-d);&.on{color:var(--amber)}}
 .wb-name{font-size:11px;color:var(--chalk)}
+.wb-search-row{display:flex;gap:6px;margin-bottom:6px}
+.wb-search{flex:1;min-width:0;padding:6px 8px;background:rgba(16,12,8,0.7);border:1px solid rgba(80,40,20,0.35);border-radius:4px;color:var(--chalk);font-size:11px;outline:none;&::placeholder{color:var(--chalk-d);opacity:0.5}&:focus{border-color:rgba(180,40,40,0.5)}}
+.wb-block{margin-bottom:2px}
+.wb-expand{margin-left:auto;flex-shrink:0;width:22px;height:22px;background:transparent;border:1px solid rgba(80,40,20,0.3);border-radius:4px;color:var(--amber-d);font-size:10px;line-height:1;cursor:pointer;display:flex;align-items:center;justify-content:center;&:hover{background:rgba(255,255,255,0.05)}}
+.wb-entries{padding:4px 0 6px 10px;border-left:1px solid rgba(80,40,20,0.25);margin:0 0 4px 8px}
+.wb-entry-actions{display:flex;align-items:center;gap:6px;margin-bottom:4px;flex-wrap:wrap}
+.wb-mini{padding:3px 8px;background:rgba(100,80,40,0.15);border:1px solid rgba(140,100,40,0.3);color:var(--amber-d);font-size:10px;border-radius:4px;cursor:pointer;&:hover{background:rgba(100,80,40,0.25)}}
+.wb-count{font-size:10px;color:var(--chalk-d);opacity:0.7;margin-left:auto}
+.wb-entry{display:flex;align-items:center;gap:6px;padding:3px 6px;cursor:pointer;border-radius:4px;transition:background 0.1s;&:hover{background:rgba(255,255,255,0.03)}}
+.wb-entry-name{font-size:11px;color:var(--chalk-d);overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.prof-select{flex:1;min-width:0;padding:6px 8px;background:rgba(16,12,8,0.7);border:1px solid rgba(80,40,20,0.35);border-radius:4px;color:var(--chalk);font-size:11px;outline:none;&:focus{border-color:rgba(180,40,40,0.5)}}
+.set-row .test-btn{width:auto;flex-shrink:0;margin-top:0;padding:6px 10px;white-space:nowrap}
 
 // ============ WALLPAPER ============
 .wp-preview{width:100%;height:120px;border-radius:8px;border:1px solid rgba(80,40,20,0.35);margin-bottom:8px;background:var(--bg)}

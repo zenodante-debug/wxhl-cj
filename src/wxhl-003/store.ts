@@ -12,12 +12,18 @@ export interface ApiConfig {
   url: string; apiKey: string; model: string; timeout: number; maxRetries: number
 }
 
+/** 具名方案: 一个名字 + 一份快照值 */
+export interface Profile<T> { name: string; value: T }
+
 export interface Settings {
   apiMode: 'single' | 'multi'
   primary: ApiConfig; secondary: ApiConfig
   selectedWorldbooks: string[]
   /** 世界书条目级筛选: 世界书名 -> 条目名数组; null/缺省 = 整本全取, [] = 一条不取 */
   worldbookEntryFilter: Record<string, string[] | null>
+  /** 世界书方案（快照 = selectedWorldbooks + worldbookEntryFilter） */
+  worldbookProfiles: Profile<{ selectedWorldbooks: string[]; worldbookEntryFilter: Record<string, string[] | null> }>[]
+  activeWorldbookProfile: string      // 方案名; '' = 未使用方案
   wallpaper: string
 }
 
@@ -49,11 +55,13 @@ function load(): Settings {
         secondary: { ...defApi(), ...p.secondary },
         selectedWorldbooks: p.selectedWorldbooks||[],
         worldbookEntryFilter: p.worldbookEntryFilter||{},
+        worldbookProfiles: p.worldbookProfiles||[],
+        activeWorldbookProfile: p.activeWorldbookProfile||'',
         wallpaper: p.wallpaper||'',
       }
     }
   } catch (_) {}
-  return { apiMode:'single', primary:defApi(), secondary:defApi(), selectedWorldbooks:[], worldbookEntryFilter:{}, wallpaper:'' }
+  return { apiMode:'single', primary:defApi(), secondary:defApi(), selectedWorldbooks:[], worldbookEntryFilter:{}, worldbookProfiles:[], activeWorldbookProfile:'', wallpaper:'' }
 }
 
 function save(s: Settings) { try { localStorage.setItem(SK, JSON.stringify(s)) } catch (_) {} }
