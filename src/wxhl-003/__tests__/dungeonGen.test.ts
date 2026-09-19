@@ -95,12 +95,40 @@ describe('buildEnterPrompt', () => {
   });
 });
 
-describe('敌人生成占位', () => {
-  it('buildEnemyPrompt 明确抛出「规则待实现」而不是返回空串', () => {
-    expect(() => buildEnemyPrompt()).toThrow(/待实现/);
+describe('buildEnemyPrompt', () => {
+  it('敌人 prompt 含三类型、基准等级、内联规则与必需字段', () => {
+    const p = buildEnemyPrompt(build, '契约者: 刘林', '世界书内容', 11);
+    expect(p).toContain('Lv.11');
+    expect(p).toContain('杂兵');
+    expect(p).toContain('精英');
+    expect(p).toContain('BOSS');
+    expect(p).toContain('副本角色生成规则');   // 内联规则确实注入了
+    expect(p).toContain('威胁');               // 面板靠它
+    expect(p).toContain('装备防御');
   });
 
-  it('mapEnemiesToVariables 同样抛出', () => {
+  it('把写入白名单铁律与装备防闪绝对值公式整段带上', () => {
+    const p = buildEnemyPrompt(build, '契约者: 刘林', '', 11);
+    expect(p).toContain('严禁写入');
+    expect(p).toContain('装备防闪绝对值公式');
+  });
+
+  it('带上玩家数据与世界书参考原文', () => {
+    const p = buildEnemyPrompt(build, '契约者: 刘林', '世界书内容', 11);
+    expect(p).toContain('契约者: 刘林');
+    expect(p).toContain('世界书内容');
+  });
+
+  it('按公式算好三者的等级并写进 prompt', () => {
+    const p = buildEnemyPrompt(build, '契约者: 刘林', '', 20);
+    expect(p).toContain('杂兵 Lv.12');   // round(20 × 0.6)
+    expect(p).toContain('精英 Lv.18');   // round(20 × 0.9)
+    expect(p).toContain('BOSS Lv.24');   // round(20 × 1.2)
+  });
+});
+
+describe('mapEnemiesToVariables 占位', () => {
+  it('仍恒抛「待实现」, 由 store 直接调 enemyRules 的 mapEnemyToVariables', () => {
     expect(() => mapEnemiesToVariables()).toThrow(/待实现/);
   });
 });
