@@ -297,6 +297,11 @@ const 假快照 = {
     '初见': '20 UP + 40 EXP + 2 RP',
     '没做完的支线': '999 UP + 999 EXP',
   } as Record<string, string>,
+  // 快照契约要求这个字段必须在 —— 缺了 `buildSettlementWrites` 会**抛错**（「整体缺失」是接线 bug,
+  // 与「该物品不在背包里」的 0 不是一回事）; `{}` 是合法的空背包。
+  // 另外两张清单（成就清单 / 隐藏任务清单）**有意不在这里** —— 「缺清单时退化为 `无`」那条测试靠它成立,
+  // 它们由需要用到的新测试各自 spread 覆盖后按值供给。
+  已有背包: {},
   小队成员: [{ 名称: '阿澈', 当前EXP: 0, 当前UP: 0 }],
 };
 
@@ -515,12 +520,14 @@ describe('副本成就 / 隐藏任务公示 · 按变量清单 + AI 名单比对
     expect(未).toContain('在血雨里不闪不避站满全程');
   });
 
-  it('隐藏任务公示把两个都列出来: 已完成的标「已完成」, 未完成的标「未触发」', () => {
+  it('隐藏任务公示把两个都列出来, 且标签按名字各自对上（对调标签要能红）', () => {
     const 公示 = 取行(p, '## 隐藏任务公示:');
-    expect(公示).toContain('旧日回响');
-    expect(公示).toContain('已完成');
-    expect(公示).toContain('无人知晓');
-    expect(公示).toContain('未触发');
+    // 按名字切出各自那一段再断言 —— 只断言「两个词都出现过」时, 把两个标签**对调**仍然全绿
+    const 段 = (名: string) => 公示.split('；').find(s => s.includes(名)) ?? '';
+    expect(段('旧日回响')).toContain('已完成');
+    expect(段('旧日回响')).not.toContain('未触发');
+    expect(段('无人知晓')).toContain('未触发');
+    expect(段('无人知晓')).not.toContain('已完成');
   });
 
   it('快照没有这两张清单时退化为「无」而不抛错（旧 fixture 正是这种）', () => {
@@ -581,5 +588,52 @@ describe('掉落: 同名先聚合, 再累加到背包里已有的数量', () => 
     expect(行).toContain('血刃');
     expect(行).toContain('×3');
     expect(行.match(/血刃/g)?.length).toBe(1);
+  });
+});
+
+describe('已有背包 整体缺失是接线 bug, 不是「空背包」', () => {
+  const c = computeSettlement(基准输入, 满骰());
+  const 取 = (w: ReturnType<typeof buildSettlementWrites>, 路径: string[]) =>
+    w.find(x => x.路径.join('.') === 路径.join('.'))?.值;
+
+  it('缺失(undefined) → 抛错, 错误信息点名 已有背包', () => {
+    // 把「字段整体缺失」（接线漏了）与「该物品不在背包里」（正常 0）分开:
+    // 前者静默当 0 时, 掉落写入会把玩家原有的同名物品冲掉而没人察觉
+    expect(() => buildSettlementWrites(c, 假AI, { ...假快照, 已有背包: undefined } as any))
+      .toThrow(/已有背包/);
+  });
+
+  it('空对象 {} 是合法空背包: 不抛错, 数量按 0 + 本次算', () => {
+    const w = buildSettlementWrites(c, 假AI, { ...假快照, 已有背包: {} } as any);
+    expect(取(w, ['背包', '血刃', '数量'])).toBe(1);
+  });
+});
+
+describe('说明 为空时印显式占位, 不静默丢掉整段', () => {
+  const c = computeSettlement(基准输入, 满骰());
+  const 空说明快照 = {
+    ...假快照,
+    成就清单: [
+      { 名称: '初见', 说明: '第一次踏进回廊', 难度: '★ 探索级 · 顺路可完成', 奖励: '20 UP + 40 EXP + 2 RP' },
+      { 名称: '血雨行者', 说明: '', 难度: '★★★★★★ 世界天花板 · 绝无仅有', 奖励: '500 UP + 900 EXP' },
+    ],
+    隐藏任务清单: [{ 名称: '旧日回响', 说明: '', 奖励: '80 UP + 150 EXP' }],
+  };
+  const p = assembleSettlementPanel(c, 假AI, 空说明快照 as any);
+  const 取行 = (k: string) => p.split('\n').find(l => l.startsWith(k)) ?? '';
+
+  it('未达成行的说明为空 → 印「（变量中未记录达成条件）」, 成就名与奖励仍在', () => {
+    // 这一行正是规则第九步要公示的「本次错过的达成条件」—— 说明丢了, 玩家就看不出要满足什么
+    const 未 = 取行('## 副本成就未达成:');
+    expect(未).toContain('血雨行者');
+    expect(未).toContain('（变量中未记录达成条件）');
+    expect(未).toContain('500 UP + 900 EXP');
+  });
+
+  it('隐藏任务公示的说明为空 → 印「（变量中未记录说明）」, 任务名与状态仍在', () => {
+    const 公示 = 取行('## 隐藏任务公示:');
+    expect(公示).toContain('旧日回响');
+    expect(公示).toContain('（变量中未记录说明）');
+    expect(公示).toContain('已完成');
   });
 });
