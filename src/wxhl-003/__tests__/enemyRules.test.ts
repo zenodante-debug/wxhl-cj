@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ENEMY_KINDS, EnemyGenResultSchema, assembleEnemyPanel, mapEnemyToVariables } from '../enemyRules';
+import { ENEMY_KINDS, EnemyGenResultSchema, assembleEnemyPanel, computeDerivedStats, mapEnemyToVariables } from '../enemyRules';
 
 const 一只杂兵 = {
   名称: '腐化游民',
@@ -103,14 +103,14 @@ describe('assembleEnemyPanel', () => {
   });
 
   // ===== 严格对齐用户规则第七步的逐字格式 =====
-  it('[生命] 写 1/1 占位（真实值由前端代算）', () => {
-    expect(p).toContain('[生命|1/1]');
+  it('[生命] 按 6-2 公式写 最大HP/最大HP（满血出场）, 不再占位', () => {
+    expect(p).toContain('[生命|112/112]');
   });
   it('[属性] 行严格形状: 【等级】Lv.X | 【阶位】X | STR:.. 四维', () => {
     expect(p).toContain('[属性|【等级】Lv.6 | 【阶位】一阶 | STR:12 | AGI:8 | CON:14 | PER:8]');
   });
-  it('[防御] 行严格形状: 【防御】X | 【闪避】X', () => {
-    expect(p).toContain('[防御|【防御】0 | 【闪避】0]');
+  it('[防御] 行按 6-2 公式写 防御 / 闪避值, 不再占位', () => {
+    expect(p).toContain('[防御|【防御】2 | 【闪避】11]');
   });
   it('[底牌] 行严格形状: 【称号】 / 【天赋】 / 【血统】', () => {
     expect(p).toContain('[底牌|【称号】无 / 【天赋】腐臭血肉（腐臭--被近战命中时使对方中毒1回合） / 【血统】感染者（病源--免疫同类毒素）]');
@@ -126,5 +126,82 @@ describe('assembleEnemyPanel', () => {
   });
   it('BOSS 的 [职业] 行严格形状: 职业名称 / 职业特性 / 职业技能', () => {
     expect(assembleEnemyPanel(结果.敌人[2] as any)).toContain('[职业|【职业名称】腐潮领主（金色） / 【职业特性】无 / 【职业技能】无]');
+  });
+});
+
+// ===== 用户规则 6-2 的衍生属性公式（只用于面板, 不写变量） =====
+const 七键 = ['HP额外加成', 'MP额外加成', '耐力额外加成', '防御额外加成', '闪避额外加成', '移动距离额外加成', '负重额外加成'];
+
+describe('computeDerivedStats（6-2 公式）', () => {
+  const 基准 = { 类型: '杂兵', 阶位: '一阶', 属性基础: { STR: 12, AGI: 8, CON: 14, PER: 8 }, 衍生额外加成: {}, 装备: {} };
+
+  it('位阶修正系数: 一阶1 / 二阶2 / 三阶4 / 四阶7 / 五阶11（以 PER 修正 × 10 = 最大MP 观察）', () => {
+    const e = { ...基准, 属性基础: { STR: 5, AGI: 5, CON: 5, PER: 6 } } as any; // PER修正 = (6-5)×系数
+    expect(computeDerivedStats({ ...e, 阶位: '一阶' }).最大MP).toBe(10);
+    expect(computeDerivedStats({ ...e, 阶位: '二阶' }).最大MP).toBe(20);
+    expect(computeDerivedStats({ ...e, 阶位: '三阶' }).最大MP).toBe(40);
+    expect(computeDerivedStats({ ...e, 阶位: '四阶' }).最大MP).toBe(70);
+    expect(computeDerivedStats({ ...e, 阶位: '五阶' }).最大MP).toBe(110);
+  });
+
+  it('最大HP 的类型系数: 杂兵8 / 精英10 / BOSS20（CON14, 一阶 → CON修正9）', () => {
+    expect(computeDerivedStats({ ...基准, 类型: '杂兵' } as any).最大HP).toBe(112);
+    expect(computeDerivedStats({ ...基准, 类型: '精英' } as any).最大HP).toBe(140);
+    expect(computeDerivedStats({ ...基准, 类型: 'BOSS' } as any).最大HP).toBe(280);
+  });
+
+  it('七个衍生属性全部按 6-2 公式算出（含 Σ装备防御/闪避 与 额外加成, 防御 0.2 项向下取整）', () => {
+    const boss = {
+      类型: 'BOSS',
+      阶位: '二阶',
+      属性基础: { STR: 40, AGI: 20, CON: 30, PER: 10 },
+      衍生额外加成: { HP额外加成: 100, MP额外加成: 0, 耐力额外加成: 0, 防御额外加成: 5, 闪避额外加成: 2, 移动距离额外加成: 1, 负重额外加成: 50 },
+      装备: { 头部: { 名称: '头盔', 装备防御: 10, 装备闪避: 3 }, 主武器: { 名称: '巨剑', 装备防御: 0, 装备闪避: 0 } },
+    } as any;
+    // 二阶系数2: CON修正50 / AGI修正30 / PER修正10
+    const d = computeDerivedStats(boss);
+    expect(d.最大HP).toBe((50 + 5) * 20 + 100); // 1200
+    expect(d.最大MP).toBe(10 * 10 + 0); // 100
+    expect(d.最大耐力).toBe((50 + 5) * 10 + 0); // 550
+    expect(d.防御).toBe(Math.floor((50 + 5) * 0.2) + 10 + 5); // 11+15 = 26
+    expect(d.闪避值).toBe(10 + Math.floor(30 * 0.5) + 3 + 2); // 30
+    expect(d.移动距离).toBe(5 + 30 + 1); // 36
+    expect(d.负重上限).toBe(40 * 5 + 50); // 250
+  });
+
+  it('负重上限 用的是 STR实际值 × 5, 不是 STR修正值（易错点）', () => {
+    const e = { 类型: 'BOSS', 阶位: '二阶', 属性基础: { STR: 40, AGI: 5, CON: 5, PER: 5 }, 衍生额外加成: { 负重额外加成: 50 }, 装备: {} } as any;
+    // STR实际值 40 → 40×5+50 = 250；若误用 STR修正值 (40-5)×2=70 → 400
+    expect(computeDerivedStats(e).负重上限).toBe(250);
+  });
+});
+
+describe('衍生属性白名单重建', () => {
+  it('AI 多给的被禁字段不会漏进变量（按 7 个白名单键重建）', () => {
+    const 脏 = {
+      ...一只杂兵,
+      衍生额外加成: { HP额外加成: 3, HP_最大: 999, MP_最大: 500, 防御: 77, 闪避值: 123, 耐力_当前: 7 },
+    } as any;
+    const v: any = mapEnemyToVariables(脏);
+    expect(Object.keys(v.衍生属性).sort()).toEqual([...七键].sort());
+    expect(v.衍生属性.HP额外加成).toBe(3);
+    for (const bad of ['HP_最大', 'MP_最大', '防御', '闪避值', '耐力_当前']) {
+      expect(v.衍生属性).not.toHaveProperty(bad);
+    }
+  });
+});
+
+describe('威胁 从 AI 结果流到面板', () => {
+  it('parse 后 [威胁] 行是 AI 给的评估文本, 不是占位回退', () => {
+    const parsed = EnemyGenResultSchema.parse({
+      敌人: [
+        { ...一只杂兵, 威胁: '极低单体，集群麻烦' },
+        { ...一只杂兵, 名称: '精英甲', 类型: '精英' },
+        { ...一只杂兵, 名称: 'BOSS甲', 类型: 'BOSS' },
+      ],
+    });
+    const panel = assembleEnemyPanel(parsed.敌人[0]);
+    expect(panel).toContain('[威胁|极低单体，集群麻烦]');
+    expect(panel).not.toContain('[威胁|一阶 · Lv.6]');
   });
 });

@@ -78,6 +78,9 @@ export type GeneratedEnemy = EnemyGenResult['敌人'][number];
 /** 装备的七个槽位, 顺序即面板里的展示顺序 */
 const 装备槽顺序 = ['头部', '躯干', '手部', '下装', '饰品', '主武器', '副武器'] as const;
 
+/** 衍生属性的 7 个「额外加成」白名单键 —— 必须与 `衍生额外加成Schema` 保持一致 */
+const 衍生额外加成键 = ['HP额外加成', 'MP额外加成', '耐力额外加成', '防御额外加成', '闪避额外加成', '移动距离额外加成', '负重额外加成'] as const;
+
 /**
  * 把单个副本角色映射成 `契约者.副本角色.<名称>` 的实体对象（键名对齐用户 schema 的 `实体Schema`）。
  *
@@ -108,8 +111,13 @@ export function mapEnemyToVariables(e: GeneratedEnemy): Record<string, unknown> 
       基础: e.属性基础 ?? { STR: 0, AGI: 0, CON: 0, PER: 0 },
       自定义加成: { STR: 0, AGI: 0, CON: 0, PER: 0 },
     },
-    // 只写 7 个额外加成; 最大值 / 当前值 由前端代算, 严禁写入
-    衍生属性: { ...e.衍生额外加成 },
+    // 只写 7 个额外加成（按白名单键重建, 绝不直接展开 AI 给的对象 —— 防止未校验数据里
+    // 混入 HP_最大 之类被禁字段）; 最大值 / 当前值 由前端代算, 严禁写入
+    衍生属性: 衍生额外加成键.reduce<Record<string, number>>((acc, k) => {
+      const v = (e.衍生额外加成 as Record<string, unknown> | undefined)?.[k];
+      acc[k] = typeof v === 'number' && Number.isFinite(v) ? v : 0;
+      return acc;
+    }, {}),
     职业: e.职业,
     通用技能: e.通用技能 ?? {},
     装备: e.装备 ?? {},
@@ -201,6 +209,61 @@ function 汇总装备防闪(装备: unknown): { 防御: number; 闪避: number }
   return { 防御, 闪避 };
 }
 
+/** 位阶修正值系数（用户规则 6-2）：一阶1 / 二阶2 / 三阶4 / 四阶7 / 五阶11 */
+const 位阶修正系数: Record<string, number> = { 一阶: 1, 二阶: 2, 三阶: 4, 四阶: 7, 五阶: 11 };
+
+/** 最大HP 的类型系数（用户规则 6-2）：杂兵8 / 精英10 / BOSS20 —— 本模块只生成这三种 */
+const HP系数: Record<EnemyKind, number> = { 杂兵: 8, 精英: 10, BOSS: 20 };
+
+/** 面板用的衍生属性计算结果 */
+export interface EnemyDerivedStats {
+  最大HP: number;
+  最大MP: number;
+  最大耐力: number;
+  防御: number;
+  闪避值: number;
+  移动距离: number;
+  负重上限: number;
+}
+
+/**
+ * 按用户规则 6-2 的公式计算衍生属性 —— **仅用于 `<enemy>` 面板展示**。
+ * 这些数值**仍然严禁写入变量**: 用户规则把衍生属性的计算职责给了用户卡里的前端脚本,
+ * 模块只是为了让面板数字与前端代算结果一致才复算一遍。
+ *
+ * - 「实际属性值」取 `属性.基础` 四维 —— 本模块不写 `属性.加成`, 故 实际 = 基础
+ * - 「修正值」=（实际属性值 − 5）× 位阶修正系数
+ * - `负重上限` 用的是 **STR 实际值**（不是 STR 修正值）
+ * - `Σ装备防御`/`Σ装备闪避` 为七槽求和（AI 已按步骤二公式算好绝对值, 缺槽按 0 计）
+ */
+export function computeDerivedStats(e: GeneratedEnemy): EnemyDerivedStats {
+  const 系数 = 位阶修正系数[e.阶位] ?? 1;
+  const 基础 = (e.属性基础 ?? { STR: 0, AGI: 0, CON: 0, PER: 0 }) as Record<string, number>;
+  const 额外 = (e.衍生额外加成 ?? {}) as Record<string, unknown>;
+  const 取额外 = (键: string): number => {
+    const v = 额外[键];
+    return typeof v === 'number' && Number.isFinite(v) ? v : 0;
+  };
+  const 修正 = (实际值: number): number => (实际值 - 5) * 系数;
+
+  const CON修正 = 修正(基础.CON ?? 0);
+  const AGI修正 = 修正(基础.AGI ?? 0);
+  const PER修正 = 修正(基础.PER ?? 0);
+  // 负重上限用的是 STR 实际值, 不是 STR 修正值
+  const STR实际值 = 基础.STR ?? 0;
+  const 防闪 = 汇总装备防闪(e.装备);
+
+  return {
+    最大HP: (CON修正 + 5) * (HP系数[e.类型] ?? 8) + 取额外('HP额外加成'),
+    最大MP: PER修正 * 10 + 取额外('MP额外加成'),
+    最大耐力: (CON修正 + 5) * 10 + 取额外('耐力额外加成'),
+    防御: Math.floor((CON修正 + 5) * 0.2) + 防闪.防御 + 取额外('防御额外加成'),
+    闪避值: 10 + Math.floor(AGI修正 * 0.5) + 防闪.闪避 + 取额外('闪避额外加成'),
+    移动距离: 5 + AGI修正 + 取额外('移动距离额外加成'),
+    负重上限: STR实际值 * 5 + 取额外('负重额外加成'),
+  };
+}
+
 /**
  * `[技能]` 行: `技能名:（类型·行动类型·关联属性·消耗·冷却）效果名--效果内容`, 多个技能用 `；` 分隔。
  * 逐字对齐用户规则的示例（半角冒号、全角括号、`·` 分隔、`--` 连接效果名与内容）。
@@ -242,13 +305,13 @@ function 拼职业行(职业: unknown): string {
 /**
  * 拼 `<enemy>…</enemy>` 面板文本, **严格对齐用户规则第七步的输出格式**（与 <检定模块> 的 <enemy> 一致）。
  *
- * 取舍: `[生命|` 行只能写占位值 `1/1` —— 用户规则说「当前HP=最大HP（新实体满血出场）, 真实数值由
- * 用户卡里的前端脚本代算」, 本模块不知道那套派生公式, 故用 1/1 占位。同理 `[防御|` 行只给
- * 装备防御 / 装备闪避七槽的 Σ（衍生「防御」「闪避值」由前端代算, 模块不算）。
+ * `[生命|` 与 `[防御|` 的数值由 `computeDerivedStats` 按用户规则 6-2 的公式算出 —— 用户规则规定
+ * 「新实体满血出场」, 故 `[生命|` 写 `${最大HP}/${最大HP}`; 这些数值**只用于面板展示, 绝不写变量**
+ * （变量里的衍生属性由用户卡里的前端脚本代算）。
  * `[职业|` 行仅 BOSS 输出; 杂兵 / 精英省略。
  */
 export function assembleEnemyPanel(e: GeneratedEnemy): string {
-  const 防闪 = 汇总装备防闪(e.装备);
+  const 衍生 = computeDerivedStats(e);
   const 威胁 = typeof e.威胁 === 'string' && e.威胁.trim().length > 0 ? e.威胁 : `${e.阶位} · Lv.${e.等级}`;
   const L: string[] = [];
 
@@ -256,11 +319,11 @@ export function assembleEnemyPanel(e: GeneratedEnemy): string {
   L.push(`[名称|${e.名称}]`);
   L.push(`[类型|${e.类型}]`);
   L.push(`[外观|${e.外貌 ?? '无'}]`);
-  // 占位值: 用户规则规定新实体满血出场, 真实 HP 由用户卡里的前端脚本代算, 模块不知道公式
-  L.push('[生命|1/1]');
+  // 用户规则: 新实体满血出场, 当前HP = 最大HP（前端脚本代算出的真实值, 这里复算保持一致）
+  L.push(`[生命|${衍生.最大HP}/${衍生.最大HP}]`);
   L.push(`[威胁|${威胁}]`);
   L.push(`[属性|【等级】Lv.${e.等级} | 【阶位】${e.阶位} | STR:${e.属性基础.STR} | AGI:${e.属性基础.AGI} | CON:${e.属性基础.CON} | PER:${e.属性基础.PER}]`);
-  L.push(`[防御|【防御】${防闪.防御} | 【闪避】${防闪.闪避}]`);
+  L.push(`[防御|【防御】${衍生.防御} | 【闪避】${衍生.闪避值}]`);
   L.push(`[底牌|【称号】${名称及效果(e.称号)} / 【天赋】${名称及效果(e.天赋)} / 【血统】${名称及效果(e.血统)}]`);
   // 职业行仅 BOSS 输出（杂兵 / 精英不填职业, 省略整行）
   if (e.类型 === 'BOSS') L.push(拼职业行(e.职业));
