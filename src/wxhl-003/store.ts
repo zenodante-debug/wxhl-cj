@@ -4,7 +4,8 @@ import { WORKSHOP_WORLDBOOK_NAME, PvPSaveSchema, type WorkshopCard, type PvPSave
 import { extractContractSave, buildIntroPrompt, tierOf, generateDefaultAppearance, buildBattleIntroMessage } from './workshop'
 import { rollBuild, rollRewards, type BuildRoll, type RewardSet, type RollRecord } from './dice'
 import { DungeonGenResultSchema, assemblePanelText, mapToVariables, type DungeonGenResult, type PlayerBrief } from './dungeonRules'
-import { buildDungeonPrompt, buildEnterPrompt } from './dungeonGen'
+import { buildDungeonPrompt, buildEnterPrompt, buildEnemyPrompt } from './dungeonGen'
+import { EnemyGenResultSchema, mapEnemyToVariables, assembleEnemyPanelFromEntity, 前端已代算, type GeneratedEnemy } from './enemyRules'
 
 const SK = 'wxhl003_settings'
 
@@ -1657,6 +1658,16 @@ export const useWorkshopStore = defineStore('workshop', () => {
 // ================================================================
 const DGEN_SK = 'wxhl003_rolled_dungeons'
 
+/** 单个副本角色的生成槽位 */
+export interface EnemySlot {
+  /** AI 原始产物。面板专用的「威胁」也在里面 —— 按用户规则, 威胁不进变量 */
+  数据: GeneratedEnemy
+  /** 写入后回读前端代算值拼出的 <enemy> 面板; 尚未写入时为空串 */
+  面板: string
+  /** 是否已写进存档 */
+  已写入: boolean
+}
+
 /** 一次「掷骰 + 生成」的完整产物 */
 export interface RolledDungeon {
   id: number
@@ -1672,6 +1683,8 @@ export interface RolledDungeon {
   enterPrompt?: string
   /** 已写入存档的痕迹 */
   written?: { at: string; messageId: number | 'latest' }
+  /** 敌人生成的产物, 每个副本条目独立; 未生成时为 undefined */
+  enemies?: EnemySlot[]
 }
 
 function loadRolledDungeons(): RolledDungeon[] {
@@ -1711,6 +1724,8 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
   const rolling = ref(false)
   const generating = ref(false)
   const writing = ref(false)
+  const generatingEnemies = ref(false)
+  const writingEnemies = ref(false)
   const lastError = ref('')
 
   watchEffect(() => saveRolledDungeons(rolledDungeons.value))
@@ -1834,6 +1849,41 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     }
   }
 
+  /** 敌人生成: 按基准等级生成 1 杂兵 + 1 精英 + 1 BOSS, 先只落库不碰变量 */
+  async function generateEnemies() {
+    if (generatingEnemies.value) return
+    const entry = current.value
+    if (!entry) { lastError.value = '请先掷骰'; return }
+    if (!entry.result) { lastError.value = '请先生成副本'; return }
+
+    const forumStore = getForumStore()
+    const cfg = getActiveCfg(forumStore.settings)
+    if (!cfg.url || !cfg.apiKey) { lastError.value = '请先在终端设置中配置 API'; return }
+
+    generatingEnemies.value = true
+    lastError.value = ''
+    try {
+      const { player, text: playerText } = readPlayerBrief()
+      const wb = await forumStore.getWorldbookContent()
+      const prompt = buildEnemyPrompt(entry.build, playerText, wb, player.等级)
+      const raw = await aiGenerate(cfg, prompt, {
+        name: 'enemy_generation',
+        value: JSON.parse(JSON.stringify(z.toJSONSchema(EnemyGenResultSchema, { io: 'input' }))),
+      })
+      const parsed = EnemyGenResultSchema.parse(extractJSON(raw))
+      const idx = rolledDungeons.value.findIndex(d => d.id === entry.id)
+      if (idx < 0) return
+      rolledDungeons.value[idx] = {
+        ...rolledDungeons.value[idx],
+        enemies: parsed.敌人.map(e => ({ 数据: e, 面板: '', 已写入: false })),
+      }
+    } catch (e: any) {
+      lastError.value = e.message || '敌人生成失败'
+    } finally {
+      generatingEnemies.value = false
+    }
+  }
+
   /** 重roll: 丢弃当前展示条目的 AI 产物, 重新掷骰 */
   function reroll() {
     const entry = current.value
@@ -1886,6 +1936,73 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     }
   }
 
+  /**
+   * 把勾选的副本角色写进 `契约者.副本角色`。
+   *
+   * 顺序严格按用户规则: 先 insert 变量 → 读回前端代算好的值 → 用那些值拼 <enemy> 面板。
+   * 因此生成后、写入前**不提供面板** —— 宁可不给, 也不给一个注定偏低的数。
+   */
+  async function writeEnemies(选中: number[]): Promise<boolean> {
+    const entry = current.value
+    if (!entry?.enemies?.length) { lastError.value = '请先生成副本角色'; return false }
+    const 目标 = 选中.map(i => ({ i, slot: entry.enemies![i] })).filter(x => x.slot)
+    if (目标.length === 0) { lastError.value = '请至少勾选一个副本角色'; return false }
+    writingEnemies.value = true
+    lastError.value = ''
+    try {
+      await waitGlobalInitialized('Mvu')
+      // 与竞技场写「当前敌人」/ writeToSave 一致的楼层探测: 全局脚本 iframe 无楼层上下文时回退最新楼层
+      let message_id: number | 'latest' = -1
+      try {
+        const mid = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : -1
+        if (mid && mid !== -1) message_id = mid
+      } catch (_) {}
+      const mvu = Mvu.getMvuData({ type: 'message', message_id })
+      for (const { slot } of 目标) {
+        // 数组路径: 角色名可能含「.」, 不能走字符串路径
+        _.set(mvu, ['stat_data', '契约者', '副本角色', slot.数据.名称], mapEnemyToVariables(slot.数据))
+      }
+      await Mvu.replaceMvuData(mvu, { type: 'message', message_id })
+      // 回读校验: MVU 按注册的 zod schema 处理写入, 未声明的键会被静默剥掉 —— 这里主动暴露, 避免"看起来写成功"
+      for (const { slot } of 目标) {
+        if (_.get(Mvu.getMvuData({ type: 'message', message_id }), ['stat_data', '契约者', '副本角色', slot.数据.名称]) === undefined) {
+          throw new Error('写入未生效: 字段名与存档 schema 不匹配 → 副本角色.' + slot.数据.名称)
+        }
+      }
+      // 用户卡的前端脚本异步跑代算, 写入刚返回时 属性.实际 / 衍生属性 很可能还没算好。
+      // 每轮都重新取快照, 不复用上一轮。最多约 2 秒, 超时不算失败 —— 走回退路径并如实告知用户。
+      let 已代算 = false
+      let 快照 = Mvu.getMvuData({ type: 'message', message_id })
+      for (let n = 0; n < 10; n++) {
+        快照 = Mvu.getMvuData({ type: 'message', message_id })
+        已代算 = 目标.every(({ slot }) => 前端已代算(_.get(快照, ['stat_data', '契约者', '副本角色', slot.数据.名称])))
+        if (已代算) break
+        await new Promise(r => setTimeout(r, 200))
+      }
+      // 用回读实体拼面板, 写回条目 —— 只更新被勾选的槽, 未勾选的原样保留
+      const idx = rolledDungeons.value.findIndex(d => d.id === entry.id)
+      if (idx >= 0) {
+        const 槽 = [...rolledDungeons.value[idx].enemies!]
+        for (const { i, slot } of 目标) {
+          const 实体 = _.get(快照, ['stat_data', '契约者', '副本角色', slot.数据.名称]) ?? {}
+          槽[i] = { ...slot, 面板: assembleEnemyPanelFromEntity(slot.数据.名称, 实体, slot.数据.威胁), 已写入: true }
+        }
+        rolledDungeons.value[idx] = { ...rolledDungeons.value[idx], enemies: 槽 }
+      }
+      // 两个分支都刻意保留: 未代算时面板会退化, 用户必须知道; 成功分支也要点明来源,
+      // 因为「已代算」判据对 prefault 非 0 的 schema 可能在脚本跑之前就为真。
+      if (已代算) toastr.success('已写入 ' + 目标.length + ' 个副本角色（面板数值取自前端代算结果）')
+      else toastr.info('已写入 ' + 目标.length + ' 个副本角色；前端脚本尚未代算, 面板为模块自算值')
+      return true
+    } catch (e: any) {
+      lastError.value = e?.message || '写入副本角色失败'
+      toastr.error('写入副本角色失败: ' + lastError.value)
+      return false
+    } finally {
+      writingEnemies.value = false
+    }
+  }
+
   /** 把「进入副本」提示词填入酒馆输入框, 只填入不发送 */
   async function fillInput(id: number): Promise<boolean> {
     const entry = rolledDungeons.value.find(d => d.id === id)
@@ -1925,6 +2042,7 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
 
   return {
     rolledDungeons, rolling, generating, writing, lastError, current, select,
+    generatingEnemies, writingEnemies, generateEnemies, writeEnemies,
     doRoll, generate, reroll, writeToSave, fillInput, remove,
   }
 })

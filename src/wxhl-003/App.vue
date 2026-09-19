@@ -619,6 +619,31 @@
           </div>
         </details>
 
+        <div v-if="dungeonGenStore.current.enemies?.length" class="enemy-block">
+          <div class="roll-section-title">副本角色</div>
+          <div class="set-hint">📌 三种副本角色的生成规则已内置在本脚本里；但规则引用的系统模块（&lt;技能模版和限制&gt; / &lt;装备效果强度限制&gt; / &lt;装备与消耗品系统&gt; / &lt;天赋系统&gt; / &lt;血统系统&gt; / &lt;特殊技能模版&gt; 等）需要你到「终端设置 → 世界书」里勾选，否则生成的数值没有依据。</div>
+
+          <div v-for="(slot, i) in dungeonGenStore.current.enemies" :key="slot.数据.名称" class="enemy-row">
+            <span class="wb-check" :class="{on: enemyChecked[i]}" @click="onToggleEnemy(i)">{{ enemyChecked[i] ? '☑' : '☐' }}</span>
+            <span class="enemy-name">{{ slot.数据.名称 }}</span>
+            <span class="enemy-kind">{{ slot.数据.类型 }}</span>
+            <span class="enemy-lv">Lv.{{ slot.数据.等级 }}</span>
+            <span v-if="slot.已写入" class="enemy-wrote">✓ 已写入</span>
+          </div>
+
+          <div class="dc-actions">
+            <button class="confirm-btn" :disabled="dungeonGenStore.writingEnemies" @click="onWriteEnemies">
+              {{ dungeonGenStore.writingEnemies ? '写入中...' : '写入选中的' }}
+            </button>
+          </div>
+
+          <div v-for="slot in dungeonGenStore.current.enemies.filter(s => s.面板)" :key="'p-' + slot.数据.名称" class="enemy-panel">
+            <div class="roll-section-title">{{ slot.数据.名称 }} · 状态卡</div>
+            <pre class="enemy-panel-text">{{ slot.面板 }}</pre>
+            <button class="confirm-btn modify" @click="onCopyEnemyPanel(slot.面板)">复制面板文本</button>
+          </div>
+        </div>
+
         <div class="dc-actions">
           <button class="confirm-btn" :disabled="dungeonGenStore.writing" @click="onWriteDungeon(dungeonGenStore.current.id)">
             {{ dungeonGenStore.current.written ? '已写入存档' : '写入存档' }}
@@ -626,7 +651,9 @@
           <button class="confirm-btn modify" @click="onFillDungeonInput(dungeonGenStore.current.id)">填入输入框</button>
           <button class="confirm-btn modify" @click="onCopyPanel(dungeonGenStore.current)">复制面板文本</button>
           <button class="confirm-btn reroll" :disabled="dungeonGenStore.rolling || dungeonGenStore.generating" @click="onRerollDungeonGen">🔄 重roll</button>
-          <button class="confirm-btn" @click="onEnemyGenPlaceholder">敌人生成</button>
+          <button class="confirm-btn" :disabled="dungeonGenStore.generatingEnemies" @click="onGenerateEnemies">
+            {{ dungeonGenStore.generatingEnemies ? '生成中...' : '敌人生成' }}
+          </button>
         </div>
       </div>
 
@@ -897,8 +924,32 @@ async function onCopyPanel(entry: { panelText?: string }) {
   }
 }
 
-/** 敌人生成占位（阶段 C 实现） */
-function onEnemyGenPlaceholder() { toastr.info('敌人生成规则待补，下一阶段实现') }
+/** 敌人生成: 三个副本角色的勾选状态, 默认全勾 */
+const enemyChecked = ref<boolean[]>([true, true, true])
+
+async function onGenerateEnemies() {
+  enemyChecked.value = [true, true, true]
+  await dungeonGenStore.generateEnemies()
+}
+
+function onToggleEnemy(i: number) { enemyChecked.value[i] = !enemyChecked.value[i] }
+
+function onWriteEnemies() {
+  const 选中 = enemyChecked.value.map((on, i) => (on ? i : -1)).filter(i => i >= 0)
+  if (选中.length === 0) { toastr.info('请至少勾选一个副本角色'); return }
+  dungeonGenStore.writeEnemies(选中)
+}
+
+/** 复制某个副本角色的 <enemy> 面板 */
+async function onCopyEnemyPanel(文本: string) {
+  if (!文本) { toastr.info('面板要写入存档后才会生成'); return }
+  try {
+    await navigator.clipboard.writeText(文本)
+    toastr.success('面板文本已复制')
+  } catch (e: any) {
+    toastr.error('复制失败: ' + (e?.message || e))
+  }
+}
 
 // ============ 构筑编辑 · 六字段模块 ============
 const editModules = [
@@ -1537,4 +1588,12 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .dc-line{margin-top:4px}
 .dc-sub{font-size:11px;color:var(--chalk-d);line-height:1.45}
 .dc-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
+.enemy-block{margin-top:10px}
+.enemy-row{display:flex;align-items:center;gap:8px;padding:5px 8px;font-size:12px;color:var(--chalk);border-bottom:1px solid rgba(80,40,20,0.18)}
+.enemy-name{flex:1;color:var(--chalk);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.enemy-kind{flex-shrink:0;font-size:10px;color:var(--amber-d);background:rgba(180,40,40,0.12);border:1px solid rgba(180,40,40,0.3);border-radius:3px;padding:1px 6px}
+.enemy-lv{flex-shrink:0;font-size:10px;color:var(--chalk-d);font-family:'Courier New',monospace}
+.enemy-wrote{flex-shrink:0;font-size:10px;color:var(--amber)}
+.enemy-panel{margin-top:10px}
+.enemy-panel-text{white-space:pre-wrap;word-break:break-all;font-size:11px;line-height:1.5;color:var(--chalk);background:var(--iron-d);border:1px solid var(--iron);border-radius:6px;padding:8px;margin:6px 0;max-height:320px;overflow:auto;font-family:'Courier New',monospace}
 </style>
