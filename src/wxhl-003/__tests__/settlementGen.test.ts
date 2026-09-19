@@ -12,8 +12,14 @@ describe('buildSettlementPrompt', () => {
 
   it('带【优先级声明】, 明确禁止输出结算面板', () => {
     expect(p).toContain('不适用于本次生成');
-    expect(p).toContain('Settlement Beautification');
     expect(p).toContain('严禁');
+    // 真断言: 显式禁止的那句本身。规则原文里没有这一句, 删掉优先级声明即红。
+    expect(p).toContain('在 JSON 前后输出任何 <Settlement Beautification> 面板或结算画面');
+  });
+
+  it('武装 F 守卫: 主线失败必须填 "F"', () => {
+    // 真断言: 规则原文里没有「填 "F"」这个串, 删掉 prompt 那句即红。
+    expect(p).toContain('填 "F"');
   });
 
   it('点名了 JSON 的每个字段', () => {
@@ -33,5 +39,11 @@ describe('buildSettlementPrompt', () => {
     expect(p).toContain('契约者: 刘林');
     expect(p).toContain('[玩家]: 打完了');
     expect(p).toContain('世界书内容');
+  });
+
+  it('空输入时回退到占位串', () => {
+    const q = buildSettlementPrompt('契约者: 刘林', '', '');
+    expect(q).toContain('（未读取到聊天记录）');
+    expect(q).toContain('（无世界书内容）');
   });
 });
