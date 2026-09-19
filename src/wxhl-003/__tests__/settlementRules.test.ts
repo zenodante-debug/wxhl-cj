@@ -462,3 +462,124 @@ describe('buildSettlementWrites · 旧值非零时才钉得住累加', () => {
     expect(40 + c.RP).not.toBe(c.RP);
   });
 });
+
+// ────────────────────────────────────────────────────────────────────
+// 协调者裁决后的补钉（Task 3 第 2 轮）
+//
+// 上面 54 条在口径改正**前后都是全绿**的 —— 这说明旧断言根本没钉住这三处
+// （不是「旧断言是对的」）。以下每条都能红: 把实现改回裁决前的写法, 对应的 it 就断。
+// ────────────────────────────────────────────────────────────────────
+
+describe('当前PEXP 与「获得」行同口径', () => {
+  const c = computeSettlement(基准输入, 满骰());
+
+  it('当前PEXP = 旧值 + 本次获得（与 当前RP余额 一致, 不是照抄旧值）', () => {
+    const p = assembleSettlementPanel(c, 假AI, { ...假快照, 当前PEXP: 1234 } as any);
+    expect(p).toContain('## 当前PEXP: ' + (1234 + c.PEXP));
+    // 反退化: 新值必须同时不同于「旧值」与「裸增量」, 否则这句断言又成空的
+    expect(1234 + c.PEXP).not.toBe(1234);
+    expect(1234 + c.PEXP).not.toBe(c.PEXP);
+  });
+
+  it('军衔状态 / 职业进度 仍照抄快照（它们没有「获得」配对的余额语义）', () => {
+    const p = assembleSettlementPanel(c, 假AI, 假快照 as any);
+    expect(p).toContain('## 军衔状态: 上等兵');
+    expect(p).toContain('## 职业进度: 5/200');
+  });
+});
+
+describe('副本成就 / 隐藏任务公示 · 按变量清单 + AI 名单比对', () => {
+  const c = computeSettlement(基准输入, 满骰());
+  const 清单快照 = {
+    ...假快照,
+    成就清单: [
+      { 名称: '初见', 说明: '第一次踏进回廊', 难度: '★ 探索级 · 顺路可完成', 奖励: '20 UP + 40 EXP + 2 RP' },
+      { 名称: '血雨行者', 说明: '在血雨里不闪不避站满全程', 难度: '★★★★★★ 世界天花板 · 绝无仅有', 奖励: '500 UP + 900 EXP' },
+    ],
+    隐藏任务清单: [
+      { 名称: '旧日回响', 说明: '钟楼下把旧日的回响听完', 奖励: '80 UP + 150 EXP' },
+      { 名称: '无人知晓', 说明: '日落前找到第三个名字', 奖励: '999 UP + 999 EXP' },
+    ],
+  };
+  const p = assembleSettlementPanel(c, 假AI, 清单快照 as any);
+  const 取行 = (文本: string, k: string) => 文本.split('\n').find(l => l.startsWith(k)) ?? '';
+
+  it('已达成行只列 AI 名单里的那个; 未达成行列另一个, 且带上它的说明（达成条件）', () => {
+    const 已 = 取行(p, '## 副本成就已达成:');
+    const 未 = 取行(p, '## 副本成就未达成:');
+    expect(已).toContain('初见');
+    expect(已).not.toContain('血雨行者');
+    expect(未).toContain('血雨行者');
+    expect(未).not.toContain('初见');
+    // 规则第九步要公示的就是「本次错过的成就达成条件」
+    expect(未).toContain('在血雨里不闪不避站满全程');
+  });
+
+  it('隐藏任务公示把两个都列出来: 已完成的标「已完成」, 未完成的标「未触发」', () => {
+    const 公示 = 取行(p, '## 隐藏任务公示:');
+    expect(公示).toContain('旧日回响');
+    expect(公示).toContain('已完成');
+    expect(公示).toContain('无人知晓');
+    expect(公示).toContain('未触发');
+  });
+
+  it('快照没有这两张清单时退化为「无」而不抛错（旧 fixture 正是这种）', () => {
+    const p2 = assembleSettlementPanel(c, 假AI, 假快照 as any);
+    expect(取行(p2, '## 副本成就已达成:')).toBe('## 副本成就已达成: 无');
+    expect(取行(p2, '## 副本成就未达成:')).toBe('## 副本成就未达成: 无');
+    expect(取行(p2, '## 隐藏任务公示:')).toBe('## 隐藏任务公示: 无');
+  });
+});
+
+describe('称号的 A/S 守卫（规则第七步「未达 A 级直接跳过」）', () => {
+  const cB = computeSettlement({ ...基准输入, 评价等级: 'B' }, 满骰());
+  const cS = computeSettlement(基准输入, 满骰());
+  const 备用称号值 = (w: ReturnType<typeof buildSettlementWrites>) =>
+    w.find(x => x.路径.join('.') === '头部.称号.备用称号（只记录不生效）')?.值;
+
+  it('非 A/S 级: 即使 AI 给了称号, 面板留空且只写「无」', () => {
+    // 假AI 声称 S 级并给了称号, 但 computed 是 B —— 守卫看的是 computed 的评价等级
+    expect(cB.评价等级).toBe('B');
+    const p = assembleSettlementPanel(cB, 假AI, 假快照 as any);
+    expect(p).not.toContain('血夜行者');
+    expect(p.split('\n').find(l => l.startsWith('## 称号获得:'))?.trim()).toBe('## 称号获得:');
+    expect(备用称号值(buildSettlementWrites(cB, 假AI, 假快照 as any))).toEqual({ 名称: '无', 效果: {} });
+  });
+
+  it('A/S 级照常显示, 并写进备用称号', () => {
+    const p = assembleSettlementPanel(cS, 假AI, 假快照 as any);
+    expect(p).toContain('## 称号获得: 血夜行者');
+    expect(备用称号值(buildSettlementWrites(cS, 假AI, 假快照 as any))).toEqual(假AI.称号);
+  });
+});
+
+describe('掉落: 同名先聚合, 再累加到背包里已有的数量', () => {
+  const c = computeSettlement(基准输入, 满骰());
+  const 两条同名 = {
+    ...假AI,
+    掉落物品: [
+      { 名称: '血刃', 品质: '金色', 属性: 'STR+5', 效果: '流血', 数量: 1 },
+      { 名称: '血刃', 品质: '金色', 属性: 'STR+5', 效果: '流血', 数量: 2 },
+    ],
+  };
+  const 有余粮快照 = { ...假快照, 已有背包: { 血刃: 3 } };
+  const w = buildSettlementWrites(c, 两条同名 as any, 有余粮快照 as any);
+  const 取 = (路径: string[]) => w.find(x => x.路径.join('.') === 路径.join('.'))?.值;
+
+  it('已有 3 把 + 本次 1+2 把 = 6 把（不是 1、不是 2、也不是 3）', () => {
+    expect(取(['背包', '血刃', '数量'])).toBe(6);
+    expect(取(['背包', '血刃', '描述'])).toContain('金色');
+  });
+
+  it('同名只产生一条「数量」写入（逐条写会被 _.set 覆盖成最后一条）', () => {
+    expect(w.filter(x => x.路径[0] === '背包' && x.路径[2] === '数量').length).toBe(1);
+  });
+
+  it('面板的掉落清单也按同名聚合, 且列的是本次掉落量', () => {
+    const p = assembleSettlementPanel(c, 两条同名 as any, 有余粮快照 as any);
+    const 行 = p.split('\n').find(l => l.startsWith('## 掉落清单:')) ?? '';
+    expect(行).toContain('血刃');
+    expect(行).toContain('×3');
+    expect(行.match(/血刃/g)?.length).toBe(1);
+  });
+});
