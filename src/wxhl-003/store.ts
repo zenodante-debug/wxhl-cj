@@ -16,7 +16,24 @@ export interface Settings {
   apiMode: 'single' | 'multi'
   primary: ApiConfig; secondary: ApiConfig
   selectedWorldbooks: string[]
+  /** 世界书条目级筛选: 世界书名 -> 条目名数组; null/缺省 = 整本全取, [] = 一条不取 */
+  worldbookEntryFilter: Record<string, string[] | null>
   wallpaper: string
+}
+
+/**
+ * 按条目筛选世界书内容。
+ * @param filter null / undefined = 整本全取; 数组 = 只取这些条目名（空数组 = 一条不取）
+ */
+export function filterWorldbookEntries(
+  entries: { name: string; content: string; enabled?: boolean }[],
+  filter: string[] | null | undefined,
+): { name: string; content: string }[] {
+  return entries
+    .filter(e => e.enabled !== false)
+    .filter(e => !filter || filter.includes(e.name))
+    .map(e => ({ name: e.name, content: e.content }))
+    .filter(e => Boolean(e.content));
 }
 
 function defApi(): ApiConfig { return { url:'', apiKey:'', model:'', timeout:30000, maxRetries:3 } }
@@ -31,11 +48,12 @@ function load(): Settings {
         primary: { ...defApi(), ...p.primary },
         secondary: { ...defApi(), ...p.secondary },
         selectedWorldbooks: p.selectedWorldbooks||[],
+        worldbookEntryFilter: p.worldbookEntryFilter||{},
         wallpaper: p.wallpaper||'',
       }
     }
   } catch (_) {}
-  return { apiMode:'single', primary:defApi(), secondary:defApi(), selectedWorldbooks:[], wallpaper:'' }
+  return { apiMode:'single', primary:defApi(), secondary:defApi(), selectedWorldbooks:[], worldbookEntryFilter:{}, wallpaper:'' }
 }
 
 function save(s: Settings) { try { localStorage.setItem(SK, JSON.stringify(s)) } catch (_) {} }
@@ -236,7 +254,11 @@ export const useForumStore = defineStore('forum', () => {
       try {
         const entries = await getWorldbook(name)
         if (entries && entries.length > 0) {
-          const text = entries.filter(e => e.enabled !== false).map(e => e.content).filter(Boolean).join('\n\n')
+          const picked = filterWorldbookEntries(
+            entries as { name: string; content: string; enabled?: boolean }[],
+            settings.worldbookEntryFilter?.[name],
+          )
+          const text = picked.map(e => e.content).join('\n\n')
           if (text) parts.push('【' + name + '】\n' + text)
         }
       } catch (_) {}
