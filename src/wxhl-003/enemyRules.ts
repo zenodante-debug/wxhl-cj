@@ -23,6 +23,14 @@ const 四维Schema = z.object({
   PER: z.coerce.number().min(0),
 });
 
+/** 剧情性加成（用户规则原文：「属性.自定义加成（剧情性加成，默认0）」）—— 缺省或漏写一律按 0 处理 */
+const 自定义加成Schema = z.object({
+  STR: z.coerce.number().prefault(0),
+  AGI: z.coerce.number().prefault(0),
+  CON: z.coerce.number().prefault(0),
+  PER: z.coerce.number().prefault(0),
+}).prefault({});
+
 /**
  * 衍生属性的 7 个「额外加成」字段 —— **只有这 7 个白名单字段允许 AI 写入**。
  * HP_最大 / MP_最大 / 耐力_最大 / 防御 / 闪避值 / 移动距离 / 负重_上限 一律不在此列（前端代算）。
@@ -54,6 +62,7 @@ const 敌人Schema = z.object({
   血统: z.record(z.string(), z.any()).prefault({}),
   称号: z.record(z.string(), z.any()).prefault({}),
   属性基础: 四维Schema,
+  属性自定义加成: 自定义加成Schema,
   衍生额外加成: 衍生额外加成Schema.prefault({}),
   通用技能: z.record(z.string(), z.any()).prefault({}),
   装备: z.record(z.string(), z.any()).prefault({}),
@@ -109,7 +118,7 @@ export function mapEnemyToVariables(e: GeneratedEnemy): Record<string, unknown> 
     // 只写 基础 与 自定义加成; 加成 / 实际 / 属性修正值 由前端代算, 严禁写入
     属性: {
       基础: e.属性基础 ?? { STR: 0, AGI: 0, CON: 0, PER: 0 },
-      自定义加成: { STR: 0, AGI: 0, CON: 0, PER: 0 },
+      自定义加成: e.属性自定义加成 ?? { STR: 0, AGI: 0, CON: 0, PER: 0 },
     },
     // 只写 7 个额外加成（按白名单键重建, 绝不直接展开 AI 给的对象 —— 防止未校验数据里
     // 混入 HP_最大 之类被禁字段）; 最大值 / 当前值 由前端代算, 严禁写入
@@ -118,7 +127,8 @@ export function mapEnemyToVariables(e: GeneratedEnemy): Record<string, unknown> 
       acc[k] = typeof v === 'number' && Number.isFinite(v) ? v : 0;
       return acc;
     }, {}),
-    职业: e.职业,
+    // 规则原文: 杂兵、精英无职业 —— 直接不写该键, 由 MVU schema 的 prefault 兜底
+    ...(e.类型 === 'BOSS' && e.职业 ? { 职业: e.职业 } : {}),
     通用技能: e.通用技能 ?? {},
     装备: e.装备 ?? {},
     // 只写 特殊状态; 生命状态由前端代算, 严禁写入
@@ -226,20 +236,43 @@ export interface EnemyDerivedStats {
   负重上限: number;
 }
 
+/** 写入后回读到的实体。字段全部可选 —— 面板要在字段缺失时也能退化输出, 不能抛错 */
+export type 回读实体 = Record<string, any>;
+
 /**
- * 按用户规则 6-2 的公式计算衍生属性 —— **仅用于 `<enemy>` 面板展示**。
+ * 回读到的实体里, 用户卡的前端脚本是否已完成代算。
+ *
+ * 判据取 `衍生属性.HP_最大 > 0`：前端代算出的 HP_最大 =（CON修正+5）× HP系数,
+ * 恒为正; 未代算时 MVU 的 prefault 只会补 0（或该键根本不存在）。
+ * 之所以不用 `属性.实际` 判定: prefault 会把它补成 {STR:0,...} 这种"看着存在其实是空的"值。
+ */
+export function 前端已代算(实体: 回读实体 | undefined | null): boolean {
+  return Number((实体 as any)?.衍生属性?.HP_最大) > 0;
+}
+
+/** 算衍生 的原始输入 —— 四维 / 阶位 / 类型 / 装备 / 额外加成, 与实体结构解耦 */
+interface 衍生输入 {
+  四维: { STR?: number; AGI?: number; CON?: number; PER?: number };
+  阶位: string;
+  类型: string;
+  装备: unknown;
+  额外加成: Record<string, unknown>;
+}
+
+/**
+ * 按用户规则 6-2 的公式计算衍生属性（唯一定义处, 面板的两条取值路径都走它）。
  * 这些数值**仍然严禁写入变量**: 用户规则把衍生属性的计算职责给了用户卡里的前端脚本,
  * 模块只是为了让面板数字与前端代算结果一致才复算一遍。
  *
- * - 「实际属性值」取 `属性.基础` 四维 —— 本模块不写 `属性.加成`, 故 实际 = 基础
+ * - 「实际属性值」取 输入.四维 —— 调用方决定是「基础」还是「实际」
  * - 「修正值」=（实际属性值 − 5）× 位阶修正系数
  * - `负重上限` 用的是 **STR 实际值**（不是 STR 修正值）
  * - `Σ装备防御`/`Σ装备闪避` 为七槽求和（AI 已按步骤二公式算好绝对值, 缺槽按 0 计）
  */
-export function computeDerivedStats(e: GeneratedEnemy): EnemyDerivedStats {
-  const 系数 = 位阶修正系数[e.阶位] ?? 1;
-  const 基础 = (e.属性基础 ?? { STR: 0, AGI: 0, CON: 0, PER: 0 }) as Record<string, number>;
-  const 额外 = (e.衍生额外加成 ?? {}) as Record<string, unknown>;
+function 算衍生(输入: 衍生输入): EnemyDerivedStats {
+  const 系数 = 位阶修正系数[输入.阶位] ?? 1;
+  const 基础 = (输入.四维 ?? { STR: 0, AGI: 0, CON: 0, PER: 0 }) as Record<string, number>;
+  const 额外 = (输入.额外加成 ?? {}) as Record<string, unknown>;
   const 取额外 = (键: string): number => {
     const v = 额外[键];
     return typeof v === 'number' && Number.isFinite(v) ? v : 0;
@@ -251,10 +284,10 @@ export function computeDerivedStats(e: GeneratedEnemy): EnemyDerivedStats {
   const PER修正 = 修正(基础.PER ?? 0);
   // 负重上限用的是 STR 实际值, 不是 STR 修正值
   const STR实际值 = 基础.STR ?? 0;
-  const 防闪 = 汇总装备防闪(e.装备);
+  const 防闪 = 汇总装备防闪(输入.装备);
 
   return {
-    最大HP: (CON修正 + 5) * (HP系数[e.类型] ?? 8) + 取额外('HP额外加成'),
+    最大HP: (CON修正 + 5) * (HP系数[输入.类型 as EnemyKind] ?? 8) + 取额外('HP额外加成'),
     最大MP: PER修正 * 10 + 取额外('MP额外加成'),
     最大耐力: (CON修正 + 5) * 10 + 取额外('耐力额外加成'),
     防御: Math.floor((CON修正 + 5) * 0.2) + 防闪.防御 + 取额外('防御额外加成'),
@@ -262,6 +295,22 @@ export function computeDerivedStats(e: GeneratedEnemy): EnemyDerivedStats {
     移动距离: 5 + AGI修正 + 取额外('移动距离额外加成'),
     负重上限: STR实际值 * 5 + 取额外('负重额外加成'),
   };
+}
+
+/** 从 AI 原始产物算衍生属性（面板回退路径之外, 现有测试仍直接用它） */
+export function computeDerivedStats(e: GeneratedEnemy): EnemyDerivedStats {
+  return 算衍生({ 四维: e.属性基础, 阶位: e.阶位, 类型: e.类型, 装备: e.装备, 额外加成: e.衍生额外加成 as Record<string, unknown> });
+}
+
+/** 从回读到的实体算衍生属性（＝前端尚未代算时的回退路径） */
+function 从实体算衍生(实体: 回读实体): EnemyDerivedStats {
+  return 算衍生({
+    四维: 实体?.属性?.基础 ?? {},
+    阶位: 实体?.头部?.阶位 ?? '',
+    类型: 实体?.类型 ?? '杂兵',
+    装备: 实体?.装备,
+    额外加成: 实体?.衍生属性 ?? {},
+  });
 }
 
 /**
@@ -303,32 +352,45 @@ function 拼职业行(职业: unknown): string {
 }
 
 /**
- * 拼 `<enemy>…</enemy>` 面板文本, **严格对齐用户规则第七步的输出格式**（与 <检定模块> 的 <enemy> 一致）。
+ * 拼 `<enemy>…</enemy>` 面板（严格对齐用户规则第七步的格式）。
  *
- * `[生命|` 与 `[防御|` 的数值由 `computeDerivedStats` 按用户规则 6-2 的公式算出 —— 用户规则规定
- * 「新实体满血出场」, 故 `[生命|` 写 `${最大HP}/${最大HP}`; 这些数值**只用于面板展示, 绝不写变量**
- * （变量里的衍生属性由用户卡里的前端脚本代算）。
- * `[职业|` 行仅 BOSS 输出; 杂兵 / 精英省略。
+ * 数值全部**优先取回读实体里前端代算的结果**（`属性.实际` / `衍生属性.HP_最大 / HP_当前 / 防御 / 闪避值`）;
+ * 前端尚未代算时退回 `算衍生` 自算, 保证面板永远有数可出。
+ *
+ * @param 名称 角色名 —— 实体本身不存名字, 名字是 `契约者.副本角色` 下的 key
+ * @param 实体 写入变量后回读到的实体对象
+ * @param 威胁 AI 给的威胁评估（面板专用字段, 按规则不进变量）
  */
-export function assembleEnemyPanel(e: GeneratedEnemy): string {
-  const 衍生 = computeDerivedStats(e);
-  const 威胁 = typeof e.威胁 === 'string' && e.威胁.trim().length > 0 ? e.威胁 : `${e.阶位} · Lv.${e.等级}`;
+export function assembleEnemyPanelFromEntity(名称: string, 实体: 回读实体, 威胁?: string): string {
+  const 已代算 = 前端已代算(实体);
+  const 衍生 = 从实体算衍生(实体);
+  const 类型 = 实体?.类型 ?? '杂兵';
+  const 阶位 = 实体?.头部?.阶位 ?? '';
+  const 等级 = 实体?.头部?.等级 ?? 0;
+  // 已代算时四维取「实际」（含装备/职业/剧情的加成汇总）, 否则退回「基础」
+  const 四维: Record<string, any> = (已代算 ? 实体?.属性?.实际 ?? 实体?.属性?.基础 : 实体?.属性?.基础) ?? {};
+  const 威胁文本 = typeof 威胁 === 'string' && 威胁.trim().length > 0 ? 威胁 : `${阶位} · Lv.${等级}`;
   const L: string[] = [];
 
   L.push('<enemy>');
-  L.push(`[名称|${e.名称}]`);
-  L.push(`[类型|${e.类型}]`);
-  L.push(`[外观|${e.外貌 ?? '无'}]`);
-  // 用户规则: 新实体满血出场, 当前HP = 最大HP（前端脚本代算出的真实值, 这里复算保持一致）
-  L.push(`[生命|${衍生.最大HP}/${衍生.最大HP}]`);
-  L.push(`[威胁|${威胁}]`);
-  L.push(`[属性|【等级】Lv.${e.等级} | 【阶位】${e.阶位} | STR:${e.属性基础.STR} | AGI:${e.属性基础.AGI} | CON:${e.属性基础.CON} | PER:${e.属性基础.PER}]`);
-  L.push(`[防御|【防御】${衍生.防御} | 【闪避】${衍生.闪避值}]`);
-  L.push(`[底牌|【称号】${名称及效果(e.称号)} / 【天赋】${名称及效果(e.天赋)} / 【血统】${名称及效果(e.血统)}]`);
+  L.push(`[名称|${名称}]`);
+  L.push(`[类型|${类型}]`);
+  L.push(`[外观|${实体?.外貌 ?? '无'}]`);
+  // 用户规则: 新实体满血出场（HP_当前 === HP_最大）; 仍优先读 HP_当前, 战斗后再次生成面板时会用到
+  const 生命 = 已代算
+    ? `${实体?.衍生属性?.HP_当前 ?? 实体?.衍生属性?.HP_最大 ?? 衍生.最大HP}/${实体?.衍生属性?.HP_最大 ?? 衍生.最大HP}`
+    : `${衍生.最大HP}/${衍生.最大HP}`;
+  L.push(`[生命|${生命}]`);
+  L.push(`[威胁|${威胁文本}]`);
+  L.push(`[属性|【等级】Lv.${等级} | 【阶位】${阶位} | STR:${四维.STR ?? 0} | AGI:${四维.AGI ?? 0} | CON:${四维.CON ?? 0} | PER:${四维.PER ?? 0}]`);
+  const 防御 = 已代算 ? 实体?.衍生属性?.防御 ?? 衍生.防御 : 衍生.防御;
+  const 闪避 = 已代算 ? 实体?.衍生属性?.闪避值 ?? 衍生.闪避值 : 衍生.闪避值;
+  L.push(`[防御|【防御】${防御} | 【闪避】${闪避}]`);
+  L.push(`[底牌|【称号】${名称及效果(实体?.头部?.称号?.当前称号)} / 【天赋】${名称及效果(实体?.头部?.天赋)} / 【血统】${名称及效果(实体?.头部?.血统)}]`);
   // 职业行仅 BOSS 输出（杂兵 / 精英不填职业, 省略整行）
-  if (e.类型 === 'BOSS') L.push(拼职业行(e.职业));
-  L.push(`[装备|${拼装备行(e.装备)}]`);
-  L.push(`[技能|${拼技能行(e.通用技能)}]`);
+  if (类型 === 'BOSS') L.push(拼职业行(实体?.职业));
+  L.push(`[装备|${拼装备行(实体?.装备)}]`);
+  L.push(`[技能|${拼技能行(实体?.通用技能)}]`);
   L.push('</enemy>');
 
   return L.join('\n');

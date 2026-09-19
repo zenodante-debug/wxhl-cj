@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { ENEMY_KINDS, EnemyGenResultSchema, assembleEnemyPanel, computeDerivedStats, mapEnemyToVariables } from '../enemyRules';
+import { ENEMY_KINDS, EnemyGenResultSchema, assembleEnemyPanelFromEntity, computeDerivedStats, mapEnemyToVariables, 前端已代算 } from '../enemyRules';
 
 const 一只杂兵 = {
   名称: '腐化游民',
@@ -43,10 +43,14 @@ describe('EnemyGenResultSchema', () => {
 describe('mapEnemyToVariables', () => {
   const v: any = mapEnemyToVariables(结果.敌人[0] as any);
 
-  it('顶层键与实体 schema 对齐', () => {
-    for (const k of ['外貌', '类型', '构筑', '好感度', '头部', '属性', '衍生属性', '职业', '通用技能', '装备', '状态', '背包']) {
+  it('顶层键与实体 schema 对齐（杂兵无「职业」, BOSS 必须有）', () => {
+    for (const k of ['外貌', '类型', '构筑', '好感度', '头部', '属性', '衍生属性', '通用技能', '装备', '状态', '背包']) {
       expect(v).toHaveProperty(k);
     }
+    // 规则原文: 杂兵、精英无职业 —— 不写该键, 由 MVU schema 的 prefault 兜底（不写显式 undefined）
+    expect(v).not.toHaveProperty('职业');
+    const boss: any = mapEnemyToVariables(结果.敌人[2] as any);
+    expect(boss).toHaveProperty('职业');
   });
 
   it('头部带等级/阶位/天赋/血统/称号', () => {
@@ -64,6 +68,14 @@ describe('mapEnemyToVariables', () => {
     expect(v.属性).not.toHaveProperty('属性修正值');
   });
 
+  it('属性自定义加成: AI 没给时全 0, AI 给了则原样保留', () => {
+    // 默认（AI 没给该字段）→ 全 0
+    expect(v.属性.自定义加成).toEqual({ STR: 0, AGI: 0, CON: 0, PER: 0 });
+    // AI 给了 → 保留
+    const 有加成: any = mapEnemyToVariables({ ...一只杂兵, 属性自定义加成: { STR: 5, AGI: 0, CON: 0, PER: 0 } } as any);
+    expect(有加成.属性.自定义加成).toEqual({ STR: 5, AGI: 0, CON: 0, PER: 0 });
+  });
+
   it('衍生属性只写 7 个额外加成, 不写任何最大值/当前值', () => {
     expect(Object.keys(v.衍生属性).sort()).toEqual(
       ['HP额外加成', 'MP额外加成', '耐力额外加成', '防御额外加成', '闪避额外加成', '移动距离额外加成', '负重额外加成'].sort(),
@@ -78,8 +90,8 @@ describe('mapEnemyToVariables', () => {
   });
 });
 
-describe('assembleEnemyPanel', () => {
-  const p = assembleEnemyPanel(结果.敌人[0] as any);
+describe('assembleEnemyPanelFromEntity', () => {
+  const p = assembleEnemyPanelFromEntity('腐化游民', mapEnemyToVariables(结果.敌人[0] as any) as any, '极低单体，集群麻烦');
   it('以 <enemy> 包裹并闭合', () => {
     expect(p.startsWith('<enemy>')).toBe(true);
     expect(p.trimEnd().endsWith('</enemy>')).toBe(true);
@@ -93,7 +105,7 @@ describe('assembleEnemyPanel', () => {
     expect(p).not.toContain('[职业|');
   });
   it('BOSS 输出 [职业] 行', () => {
-    expect(assembleEnemyPanel(结果.敌人[2] as any)).toContain('[职业|');
+    expect(assembleEnemyPanelFromEntity('BOSS甲', mapEnemyToVariables(结果.敌人[2] as any) as any)).toContain('[职业|');
   });
   it('装备行按七槽顺序, 未装备的槽写「无」', () => {
     const 装 = p.split('\n').find(l => l.startsWith('[装备|'))!;
@@ -125,7 +137,47 @@ describe('assembleEnemyPanel', () => {
     expect(技).toContain('[技能|撕咬:（主动·主要行动·STR·无·无）撕咬--造成STR修正×0.3的物理伤害]');
   });
   it('BOSS 的 [职业] 行严格形状: 职业名称 / 职业特性 / 职业技能', () => {
-    expect(assembleEnemyPanel(结果.敌人[2] as any)).toContain('[职业|【职业名称】腐潮领主（金色） / 【职业特性】无 / 【职业技能】无]');
+    expect(assembleEnemyPanelFromEntity('BOSS甲', mapEnemyToVariables(结果.敌人[2] as any) as any)).toContain('[职业|【职业名称】腐潮领主（金色） / 【职业特性】无 / 【职业技能】无]');
+  });
+});
+
+describe('assembleEnemyPanelFromEntity（前端已代算）', () => {
+  const 基础实体: any = mapEnemyToVariables(结果.敌人[0] as any);
+  const 已代算实体: any = {
+    ...基础实体,
+    属性: { ...基础实体.属性, 实际: { STR: 40, AGI: 30, CON: 60, PER: 20 } },
+    衍生属性: { ...基础实体.衍生属性, HP_最大: 900, HP_当前: 700, 防御: 55, 闪避值: 42 },
+  };
+
+  it('前端已代算: 判据是 衍生属性.HP_最大 > 0', () => {
+    expect(前端已代算(基础实体)).toBe(false);      // 未代算: 只有额外加成, 无 HP_最大
+    expect(前端已代算(已代算实体)).toBe(true);
+    expect(前端已代算(undefined)).toBe(false);
+    expect(前端已代算({})).toBe(false);
+  });
+
+  it('[生命] 取实体里的 HP_当前/HP_最大, 不是模块自算值', () => {
+    const p = assembleEnemyPanelFromEntity('腐化游民', 已代算实体, '极低单体，集群麻烦');
+    expect(p).toContain('[生命|700/900]');
+    expect(p).not.toContain('[生命|112/112]'); // 模块自算的杂兵回退值
+  });
+
+  it('[防御] 取实体里的 防御/闪避值, 不是模块自算值', () => {
+    const p = assembleEnemyPanelFromEntity('腐化游民', 已代算实体, '极低单体，集群麻烦');
+    expect(p).toContain('[防御|【防御】55 | 【闪避】42]');
+  });
+
+  it('[属性] 四维取 属性.实际（含装备加成）, 不是 属性.基础', () => {
+    const p = assembleEnemyPanelFromEntity('腐化游民', 已代算实体, '极低单体，集群麻烦');
+    expect(p).toContain('STR:40');   // 实际
+    expect(p).not.toContain('STR:12'); // 基础
+  });
+
+  it('实体字段大量缺失也不抛错, 仍返回闭合的 <enemy>…</enemy>', () => {
+    let p = '';
+    expect(() => { p = assembleEnemyPanelFromEntity('无名', {}); }).not.toThrow();
+    expect(p.startsWith('<enemy>')).toBe(true);
+    expect(p.trimEnd().endsWith('</enemy>')).toBe(true);
   });
 });
 
@@ -200,7 +252,7 @@ describe('威胁 从 AI 结果流到面板', () => {
         { ...一只杂兵, 名称: 'BOSS甲', 类型: 'BOSS' },
       ],
     });
-    const panel = assembleEnemyPanel(parsed.敌人[0]);
+    const panel = assembleEnemyPanelFromEntity('腐化游民', mapEnemyToVariables(parsed.敌人[0]) as any, parsed.敌人[0].威胁);
     expect(panel).toContain('[威胁|极低单体，集群麻烦]');
     expect(panel).not.toContain('[威胁|一阶 · Lv.6]');
   });

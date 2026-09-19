@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BuildRoll, RollRecord } from '../dice';
-import { buildDungeonPrompt, buildEnemyPrompt, buildEnterPrompt, mapEnemiesToVariables } from '../dungeonGen';
+import { buildDungeonPrompt, buildEnemyPrompt, buildEnterPrompt } from '../dungeonGen';
 
 const build: BuildRoll = {
   副本类型: '和平',
@@ -125,10 +125,10 @@ describe('buildEnemyPrompt', () => {
     expect(p).toContain('精英 Lv.18');   // round(20 × 0.9)
     expect(p).toContain('BOSS Lv.24');   // round(20 × 1.2)
   });
-});
 
-describe('mapEnemiesToVariables 占位', () => {
-  it('仍恒抛「待实现」, 由 store 直接调 enemyRules 的 mapEnemyToVariables', () => {
-    expect(() => mapEnemiesToVariables()).toThrow(/待实现/);
+  it('敌人 prompt 声明了面板协议的优先级, 并收集剧情性加成', () => {
+    const p = buildEnemyPrompt(build, '契约者: 刘林', '世界书内容', 11);
+    expect(p).toContain('不适用于本次生成');
+    expect(p).toContain('属性自定义加成');
   });
 });
