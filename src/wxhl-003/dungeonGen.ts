@@ -17,6 +17,7 @@ function formatLockedRolls(records: RollRecord[]): string {
  * @param playerText   从 stat_data 摘出的玩家数据文本
  * @param worldbookText 选中的世界书内容, 可为空
  * @param 匹配池        按 CR 规则取出的榜单候选, 或「自由生成同阶契约者」指令
+ * @param 阶位          契约者当前阶位, 作为物品阶位的硬性约束写进 prompt
  */
 export function buildDungeonPrompt(
   build: BuildRoll,
@@ -24,6 +25,7 @@ export function buildDungeonPrompt(
   playerText: string,
   worldbookText: string,
   匹配池: string,
+  阶位: string,
 ): string {
   return `${DUNGEON_GENERATION_RULES}
 
@@ -83,8 +85,9 @@ ${worldbookText ? '\n============ 世界观参考 ============\n' + worldbookTex
 副本成就的「难度」字段只填**该成就的达成难度描述**（如「顺路可完成的环境交互」）,
 **不要**把梯度档位名写进去 —— 档位名由系统另行拼接, 你重复写会导致面板显示成「★ 探索级 · ★ 探索级」。
 物品名必须出自本副本世界观的具体设定, 禁止通用化（不要写「一把剑」, 要写《作品名》里真实存在的具体物品）。
-物品的**品质与类型已由系统掷定, 你无权改动**; 但你选择的具体物品名, 其剧情分量应与该契约者当前阶位相称
-（不要让一个一阶新人拿到世界观里最强神器级别的专属物, 优先选同世界观中分量相符的具体物品）。
+物品的**品质与类型已由系统掷定, 你无权改动**。
+物品的**阶位固定为【${阶位}】**（即该契约者的当前阶位）, 你选择的具体物品名必须确实是该阶位下合理存在的物品：
+不要给低阶契约者该世界观里最高阶的专属物、神器或最终BOSS掉落, 也不要给高阶契约者路边随处可见的杂货。
 所有契约者真名公开, 禁止代号或假名。`;
 }
 

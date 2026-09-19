@@ -1793,7 +1793,7 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
       const { player, text: playerText } = readPlayerBrief()
       const wb = await forumStore.getWorldbookContent()
       const 匹配池 = buildMatchPool(player.CR, player.阶位)
-      const prompt = buildDungeonPrompt(entry.build, [...entry.buildRecords, ...entry.rewardRecords], playerText, wb, 匹配池)
+      const prompt = buildDungeonPrompt(entry.build, [...entry.buildRecords, ...entry.rewardRecords], playerText, wb, 匹配池, player.阶位)
       const raw = await aiGenerate(cfg, prompt, {
         name: 'dungeon_generation',
         value: JSON.parse(JSON.stringify(z.toJSONSchema(DungeonGenResultSchema, { io: 'input' }))),

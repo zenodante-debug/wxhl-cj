@@ -25,7 +25,7 @@ const records: RollRecord[] = [
 ];
 
 describe('buildDungeonPrompt', () => {
-  const p = buildDungeonPrompt(build, records, '契约者: 刘林\n等级: Lv.11', '世界书内容', '人榜候选…');
+  const p = buildDungeonPrompt(build, records, '契约者: 刘林\n等级: Lv.11', '世界书内容', '人榜候选…', '二阶');
 
   it('包含规则原文的关键节', () => {
     expect(p).toContain('副本生成');
@@ -58,6 +58,11 @@ describe('buildDungeonPrompt', () => {
 
   it('时间限制天数写进 prompt', () => {
     expect(p).toContain('时间限制: 5 天');
+  });
+
+  it('把契约者阶位作为物品的硬性约束写进 prompt', () => {
+    const p2 = buildDungeonPrompt(build, records, '契约者: 刘林', '世界书内容', '人榜候选…', '三阶');
+    expect(p2).toContain('阶位固定为【三阶】');
   });
 });
 
