@@ -149,11 +149,27 @@ describe('assembleEnemyPanelFromEntity（前端已代算）', () => {
     衍生属性: { ...基础实体.衍生属性, HP_最大: 900, HP_当前: 700, 防御: 55, 闪避值: 42 },
   };
 
-  it('前端已代算: 判据是 衍生属性.HP_最大 > 0', () => {
-    expect(前端已代算(基础实体)).toBe(false);      // 未代算: 只有额外加成, 无 HP_最大
+  it('前端已代算: 未代算实体（只有 7 个额外加成）判 false', () => {
+    expect(前端已代算(基础实体)).toBe(false);      // 未代算: 只有额外加成, 无 HP_最大 / 闪避值
     expect(前端已代算(已代算实体)).toBe(true);
     expect(前端已代算(undefined)).toBe(false);
     expect(前端已代算({})).toBe(false);
+  });
+
+  it('判据是多信号: HP_最大 = 0 但 闪避值 > 0 仍算已代算（CON=0 的合法 dump 角色）', () => {
+    // 单看 HP_最大 会把这批合法角色误判成未代算 → 静默回退 → 装备加成不可见
+    const 零HP: any = { ...基础实体, 衍生属性: { ...基础实体.衍生属性, HP_最大: 0, 闪避值: 7 } };
+    expect(前端已代算(零HP)).toBe(true);
+  });
+
+  it('[名称] 行取传入的角色名（实体本身不存名字）', () => {
+    const p = assembleEnemyPanelFromEntity('腐化游民', 已代算实体, '极低单体，集群麻烦');
+    expect(p).toContain('[名称|腐化游民]');
+  });
+
+  it('[威胁] 未传时不抛错, 回退成 `阶位 · Lv.等级`', () => {
+    const p = assembleEnemyPanelFromEntity('腐化游民', 基础实体);
+    expect(p).toContain('[威胁|一阶 · Lv.6]');
   });
 
   it('[生命] 取实体里的 HP_当前/HP_最大, 不是模块自算值', () => {
@@ -165,6 +181,16 @@ describe('assembleEnemyPanelFromEntity（前端已代算）', () => {
   it('[防御] 取实体里的 防御/闪避值, 不是模块自算值', () => {
     const p = assembleEnemyPanelFromEntity('腐化游民', 已代算实体, '极低单体，集群麻烦');
     expect(p).toContain('[防御|【防御】55 | 【闪避】42]');
+  });
+
+  it('部分代算: 已代算模式下缺失的数值印 `—`, 不退回自算值、也不印 0', () => {
+    // 前端跑了但只填了 HP, 防御/闪避键缺失 —— 这是「前端出问题」的信号, 必须可见
+    const 半成品: any = { ...基础实体, 衍生属性: { HP_最大: 900, HP_当前: 700 } };
+    expect(前端已代算(半成品)).toBe(true);
+    const p = assembleEnemyPanelFromEntity('腐化游民', 半成品, '极低单体，集群麻烦');
+    expect(p).toContain('[防御|【防御】— | 【闪避】—]');
+    expect(p).not.toContain('【防御】2');  // 不是自算值
+    expect(p).not.toContain('【防御】0');  // 也不是被 prefault 补出的 0
   });
 
   it('[属性] 四维取 属性.实际（含装备加成）, 不是 属性.基础', () => {

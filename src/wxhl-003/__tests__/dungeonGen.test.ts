@@ -130,5 +130,7 @@ describe('buildEnemyPrompt', () => {
     const p = buildEnemyPrompt(build, '契约者: 刘林', '世界书内容', 11);
     expect(p).toContain('不适用于本次生成');
     expect(p).toContain('属性自定义加成');
+    // 把失败模式点死: AI 若在 JSON 前后追一份面板, extractJSON 会解析失败
+    expect(p).toContain('在 JSON 前后输出任何 <enemy> 面板或状态卡');
   });
 });
