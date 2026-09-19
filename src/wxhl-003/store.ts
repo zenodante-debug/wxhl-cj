@@ -1,6 +1,9 @@
 import { type ForumThread, type ForumPost, INITIAL_THREADS, RANK_BOARDS, type CareerPlan, type CareerRoadmap, type PlanType, type DungeonStrategy, type Faction, type DungeonMode, CAREER_SYSTEM_RULES, WORLD_SUMMARY } from './data'
 import { WORKSHOP_WORLDBOOK_NAME, PvPSaveSchema, type WorkshopCard, type PvPSave } from './data'
 import { extractContractSave, buildIntroPrompt, tierOf, generateDefaultAppearance, buildBattleIntroMessage } from './workshop'
+import { rollBuild, rollRewards, type BuildRoll, type RewardSet, type RollRecord } from './dice'
+import { DungeonGenResultSchema, assemblePanelText, type DungeonGenResult, type PlayerBrief } from './dungeonRules'
+import { buildDungeonPrompt, buildEnterPrompt } from './dungeonGen'
 
 const SK = 'wxhl003_settings'
 
@@ -1633,5 +1636,201 @@ export const useWorkshopStore = defineStore('workshop', () => {
     loadContracts, extractMySave, generateIntro, downloadMySave,
     authorDraft, previewSave, authorError,
     previewPaste, writeToWorldbook, removeContract, startBattle,
+  }
+})
+
+// ================================================================
+// 副本生成
+// ================================================================
+const DGEN_SK = 'wxhl003_rolled_dungeons'
+
+/** 一次「掷骰 + 生成」的完整产物 */
+export interface RolledDungeon {
+  id: number
+  createdAt: string
+  /** 全部骰值与映射, 含奖励骰 */
+  buildRecords: RollRecord[]
+  rewardRecords: RollRecord[]
+  build: BuildRoll
+  rewards: RewardSet
+  /** AI 产出, 通过 zod 校验后才写入 */
+  result?: DungeonGenResult
+  panelText?: string
+  enterPrompt?: string
+  /** 已写入存档的痕迹 */
+  written?: { at: string; messageId: number | 'latest' }
+}
+
+function loadRolledDungeons(): RolledDungeon[] {
+  try {
+    const r = localStorage.getItem(DGEN_SK)
+    if (r) return JSON.parse(r)
+  } catch (_) {}
+  return []
+}
+
+function saveRolledDungeons(list: RolledDungeon[]) {
+  try { localStorage.setItem(DGEN_SK, JSON.stringify(list)) } catch (_) {}
+}
+
+/** 阶位写法归一: schema 用「一阶」，TIER_ORDER 用「1阶」，榜单按下标 0~4 取 */
+const 阶位归一: Record<string, number> = {
+  '一阶': 0, '二阶': 1, '三阶': 2, '四阶': 3, '五阶': 4,
+  '1阶': 0, '2阶': 1, '3阶': 2, '4阶': 3, '5阶': 4,
+}
+
+/** 按 CR 决定队友匹配池（规则 §三 与用户口径: ≥6 升一阶, ≥7 升两阶, =10 天榜） */
+function buildMatchPool(cr: number, 阶位: string): string {
+  const idx = 阶位归一[阶位] ?? 0
+  if (cr <= 4) {
+    return `玩家 CR=${cr}（≤4）：请自由生成同阶契约者作为队友，**不要**从排行榜抓人。等级与玩家同阶相近。`
+  }
+  const 偏移 = cr >= 10 ? 4 - idx : cr >= 7 ? 2 : cr >= 6 ? 1 : 0
+  const board = RANK_BOARDS[Math.min(4, idx + 偏移)]
+  const lines = board.items.map(i => `- ${i.name} ${i.team} Lv.${i.lv}`)
+  return `玩家 CR=${cr}，阶位=${阶位}：从【${board.title}】中挑选队友。榜单候选（只有称号与势力，真名由你补全）：
+${lines.join('\n')}
+要求：被选中的契约者必须补上真名（禁止代号），并给出阵营。`;
+}
+
+export const useDungeonGenStore = defineStore('dungeonGen', () => {
+  const rolledDungeons = ref<RolledDungeon[]>(loadRolledDungeons())
+  const rolling = ref(false)
+  const generating = ref(false)
+  const writing = ref(false)
+  const lastError = ref('')
+
+  watchEffect(() => saveRolledDungeons(rolledDungeons.value))
+
+  const latest = computed(() => rolledDungeons.value[0] ?? null)
+
+  function getForumStore() { return useForumStore() }
+
+  function nowStamp(): string {
+    const d = new Date()
+    return d.getFullYear() + '-' + String(d.getMonth() + 1).padStart(2, '0') + '-' + String(d.getDate()).padStart(2, '0') +
+      ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0')
+  }
+
+  /** 读 stat_data 里的副本周期与玩家简报 */
+  function readPlayerBrief(): { 副本周期: number; player: PlayerBrief; text: string } {
+    const 兜底 = { 副本周期: 1, player: { 姓名: '', 等级: 1, 阶位: '一阶', CR: 3 }, text: '' }
+    try {
+      let vars: any = {}
+      try {
+        const mid = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : -1
+        if (mid && mid !== -1) vars = getVariables?.({ type: 'message', message_id: mid }) ?? {}
+      } catch (_) {}
+      if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type: 'message', message_id: -1 }) ?? {} } catch (_) {} }
+      if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type: 'chat' }) ?? {} } catch (_) {} }
+      const c = vars?.stat_data?.契约者
+      if (!c) return 兜底
+      const h = c.头部 ?? {}
+      const player: PlayerBrief = {
+        姓名: h.姓名 || '未知契约者',
+        等级: Number(h.等级) || 1,
+        阶位: h.阶位 || '一阶',
+        CR: Number(h.CR) || 3,
+      }
+      const 副本周期 = Number(c.赛季信息?.当前副本周期) || 1
+      const lines = [
+        '【头部】' + JSON.stringify(h),
+        '【职业】' + JSON.stringify(c.职业 ?? {}),
+        '【属性】' + JSON.stringify(c.属性 ?? {}),
+        '【小队】' + JSON.stringify(c.小队 ?? {}),
+        '【副本经历】' + JSON.stringify(c.副本经历 ?? {}),
+      ]
+      return { 副本周期, player, text: lines.join('\n') }
+    } catch (_) { return 兜底 }
+  }
+
+  /** 掷骰: 只掷, 不调 AI */
+  function doRoll() {
+    rolling.value = true
+    lastError.value = ''
+    try {
+      const { 副本周期 } = readPlayerBrief()
+      const { build, records: buildRecords } = rollBuild(副本周期)
+      const { rewards, records: rewardRecords } = rollRewards()
+      const maxId = rolledDungeons.value.reduce((m, d) => Math.max(m, d.id), 0)
+      const entry: RolledDungeon = {
+        id: maxId + 1,
+        createdAt: nowStamp(),
+        buildRecords,
+        rewardRecords,
+        build,
+        rewards,
+      }
+      rolledDungeons.value.unshift(entry)
+    } catch (e: any) {
+      lastError.value = e.message || '掷骰失败'
+    } finally {
+      rolling.value = false
+    }
+  }
+
+  /** 生成: 用最新一次掷骰结果调 AI 产出副本内容 */
+  async function generate() {
+    if (generating.value) return
+    const entry = latest.value
+    if (!entry) { lastError.value = '请先掷骰'; return }
+
+    const forumStore = getForumStore()
+    const cfg = getActiveCfg(forumStore.settings)
+    if (!cfg.url || !cfg.apiKey) { lastError.value = '请先在终端设置中配置 API'; return }
+
+    generating.value = true
+    lastError.value = ''
+    try {
+      const { player, text: playerText } = readPlayerBrief()
+      const wb = await forumStore.getWorldbookContent()
+      const 匹配池 = buildMatchPool(player.CR, player.阶位)
+      const prompt = buildDungeonPrompt(entry.build, [...entry.buildRecords, ...entry.rewardRecords], playerText, wb, 匹配池)
+      const raw = await aiGenerate(cfg, prompt, {
+        name: 'dungeon_generation',
+        value: JSON.parse(JSON.stringify(z.toJSONSchema(DungeonGenResultSchema, { io: 'input' }))),
+      })
+      const parsed = DungeonGenResultSchema.parse(extractJSON(raw))
+      const idx = rolledDungeons.value.findIndex(d => d.id === entry.id)
+      if (idx < 0) return
+      rolledDungeons.value[idx] = {
+        ...rolledDungeons.value[idx],
+        result: parsed,
+        panelText: assemblePanelText(parsed, entry.build, entry.rewards, player),
+        enterPrompt: buildEnterPrompt(parsed, entry.build),
+      }
+    } catch (e: any) {
+      lastError.value = e.message || '生成失败'
+    } finally {
+      generating.value = false
+    }
+  }
+
+  /** 重roll: 丢弃 AI 产物, 重新掷骰 */
+  function reroll() {
+    const entry = latest.value
+    if (entry) rolledDungeons.value = rolledDungeons.value.filter(d => d.id !== entry.id)
+    doRoll()
+  }
+
+  /** 写入 MVU 变量（Task 8 实现） */
+  async function writeToSave(_id: number): Promise<boolean> {
+    lastError.value = '写入存档将在下一步实现'
+    return false
+  }
+
+  /** 填入酒馆输入框（Task 8 实现） */
+  async function fillInput(_id: number): Promise<boolean> {
+    lastError.value = '填入输入框将在下一步实现'
+    return false
+  }
+
+  function remove(id: number) {
+    rolledDungeons.value = rolledDungeons.value.filter(d => d.id !== id)
+  }
+
+  return {
+    rolledDungeons, rolling, generating, writing, lastError, latest,
+    doRoll, generate, reroll, writeToSave, fillInput, remove,
   }
 })
