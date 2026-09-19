@@ -191,3 +191,136 @@ export function rollBuild(副本周期: number): { build: BuildRoll; records: Ro
     records,
   };
 }
+
+// ================================================================
+// 奖励骰与奖励文本
+// ================================================================
+
+export type Quality = '白色' | '蓝色' | '金色' | '紫色' | '银色';
+export type ItemType = '消耗品' | '装备' | '技能卷轴' | '特殊';
+
+/** 区间表: [区间右端点(含), 文字], 必须按右端点升序且覆盖到骰面上限 */
+export type RangeTable<T extends string> = readonly (readonly [number, T])[];
+
+/** 按区间表把骰值映射成文字; 落在表外视为编码错误, 直接抛出 */
+export function qualityOf(table: RangeTable<Quality>, d: number): Quality {
+  return pickFromTable(table, d);
+}
+export function itemTypeOf(table: RangeTable<ItemType>, d: number): ItemType {
+  return pickFromTable(table, d);
+}
+function pickFromTable<T extends string>(table: RangeTable<T>, d: number): T {
+  for (const [right, label] of table) if (d <= right) return label;
+  throw new Error(`骰值 ${d} 超出区间表上限 ${table[table.length - 1][0]}`);
+}
+
+// 规则各奖励行给定的区间表
+const 品质_支线 = [[1, '白色'], [4, '蓝色'], [6, '金色']] as RangeTable<Quality>;
+const 类型_支线 = [[4, '消耗品'], [7, '装备'], [9, '技能卷轴']] as RangeTable<ItemType>;
+const 品质_隐藏 = [[3, '蓝色'], [7, '金色'], [9, '紫色'], [10, '银色']] as RangeTable<Quality>;
+const 类型_隐藏 = [[6, '装备'], [9, '技能卷轴'], [10, '特殊']] as RangeTable<ItemType>;
+const 品质_星1 = [[2, '白色'], [5, '蓝色']] as RangeTable<Quality>;
+const 品质_星2 = [[1, '白色'], [4, '蓝色'], [5, '金色']] as RangeTable<Quality>;
+const 品质_星3 = [[3, '蓝色'], [5, '金色']] as RangeTable<Quality>;
+const 品质_星4 = [[3, '蓝色'], [7, '金色'], [8, '紫色']] as RangeTable<Quality>;
+const 类型_星4 = [[6, '装备'], [9, '技能卷轴']] as RangeTable<ItemType>;
+const 品质_星5 = [[1, '金色'], [3, '紫色']] as RangeTable<Quality>;
+const 类型_星5 = [[5, '装备'], [9, '技能卷轴']] as RangeTable<ItemType>;
+const 品质_星6 = [[3, '紫色'], [5, '银色']] as RangeTable<Quality>;
+const 类型_星6 = [[3, '装备'], [6, '技能卷轴'], [7, '特殊']] as RangeTable<ItemType>;
+
+export interface RewardRoll {
+  up: number;
+  exp: number;
+  rp: number;
+  quality: Quality;
+  itemType: ItemType;
+}
+
+export interface RewardSet {
+  主线: RewardRoll;
+  支线: RewardRoll[];
+  隐藏: RewardRoll[];
+  成就: RewardRoll[];
+}
+
+/** 成就梯度各档的 [UP骰面, UP加值, EXP骰面, EXP加值, RP底, RP骰面]。RP骰面为 0 表示该档 RP 是固定值、不掷骰 */
+const 成就梯度 = [
+  { 名: '★ 探索级', up: [11, 24], exp: [11, 14], rp: [1, 0], 品质: 品质_星1, 类型: 类型_支线 },
+  { 名: '★★ 挑战级', up: [21, 49], exp: [11, 34], rp: [0, 3], 品质: 品质_星2, 类型: 类型_支线 },
+  { 名: '★★★ 破局级', up: [31, 84], exp: [21, 49], rp: [1, 3], 品质: 品质_星3, 类型: 类型_支线 },
+  { 名: '★★★★ 史诗级', up: [61, 169], exp: [31, 84], rp: [2, 3], 品质: 品质_星4, 类型: 类型_星4 },
+  { 名: '★★★★★ 传说级', up: [121, 339], exp: [41, 129], rp: [3, 3], 品质: 品质_星5, 类型: 类型_星5 },
+  { 名: '★★★★★★ 世界天花板', up: [241, 679], exp: [91, 254], rp: [4, 3], 品质: 品质_星6, 类型: 类型_星6 },
+] as const;
+
+/** 掷出全部奖励骰。数值全部由本函数产出, AI 永不参与 */
+export function rollRewards(): { rewards: RewardSet; records: RollRecord[] } {
+  const records: RollRecord[] = [];
+
+  /** 掷 UP/EXP 段并记账 */
+  const rollMain = (标签: string, upFaces: number, upAdd: number, expFaces: number, expAdd: number) => {
+    const upR = rollDie(upFaces);
+    const expR = rollDie(expFaces);
+    records.push({ 标签: 标签 + '·UP', 表达式: `1d${upFaces}+${upAdd}`, 骰值: upR, 映射: String(upR + upAdd) });
+    records.push({ 标签: 标签 + '·EXP', 表达式: `1d${expFaces}+${expAdd}`, 骰值: expR, 映射: String(expR + expAdd) });
+    return { up: upR + upAdd, exp: expR + expAdd };
+  };
+
+  /** 掷品质/类型段并记账 */
+  const rollItem = (标签: string, 品质表: RangeTable<Quality>, 品质面: number, 类型表: RangeTable<ItemType>, 类型面: number) => {
+    const qR = rollDie(品质面);
+    const tR = rollDie(类型面);
+    const quality = qualityOf(品质表, qR);
+    const itemType = itemTypeOf(类型表, tR);
+    records.push({ 标签: 标签 + '·品质', 表达式: `1d${品质面}`, 骰值: qR, 映射: quality });
+    records.push({ 标签: 标签 + '·类型', 表达式: `1d${类型面}`, 骰值: tR, 映射: itemType });
+    return { quality, itemType };
+  };
+
+  // 主线: 1d100+250 UP + 1d100+150 EXP (无物品)
+  const 主线数值 = rollMain('主线', 100, 250, 100, 150);
+  const 主线: RewardRoll = { ...主线数值, rp: 0, quality: '金色', itemType: '装备' };
+
+  // 支线 ×3: 1d150+50 UP + 1d30+20 EXP + 品质 1d6 + 类型 1d9
+  const 支线: RewardRoll[] = [];
+  for (let i = 1; i <= 3; i++) {
+    const 数值 = rollMain(`支线${i}`, 150, 50, 30, 20);
+    const 物品 = rollItem(`支线${i}`, 品质_支线, 6, 类型_支线, 9);
+    支线.push({ ...数值, rp: 0, ...物品 });
+  }
+
+  // 隐藏 ×2: 1d200+300 UP + 1d100+100 EXP + 1d3 RP + 品质 1d10 + 类型 1d10
+  const 隐藏: RewardRoll[] = [];
+  for (let i = 1; i <= 2; i++) {
+    const 数值 = rollMain(`隐藏${i}`, 200, 300, 100, 100);
+    const rpR = rollDie(3);
+    records.push({ 标签: `隐藏${i}·RP`, 表达式: '1d3', 骰值: rpR, 映射: String(rpR) });
+    const 物品 = rollItem(`隐藏${i}`, 品质_隐藏, 10, 类型_隐藏, 10);
+    隐藏.push({ ...数值, rp: rpR, ...物品 });
+  }
+
+  // 成就 ×6: 按梯度表。★ 的 1 RP 是规则给定的固定值, 不掷骰也不记入掷骰记录
+  const 成就: RewardRoll[] = 成就梯度.map(g => {
+    const 数值 = rollMain(g.名, g.up[0], g.up[1], g.exp[0], g.exp[1]);
+    const [rp底, rp面] = g.rp;
+    let rp = rp底;
+    if (rp面 > 0) {
+      const rpR = rollDie(rp面);
+      records.push({ 标签: g.名 + '·RP', 表达式: `1d${rp面}+${rp底}`, 骰值: rpR, 映射: String(rpR + rp底) });
+      rp = rpR + rp底;
+    }
+    const 物品 = rollItem(g.名, g.品质, g.品质[g.品质.length - 1][0], g.类型, g.类型[g.类型.length - 1][0]);
+    return { ...数值, rp, ...物品 };
+  });
+
+  return { rewards: { 主线, 支线, 隐藏, 成就 }, records };
+}
+
+/** 拼装奖励文本。物品名为空时省略物品段。RP 为 0 时省略 RP 段 */
+export function composeRewardText(r: RewardRoll, 物品名: string): string {
+  const parts = [`${r.up} UP`, `${r.exp} EXP`];
+  if (r.rp > 0) parts.push(`${r.rp} RP`);
+  if (物品名) parts.push(`【${r.quality}】${r.itemType}：${物品名}`);
+  return parts.join(' + ');
+}
