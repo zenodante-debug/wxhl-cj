@@ -35,7 +35,6 @@ export const DungeonGenResultSchema = z.object({
   副本名称: z.string().min(1),
   副本来源: z.string().min(1),
   副本背景: z.string().min(1),
-  时间限制: z.string().min(1),
   日常调和说明: z.string().prefault(''),
   主线任务: 主线任务Schema,
   支线任务: z.array(支线任务Schema).length(3),
@@ -71,7 +70,8 @@ export function mapToVariables(
     副本名称: result.副本名称,
     副本来源: result.副本来源,
     副本类型: build.副本类型,
-    时间限制: result.时间限制,
+    // 时间限制是已锁定的骰值 (1d12+2), 不从 AI 结果取, 否则 AI 的措辞会让它与骰值不一致
+    时间限制: `${build.时间限制天}天`,
     // 规则 §四: 以契约者进本时的当前等级为基准
     基准等级: player.等级,
   };
@@ -159,7 +159,7 @@ export function assemblePanelText(
   L.push(`## 副本背景: ${result.副本背景}`);
   L.push(`## 副本来源: ${result.副本来源}`);
   L.push(`## 副本类型: 【${build.副本类型}】`);
-  L.push(`## 时间限制: ${result.时间限制}`);
+  L.push(`## 时间限制: ${build.时间限制天}天`);
   L.push('## 主线任务');
   L.push(`名称: ${result.主线任务.名称}`);
   L.push(`描述: ${result.主线任务.说明}`);
