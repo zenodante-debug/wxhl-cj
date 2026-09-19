@@ -35,8 +35,13 @@ describe('EnemyGenResultSchema', () => {
   it('拒绝不在枚举里的类型', () => {
     expect(() => EnemyGenResultSchema.parse({ 敌人: [{ ...一只杂兵, 类型: '隐藏BOSS' }, 结果.敌人[1], 结果.敌人[2]] })).toThrow();
   });
-  it('类型枚举固定为 杂兵 / 精英 / BOSS', () => {
-    expect(ENEMY_KINDS).toEqual(['杂兵', '精英', 'BOSS']);
+  it('类型枚举与 schema 同源: ENEMY_KINDS 的三个成员都能通过校验', () => {
+    // 原断言 `toEqual(['杂兵','精英','BOSS'])` 只是在复述字面量（且该顺序在代码里无语义, 只喂 z.enum）。
+    // 真正声称的是: schema 的 enum 派生自 ENEMY_KINDS —— 两者写岔就在这里红。
+    for (const 类型 of ENEMY_KINDS) {
+      expect(() => EnemyGenResultSchema.parse({ 敌人: [{ ...一只杂兵, 类型 }, 结果.敌人[1], 结果.敌人[2]] })).not.toThrow();
+    }
+    expect(ENEMY_KINDS.length).toBe(3);
   });
 });
 
@@ -83,6 +88,12 @@ describe('mapEnemyToVariables', () => {
     for (const bad of ['HP_最大', 'MP_最大', '耐力_最大', '防御', '闪避值', '移动距离', '负重_上限', 'HP_当前', 'MP_当前', '耐力_当前']) {
       expect(v.衍生属性).not.toHaveProperty(bad);
     }
+  });
+
+  it('称号为空对象时兜底成 {名称:「无」, 效果:{}}', () => {
+    // 现有一只用例给的 称号 是非空对象, 走的是 `原样保留` 那一支; 这条钉住兜底分支
+    const 空称号: any = mapEnemyToVariables({ ...一只杂兵, 称号: {} } as any);
+    expect(空称号.头部.称号.当前称号).toEqual({ 名称: '无', 效果: {} });
   });
 
   it('状态只写 特殊状态', () => {
@@ -132,7 +143,8 @@ describe('assembleEnemyPanelFromEntity', () => {
   });
   it('[技能] 行严格形状: 技能名:（类型·行动类型·关联属性·消耗·冷却）效果名--效果内容', () => {
     const 技 = p.split('\n').find(l => l.startsWith('[技能|'))!;
-    expect(技).toContain('（');
+    // 原断言 `expect(技).toContain('（')` 已删 —— 拼技能行无条件拼出 `（…）`, 只要该行存在就恒真。
+    // 下面两条（`--` 与整行逐字）才是有内容的断言。
     expect(技).toContain('--');
     expect(技).toContain('[技能|撕咬:（主动·主要行动·STR·无·无）撕咬--造成STR修正×0.3的物理伤害]');
   });
@@ -160,6 +172,36 @@ describe('assembleEnemyPanelFromEntity（前端已代算）', () => {
     // 把判据改回两信号 / 三信号, 这条必红
     const 零前三: any = { ...基础实体, 衍生属性: { ...基础实体.衍生属性, HP_最大: 0, 闪避值: 0, MP_最大: 0, 负重_上限: 200 } };
     expect(前端已代算(零前三)).toBe(true);
+  });
+
+  it('判据逐信号覆盖: 四个信号各自单独 > 0 都算已代算', () => {
+    // 上一条只覆盖「前三项为 0 + 负重_上限 > 0」; 这里把四个信号各钉一遍（判据是四信号联合）
+    const 造 = (键: string, 值: number) => ({
+      ...基础实体,
+      衍生属性: { ...基础实体.衍生属性, HP_最大: 0, MP_最大: 0, 闪避值: 0, 负重_上限: 0, [键]: 值 },
+    });
+    for (const 键 of ['HP_最大', 'MP_最大', '闪避值', '负重_上限']) {
+      expect(前端已代算(造(键, 1))).toBe(true);
+    }
+    // 非空性对照: 四信号全 0 时仍判未代算 —— 说明上面的 true 不是「恒真」
+    expect(前端已代算(造('HP_最大', 0))).toBe(false);
+  });
+
+  it('已代算: 合法的 0 与负数原样打印, 不因「假值」印 —', () => {
+    // 规则步骤二明文允许重装/极重的装备闪避是负系数 → 闪避值 -8 是合法值, 必须照印
+    const 实体: any = { ...已代算实体, 衍生属性: { ...已代算实体.衍生属性, 防御: 0, 闪避值: -8 } };
+    const p = assembleEnemyPanelFromEntity('腐化游民', 实体, '极低单体，集群麻烦');
+    expect(p).toContain('[防御|【防御】0 | 【闪避】-8]');
+    expect(p).not.toContain('—'); // 0 与负数都算「有值」, 整块面板一个 — 都不该出现
+  });
+
+  it('已代算但 属性.实际 缺失: [属性] 四维印 —, 不退回 属性.基础、也不是 NaN', () => {
+    const 无实际: any = { ...已代算实体, 属性: { 基础: 基础实体.属性.基础 } };
+    expect(前端已代算(无实际)).toBe(true);
+    const p = assembleEnemyPanelFromEntity('腐化游民', 无实际, '极低单体，集群麻烦');
+    expect(p).toContain('[属性|【等级】Lv.6 | 【阶位】一阶 | STR:— | AGI:— | CON:— | PER:—]');
+    expect(p).not.toContain('STR:12'); // 不是 属性.基础
+    expect(p).not.toContain('NaN');
   });
 
   it('[名称] 行取传入的角色名（实体本身不存名字）', () => {
@@ -211,6 +253,47 @@ describe('assembleEnemyPanelFromEntity（前端已代算）', () => {
     expect(() => { p = assembleEnemyPanelFromEntity('无名', {}); }).not.toThrow();
     expect(p.startsWith('<enemy>')).toBe(true);
     expect(p.trimEnd().endsWith('</enemy>')).toBe(true);
+  });
+});
+
+// ===== 阶位不可识别时, 回退路径印「—」而不是静默按一阶系数算 =====
+describe('assembleEnemyPanelFromEntity（回退路径 · 阶位不可识别）', () => {
+  const 基础实体: any = mapEnemyToVariables(结果.敌人[0] as any);
+  const 造 = (阶位: string): any => ({ ...基础实体, 头部: { ...基础实体.头部, 阶位 } });
+
+  it('阶位「无」: 生命与防御/闪避印 —, 但 [属性] 行照常显示那个可疑原值', () => {
+    const 实体 = 造('无');
+    expect(前端已代算(实体)).toBe(false); // 走回退路径
+    const p = assembleEnemyPanelFromEntity('腐化游民', 实体, '极低单体，集群麻烦');
+    expect(p).toContain('[生命|—/—]');
+    expect(p).toContain('[防御|【防御】— | 【闪避】—]');
+    // 阶位原值必须让人看得见（这是排查依据）, 不能被归一掉、也不能被抹成「无阶位」
+    expect(p).toContain('[属性|【等级】Lv.6 | 【阶位】无 | STR:12 | AGI:8 | CON:14 | PER:8]');
+    // 不得再出现「按一阶系数算出来的数」（一阶时是 112 / 2 / 11）—— 那正是本轮要消灭的静默错位阶
+    expect(p).not.toContain('[生命|112/112]');
+    expect(p).not.toContain('【防御】2 |');
+  });
+
+  it('别名归一: 阶位「1阶」的派生数值与「一阶」逐字相同', () => {
+    const 别名 = assembleEnemyPanelFromEntity('腐化游民', 造('1阶'), 'x');
+    const 规范 = assembleEnemyPanelFromEntity('腐化游民', 造('一阶'), 'x');
+    // [属性] 行刻意显示各自的原值（见上一条）, 故只比对两个派生数值行
+    const 派生行 = (s: string) =>
+      s
+        .split('\n')
+        .filter(l => l.startsWith('[生命|') || l.startsWith('[防御|'))
+        .join('\n');
+    expect(派生行(别名)).toBe(派生行(规范));
+    expect(别名).toContain('[生命|112/112]');
+    expect(别名).toContain('[防御|【防御】2 | 【闪避】11]');
+    expect(别名).not.toContain('—');
+  });
+
+  it('阶位不可识别时 负重上限 仍照常算出（它只依赖 STR, 不该跟着变 undefined）', () => {
+    const d = computeDerivedStats({ ...一只杂兵, 阶位: '无' } as any);
+    expect(d.负重上限).toBe(60); // STR 12 × 5 + 0 —— 与阶位无关
+    expect(d.最大HP).toBeUndefined(); // 依赖阶位系数的六项才是 — 的那批
+    expect(d.闪避值).toBeUndefined();
   });
 });
 
