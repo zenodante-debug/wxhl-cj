@@ -48,6 +48,8 @@ const 敌人Schema = z.object({
   构筑: z.string().prefault('无'),
   等级: z.coerce.number().int().min(1).max(999),
   阶位: z.string().prefault('无'),
+  // 玩家视角下的威胁评估（如「极低单体，集群麻烦」）—— 只用于 <enemy> 面板, 不写进变量
+  威胁: z.string().prefault(''),
   天赋: z.record(z.string(), z.any()).prefault({}),
   血统: z.record(z.string(), z.any()).prefault({}),
   称号: z.record(z.string(), z.any()).prefault({}),
@@ -117,21 +119,80 @@ export function mapEnemyToVariables(e: GeneratedEnemy): Record<string, unknown> 
   };
 }
 
-/** 从装备的某个槽位取名称; 缺槽 / 未装备一律返回「无」 */
-function 取装备名(装备: unknown, 槽: string): string {
-  if (!装备 || typeof 装备 !== 'object') return '无';
-  const 数据 = (装备 as Record<string, any>)[槽];
+/** 空值判定: undefined / null / 空串 都算「无内容」 */
+function 是空(值: unknown): boolean {
+  return 值 === undefined || 值 === null || (typeof 值 === 'string' && 值.trim().length === 0);
+}
+
+/**
+ * 把「效果」渲染成 `效果名--效果内容`, 多个效果用 `；` 分隔。
+ * 这是用户规则里 `[技能]` 行的形状（`--` 是效果名与内容之间的固定分隔）。
+ */
+function 拼效果(效果: unknown): string {
+  if (typeof 效果 === 'string') return 效果.trim();
+  if (!效果 || typeof 效果 !== 'object') return '';
+  const 条目 = Object.entries(效果 as Record<string, any>).filter(([, v]) => !是空(v));
+  if (条目.length === 0) return '';
+  return 条目
+    .map(([名, 内容]) => {
+      const 文本 = typeof 内容 === 'string' ? 内容 : JSON.stringify(内容);
+      return 名 ? `${名}--${文本}` : 文本;
+    })
+    .join('；');
+}
+
+/** 渲染「{{名称及效果，无则填无}}」: 形如 `腐臭血肉（腐臭--被近战命中时使对方中毒1回合）` */
+function 名称及效果(对象: unknown): string {
+  if (!对象 || typeof 对象 !== 'object') return '无';
+  const d = 对象 as Record<string, any>;
+  const 名称 = typeof d.名称 === 'string' && d.名称.trim().length > 0 ? d.名称 : '无';
+  const 效果串 = 拼效果(d.效果);
+  if (名称 === '无' && !效果串) return '无';
+  return 效果串 ? `${名称}（${效果串}）` : 名称;
+}
+
+/** 把字符串 / 数组 / 对象统一渲染成 `；` 分隔的清单（用于职业特性、职业技能） */
+function 拼清单(值: unknown): string {
+  if (typeof 值 === 'string') return 值.trim() || '无';
+  if (Array.isArray(值)) {
+    const 串 = 值
+      .map(v => (typeof v === 'string' ? v : v && typeof v === 'object' && typeof (v as any).名称 === 'string' ? (v as any).名称 : ''))
+      .filter((s: string) => s.length > 0)
+      .join('；');
+    return 串 || '无';
+  }
+  if (!值 || typeof 值 !== 'object') return '无';
+  const 条目 = Object.entries(值 as Record<string, any>).filter(([, v]) => !是空(v));
+  if (条目.length === 0) return '无';
+  return 条目.map(([名, v]) => (typeof v === 'string' && v.trim().length > 0 ? `${名}: ${v}` : 名)).join('；');
+}
+
+/** 单个装备条目: `名称（品质·阶位·强化+n·伤害骰·倍率·装备防御·装备闪避·效果: …）`; 缺槽返回「无」 */
+function 装备条目(数据: unknown): string {
   if (!数据 || typeof 数据 !== 'object') return '无';
-  const 名称 = 数据.名称;
-  return typeof 名称 === 'string' && 名称.length > 0 ? 名称 : '无';
+  const d = 数据 as Record<string, any>;
+  const 名称 = typeof d.名称 === 'string' && d.名称.trim().length > 0 ? d.名称 : '无';
+  if (名称 === '无') return '无';
+  const 部件: string[] = [];
+  if (typeof d.类型 === 'string' && d.类型.trim() && d.类型 !== '无') 部件.push(d.类型);
+  if (typeof d.品质 === 'string' && d.品质.trim() && d.品质 !== '无') 部件.push(d.品质);
+  if (typeof d.阶位 === 'string' && d.阶位.trim() && d.阶位 !== '无') 部件.push(d.阶位);
+  if (typeof d.强化等级 === 'number' && d.强化等级 > 0) 部件.push(`强化+${d.强化等级}`);
+  if (typeof d.伤害骰 === 'string' && d.伤害骰.trim() && d.伤害骰 !== '无') 部件.push(`伤害骰${d.伤害骰}`);
+  if (typeof d.倍率 === 'number' && d.倍率 > 0) 部件.push(`倍率${d.倍率}`);
+  if (typeof d.装备防御 === 'number' && d.装备防御 !== 0) 部件.push(`装备防御${d.装备防御 > 0 ? '+' : ''}${d.装备防御}`);
+  if (typeof d.装备闪避 === 'number' && d.装备闪避 !== 0) 部件.push(`装备闪避${d.装备闪避 > 0 ? '+' : ''}${d.装备闪避}`);
+  const 效果串 = 拼效果(d.效果);
+  if (效果串) 部件.push(`效果: ${效果串}`);
+  return 部件.length > 0 ? `${名称}（${部件.join('·')}）` : 名称;
 }
 
 /** 汇总七个槽位的装备防御 / 装备闪避绝对值（AI 已按公式算好, 前端只做 Σ 累加） */
 function 汇总装备防闪(装备: unknown): { 防御: number; 闪避: number } {
   let 防御 = 0;
   let 闪避 = 0;
+  if (!装备 || typeof 装备 !== 'object') return { 防御, 闪避 };
   for (const 槽 of 装备槽顺序) {
-    if (!装备 || typeof 装备 !== 'object') break;
     const 数据 = (装备 as Record<string, any>)[槽];
     if (!数据 || typeof 数据 !== 'object') continue;
     if (typeof 数据.装备防御 === 'number' && Number.isFinite(数据.装备防御)) 防御 += 数据.装备防御;
@@ -140,57 +201,71 @@ function 汇总装备防闪(装备: unknown): { 防御: number; 闪避: number }
   return { 防御, 闪避 };
 }
 
-/** 把通用技能拼成一行摘要: 技能名(类型 · 行动类型 · 关联属性 · 射程 · Lv.n) */
-function 拼技能摘要(通用技能: unknown): string {
+/**
+ * `[技能]` 行: `技能名:（类型·行动类型·关联属性·消耗·冷却）效果名--效果内容`, 多个技能用 `；` 分隔。
+ * 逐字对齐用户规则的示例（半角冒号、全角括号、`·` 分隔、`--` 连接效果名与内容）。
+ */
+function 拼技能行(通用技能: unknown): string {
   if (!通用技能 || typeof 通用技能 !== 'object') return '无';
   const 条目 = Object.entries(通用技能 as Record<string, any>);
   if (条目.length === 0) return '无';
   return 条目
     .map(([名, s]) => {
       if (!s || typeof s !== 'object') return 名;
-      const 细节 = [s.类型, s.行动类型, s.关联属性, s.射程].filter((x: unknown) => typeof x === 'string' && x.length > 0 && x !== '无');
-      const 等级 = typeof s.等级 === 'number' ? `Lv.${s.等级}` : '';
-      const 括注 = [...细节, 等级].filter(Boolean).join(' · ');
-      return 括注 ? `${名}(${括注})` : 名;
+      const d = s as Record<string, any>;
+      const 括注 = [d.类型, d.行动类型, d.关联属性, d.消耗, d.冷却]
+        .filter((x: unknown) => typeof x === 'string' && x.trim().length > 0)
+        .join('·');
+      return `${名}:（${括注}）${拼效果(d.效果) || '无'}`;
     })
-    .join(' | ');
+    .join('；');
 }
 
-/** 天赋 / 血统 / 称号 的名称, 缺失写「无」 */
-function 取名(对象: unknown): string {
-  if (!对象 || typeof 对象 !== 'object') return '无';
-  const 名称 = (对象 as Record<string, any>).名称;
-  return typeof 名称 === 'string' && 名称.length > 0 ? 名称 : '无';
+/** `[装备]` 行: 七槽按固定顺序逐一输出, 缺槽写「无」, 槽间用 ` / ` 分隔 */
+function 拼装备行(装备: unknown): string {
+  return 装备槽顺序
+    .map(槽 => {
+      const 数据 = 装备 && typeof 装备 === 'object' ? (装备 as Record<string, any>)[槽] : undefined;
+      return `【${槽}】${装备条目(数据)}`;
+    })
+    .join(' / ');
+}
+
+/** `[职业]` 行（仅 BOSS 输出）: 职业名称 / 职业特性 / 职业技能 */
+function 拼职业行(职业: unknown): string {
+  const d = 职业 && typeof 职业 === 'object' ? (职业 as Record<string, any>) : {};
+  const 名称 = typeof d.名称 === 'string' && d.名称.trim().length > 0 ? d.名称 : '无';
+  const 稀有度 = typeof d.稀有度 === 'string' && d.稀有度.trim().length > 0 && d.稀有度 !== '无' ? `（${d.稀有度}）` : '';
+  return `[职业|【职业名称】${名称}${稀有度} / 【职业特性】${拼清单(d.职业特性)} / 【职业技能】${拼清单(d.职业技能)}]`;
 }
 
 /**
- * 拼 `<enemy>…</enemy>` 面板文本（用户规则第七步的格式）。
+ * 拼 `<enemy>…</enemy>` 面板文本, **严格对齐用户规则第七步的输出格式**（与 <检定模块> 的 <enemy> 一致）。
  *
- * 取舍: `[生命|` 行只能写占位值 —— 真实 HP 由用户卡里的前端脚本代算, 本模块不知道公式。
- * 同理 `[防御|` 行只给装备防御/装备闪避的 Σ（衍生防御与闪避值由前端代算）。
+ * 取舍: `[生命|` 行只能写占位值 `1/1` —— 用户规则说「当前HP=最大HP（新实体满血出场）, 真实数值由
+ * 用户卡里的前端脚本代算」, 本模块不知道那套派生公式, 故用 1/1 占位。同理 `[防御|` 行只给
+ * 装备防御 / 装备闪避七槽的 Σ（衍生「防御」「闪避值」由前端代算, 模块不算）。
+ * `[职业|` 行仅 BOSS 输出; 杂兵 / 精英省略。
  */
 export function assembleEnemyPanel(e: GeneratedEnemy): string {
   const 防闪 = 汇总装备防闪(e.装备);
+  const 威胁 = typeof e.威胁 === 'string' && e.威胁.trim().length > 0 ? e.威胁 : `${e.阶位} · Lv.${e.等级}`;
   const L: string[] = [];
 
   L.push('<enemy>');
   L.push(`[名称|${e.名称}]`);
   L.push(`[类型|${e.类型}]`);
-  // 职业行仅 BOSS 输出（杂兵 / 精英不填职业）
-  if (e.类型 === 'BOSS') {
-    const 职业名 = 取名(e.职业);
-    const 稀有度 = e.职业 && typeof e.职业 === 'object' ? (e.职业 as Record<string, any>).稀有度 : undefined;
-    L.push(`[职业|${职业名}${typeof 稀有度 === 'string' && 稀有度.length > 0 && 稀有度 !== '无' ? `（${稀有度}）` : ''}]`);
-  }
   L.push(`[外观|${e.外貌 ?? '无'}]`);
-  // 占位值: 真实 HP 由前端脚本代算
+  // 占位值: 用户规则规定新实体满血出场, 真实 HP 由用户卡里的前端脚本代算, 模块不知道公式
   L.push('[生命|1/1]');
-  L.push(`[威胁|${e.阶位 ?? '无'} · Lv.${e.等级}]`);
-  L.push(`[属性|STR ${e.属性基础.STR} | AGI ${e.属性基础.AGI} | CON ${e.属性基础.CON} | PER ${e.属性基础.PER}]`);
-  L.push(`[防御|装备防御 ${防闪.防御} | 装备闪避 ${防闪.闪避}]`);
-  L.push(`[底牌|天赋: ${取名(e.天赋)} | 血统: ${取名(e.血统)} | 称号: ${取名(e.称号)}]`);
-  L.push(`[装备|${装备槽顺序.map(槽 => `【${槽}】${取装备名(e.装备, 槽)}`).join(' | ')}]`);
-  L.push(`[技能|${拼技能摘要(e.通用技能)}]`);
+  L.push(`[威胁|${威胁}]`);
+  L.push(`[属性|【等级】Lv.${e.等级} | 【阶位】${e.阶位} | STR:${e.属性基础.STR} | AGI:${e.属性基础.AGI} | CON:${e.属性基础.CON} | PER:${e.属性基础.PER}]`);
+  L.push(`[防御|【防御】${防闪.防御} | 【闪避】${防闪.闪避}]`);
+  L.push(`[底牌|【称号】${名称及效果(e.称号)} / 【天赋】${名称及效果(e.天赋)} / 【血统】${名称及效果(e.血统)}]`);
+  // 职业行仅 BOSS 输出（杂兵 / 精英不填职业, 省略整行）
+  if (e.类型 === 'BOSS') L.push(拼职业行(e.职业));
+  L.push(`[装备|${拼装备行(e.装备)}]`);
+  L.push(`[技能|${拼技能行(e.通用技能)}]`);
   L.push('</enemy>');
 
   return L.join('\n');

@@ -101,4 +101,30 @@ describe('assembleEnemyPanel', () => {
     let last = -1;
     for (const s of 序) { const i = 装.indexOf(s); expect(i).toBeGreaterThan(last); last = i; }
   });
+
+  // ===== 严格对齐用户规则第七步的逐字格式 =====
+  it('[生命] 写 1/1 占位（真实值由前端代算）', () => {
+    expect(p).toContain('[生命|1/1]');
+  });
+  it('[属性] 行严格形状: 【等级】Lv.X | 【阶位】X | STR:.. 四维', () => {
+    expect(p).toContain('[属性|【等级】Lv.6 | 【阶位】一阶 | STR:12 | AGI:8 | CON:14 | PER:8]');
+  });
+  it('[防御] 行严格形状: 【防御】X | 【闪避】X', () => {
+    expect(p).toContain('[防御|【防御】0 | 【闪避】0]');
+  });
+  it('[底牌] 行严格形状: 【称号】 / 【天赋】 / 【血统】', () => {
+    expect(p).toContain('[底牌|【称号】无 / 【天赋】腐臭血肉（腐臭--被近战命中时使对方中毒1回合） / 【血统】感染者（病源--免疫同类毒素）]');
+  });
+  it('[装备] 行七槽用「 / 」分隔, 未装备写「无」', () => {
+    expect(p).toContain('[装备|【头部】无 / 【躯干】无 / 【手部】无 / 【下装】无 / 【饰品】无 / 【主武器】无 / 【副武器】无]');
+  });
+  it('[技能] 行严格形状: 技能名:（类型·行动类型·关联属性·消耗·冷却）效果名--效果内容', () => {
+    const 技 = p.split('\n').find(l => l.startsWith('[技能|'))!;
+    expect(技).toContain('（');
+    expect(技).toContain('--');
+    expect(技).toContain('[技能|撕咬:（主动·主要行动·STR·无·无）撕咬--造成STR修正×0.3的物理伤害]');
+  });
+  it('BOSS 的 [职业] 行严格形状: 职业名称 / 职业特性 / 职业技能', () => {
+    expect(assembleEnemyPanel(结果.敌人[2] as any)).toContain('[职业|【职业名称】腐潮领主（金色） / 【职业特性】无 / 【职业技能】无]');
+  });
 });
