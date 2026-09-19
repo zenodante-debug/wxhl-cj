@@ -650,8 +650,8 @@
           </button>
           <button class="confirm-btn modify" @click="onFillDungeonInput(dungeonGenStore.current.id)">填入输入框</button>
           <button class="confirm-btn modify" @click="onCopyPanel(dungeonGenStore.current)">复制面板文本</button>
-          <button class="confirm-btn reroll" :disabled="dungeonGenStore.rolling || dungeonGenStore.generating" @click="onRerollDungeonGen">🔄 重roll</button>
-          <button class="confirm-btn" :disabled="dungeonGenStore.generatingEnemies" @click="onGenerateEnemies">
+          <button class="confirm-btn reroll" :disabled="dungeonGenStore.rolling || dungeonGenStore.generating || dungeonGenStore.writingEnemies" @click="onRerollDungeonGen">🔄 重roll</button>
+          <button class="confirm-btn" :disabled="dungeonGenStore.generatingEnemies || dungeonGenStore.writingEnemies" @click="onGenerateEnemies">
             {{ dungeonGenStore.generatingEnemies ? '生成中...' : '敌人生成' }}
           </button>
         </div>
@@ -659,11 +659,11 @@
 
       <div v-if="dungeonGenStore.rolledDungeons.length > 1" class="roll-section">
         <div class="roll-section-title">历史记录</div>
-        <div v-for="d in dungeonGenStore.rolledDungeons" :key="d.id" class="roll-row" :class="{active: dungeonGenStore.current?.id === d.id}" @click="dungeonGenStore.select(d.id)">
+        <div v-for="d in dungeonGenStore.rolledDungeons" :key="d.id" class="roll-row" :class="{active: dungeonGenStore.current?.id === d.id}" @click="!dungeonGenStore.writingEnemies && dungeonGenStore.select(d.id)">
           <span class="roll-label">{{ d.result?.副本名称 || '（未生成）' }}</span>
           <span class="roll-expr">{{ d.build.副本类型 }}</span>
           <span class="roll-map">{{ d.createdAt }}</span>
-          <button class="retry-link" @click.stop="dungeonGenStore.remove(d.id)">删除</button>
+          <button class="retry-link" :disabled="dungeonGenStore.writingEnemies" @click.stop="dungeonGenStore.remove(d.id)">删除</button>
         </div>
       </div>
     </template>
@@ -927,6 +927,9 @@ async function onCopyPanel(entry: { panelText?: string }) {
 /** 敌人生成: 三个副本角色的勾选状态, 默认全勾 */
 const enemyChecked = ref<boolean[]>([true, true, true])
 
+// 切换历史条目时勾选状态重置为全勾 —— 否则上一条目的取消会带到下一条
+watch(() => dungeonGenStore.current?.id, () => { enemyChecked.value = [true, true, true] })
+
 async function onGenerateEnemies() {
   enemyChecked.value = [true, true, true]
   await dungeonGenStore.generateEnemies()
@@ -934,10 +937,10 @@ async function onGenerateEnemies() {
 
 function onToggleEnemy(i: number) { enemyChecked.value[i] = !enemyChecked.value[i] }
 
-function onWriteEnemies() {
+async function onWriteEnemies() {
   const 选中 = enemyChecked.value.map((on, i) => (on ? i : -1)).filter(i => i >= 0)
   if (选中.length === 0) { toastr.info('请至少勾选一个副本角色'); return }
-  dungeonGenStore.writeEnemies(选中)
+  await dungeonGenStore.writeEnemies(选中)
 }
 
 /** 复制某个副本角色的 <enemy> 面板 */

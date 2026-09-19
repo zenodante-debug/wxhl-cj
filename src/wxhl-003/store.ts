@@ -1947,6 +1947,7 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     if (!entry?.enemies?.length) { lastError.value = '请先生成副本角色'; return false }
     const 目标 = 选中.map(i => ({ i, slot: entry.enemies![i] })).filter(x => x.slot)
     if (目标.length === 0) { lastError.value = '请至少勾选一个副本角色'; return false }
+    const 源数组 = entry.enemies
     writingEnemies.value = true
     lastError.value = ''
     try {
@@ -1958,32 +1959,61 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
         if (mid && mid !== -1) message_id = mid
       } catch (_) {}
       const mvu = Mvu.getMvuData({ type: 'message', message_id })
-      for (const { slot } of 目标) {
+      // 同批重名: 写入路径是 副本角色.<名称>, 同名会互相覆盖, 而回读校验发现不了(同一路径有值)。
+      const 名称表 = 目标.map(x => x.slot.数据.名称)
+      const 重名 = [...new Set(名称表.filter((n, i) => 名称表.indexOf(n) !== i))]
+      if (重名.length > 0) {
+        lastError.value = '副本角色重名, 无法写入: ' + 重名.join('、')
+        toastr.error(lastError.value + '（请重新点「敌人生成」）')
+        return false
+      }
+      // 已存在的同名角色: _.set 是整节点替换, 覆盖会把当前 HP/MP/耐力 重置为满值并清掉战斗中的临时状态。
+      // 规则要求战斗中通过 delta 改 *_当前, 不能让这条路径静默抹掉它 —— 先问。
+      const 已存在 = 目标.filter(({ slot }) => _.get(mvu, ['stat_data', '契约者', '副本角色', slot.数据.名称]) !== undefined)
+      const 跳过 = new Set<number>()
+      if (已存在.length > 0) {
+        const 确认覆盖 = confirm(
+          '以下副本角色已存在:\n' +
+          '· ' + 已存在.map(x => x.slot.数据.名称).join('\n· ') +
+          '\n\n覆盖会把它们的当前 HP / MP / 耐力重置为满值, 并清掉战斗中的临时状态。\n\n' +
+          '点「确定」= 覆盖这些角色\n点「取消」= 跳过它们, 只写其余',
+        )
+        if (!确认覆盖) for (const x of 已存在) 跳过.add(x.i)
+      }
+      const 实写 = 目标.filter(x => !跳过.has(x.i))
+      if (实写.length === 0) {
+        toastr.info('已取消, 未写入任何副本角色')
+        return false
+      }
+      for (const { slot } of 实写) {
         // 数组路径: 角色名可能含「.」, 不能走字符串路径
         _.set(mvu, ['stat_data', '契约者', '副本角色', slot.数据.名称], mapEnemyToVariables(slot.数据))
       }
       await Mvu.replaceMvuData(mvu, { type: 'message', message_id })
       // 回读校验: MVU 按注册的 zod schema 处理写入, 未声明的键会被静默剥掉 —— 这里主动暴露, 避免"看起来写成功"
-      for (const { slot } of 目标) {
+      for (const { slot } of 实写) {
         if (_.get(Mvu.getMvuData({ type: 'message', message_id }), ['stat_data', '契约者', '副本角色', slot.数据.名称]) === undefined) {
           throw new Error('写入未生效: 字段名与存档 schema 不匹配 → 副本角色.' + slot.数据.名称)
         }
       }
       // 用户卡的前端脚本异步跑代算, 写入刚返回时 属性.实际 / 衍生属性 很可能还没算好。
-      // 每轮都重新取快照, 不复用上一轮。最多约 2 秒, 超时不算失败 —— 走回退路径并如实告知用户。
+      // 每轮都必须重新取: 前端脚本是异步写回代算值的, 复用上一轮快照等于永远读到旧值
+      // 最多约 2 秒, 超时不算失败 —— 走回退路径并如实告知用户。
       let 已代算 = false
-      let 快照 = Mvu.getMvuData({ type: 'message', message_id })
+      let 快照: any
       for (let n = 0; n < 10; n++) {
         快照 = Mvu.getMvuData({ type: 'message', message_id })
-        已代算 = 目标.every(({ slot }) => 前端已代算(_.get(快照, ['stat_data', '契约者', '副本角色', slot.数据.名称])))
+        已代算 = 实写.every(({ slot }) => 前端已代算(_.get(快照, ['stat_data', '契约者', '副本角色', slot.数据.名称])))
         if (已代算) break
         await new Promise(r => setTimeout(r, 200))
       }
-      // 用回读实体拼面板, 写回条目 —— 只更新被勾选的槽, 未勾选的原样保留
+      // 回填前校验: 写入期间用户可能重掷(条目被删)或重新生成(enemies 换成新数组)。
+      // 两种情况下变量都已经真写进存档, 但界面已经不代表它们了 —— 不能盖"已写入"骗人。
       const idx = rolledDungeons.value.findIndex(d => d.id === entry.id)
-      if (idx >= 0) {
+      const 可回填 = idx >= 0 && rolledDungeons.value[idx].enemies === 源数组
+      if (可回填) {
         const 槽 = [...rolledDungeons.value[idx].enemies!]
-        for (const { i, slot } of 目标) {
+        for (const { i, slot } of 实写) {
           const 实体 = _.get(快照, ['stat_data', '契约者', '副本角色', slot.数据.名称]) ?? {}
           槽[i] = { ...slot, 面板: assembleEnemyPanelFromEntity(slot.数据.名称, 实体, slot.数据.威胁), 已写入: true }
         }
@@ -1991,8 +2021,10 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
       }
       // 两个分支都刻意保留: 未代算时面板会退化, 用户必须知道; 成功分支也要点明来源,
       // 因为「已代算」判据对 prefault 非 0 的 schema 可能在脚本跑之前就为真。
-      if (已代算) toastr.success('已写入 ' + 目标.length + ' 个副本角色（面板数值取自前端代算结果）')
-      else toastr.info('已写入 ' + 目标.length + ' 个副本角色；前端脚本尚未代算, 面板为模块自算值')
+      if (!可回填) toastr.info('变量已写入存档, 但该条目已被重掷或重新生成, 面板未回填')
+      else if (已代算) toastr.success('已写入 ' + 实写.length + ' 个副本角色（面板数值取自前端代算结果）')
+      else toastr.info('已写入 ' + 实写.length + ' 个副本角色；前端脚本尚未代算, 面板为模块自算值')
+      if (跳过.size > 0) toastr.info('已跳过 ' + 跳过.size + ' 个已存在的副本角色')
       return true
     } catch (e: any) {
       lastError.value = e?.message || '写入副本角色失败'
