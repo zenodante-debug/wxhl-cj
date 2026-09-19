@@ -1,4 +1,5 @@
-import { type ForumThread, type ForumPost, INITIAL_THREADS, RANK_BOARDS, type CareerPlan, type CareerRoadmap, type PlanType, type DungeonStrategy, type Faction, type DungeonMode, CAREER_SYSTEM_RULES, WORLD_SUMMARY } from './data'
+import { type ForumThread, type ForumPost, INITIAL_THREADS, RANK_BOARDS, type CareerPlan, type CareerRoadmap, type PlanType, type DungeonStrategy, type Faction, type DungeonMode, CAREER_SYSTEM_RULES, CORE_WORLD } from './data'
+import { buildRefreshPrompt, buildRepliesPrompt, buildThreadDetailPrompt, type ForumSectionKey } from './forumPrompts'
 import { WORKSHOP_WORLDBOOK_NAME, PvPSaveSchema, type WorkshopCard, type PvPSave } from './data'
 import { extractContractSave, buildIntroPrompt, tierOf, generateDefaultAppearance, buildBattleIntroMessage } from './workshop'
 import { rollBuild, rollRewards, type BuildRoll, type RewardSet, type RollRecord } from './dice'
@@ -299,7 +300,7 @@ ${playerData || '（未检测到）'}
 ${chat || '（未检测到）'}
 
 【世界观参考】
-${wb || WORLD_SUMMARY}
+${wb || CORE_WORLD}
 
 【判断标准】
 - 只提取"够格上论坛"的事件：重大战绩/惨败、影响势力格局、稀有掉落、隐藏任务突破、晋升阶位、获得稀有职业、出名或丢人的事迹等
@@ -323,44 +324,21 @@ ${wb || WORLD_SUMMARY}
   function clearInfluence() { influenceEvents.value = []; influenceError.value = '' }
 
   // ---- Section refresh ----
-  const secNames: Record<string,string> = {
-    complaints:'契约者吐槽区', intel:'势力情报分享区', dungeon:'副本经历分享区', build:'构筑分享区', trade:'装备道具交易区',
-  }
-
-  const MODULE_SUMMARY = WORLD_SUMMARY
-
-  function buildRefreshPrompt(sectionKey: string, worldbookText: string): string {
-    const worldCtx = worldbookText || ''
-    // 玩家影响注入
-    let influenceCtx = ''
-    if (influenceEvents.value.length > 0) {
-      const relevant = influenceEvents.value.filter(e => !e.section || e.section === sectionKey)
-      if (relevant.length > 0) {
-        influenceCtx = '\n【最近圈内大事】\n' + relevant.map(e => '- ' + e.event + (e.impact ? '（影响力：' + e.impact + '）' : '') + (e.nickname ? '——契约者被称作「' + e.nickname + '」' : '')).join('\n') + '\n请让生成的帖子自然地讨论这些事件，可以有部分帖子围绕这些大事展开。'
-      }
-    }
-
-    const prompts: Record<string, string> = {
-      complaints: '你是无限回廊论坛「契约者吐槽区」的活跃用户。以不同契约者口吻生成8条吐槽帖。\n必须遵守：每条帖子涉及不同的主模块或副模块，8条覆盖至少6个不同模块。吐槽要有具体场景：被投进【赛博朋克】+【绝症倒计时】差点嗑药嗑死、在【洪荒神话】+【全员禁魔】被凡人追着砍。也可吐槽势力、CR系统、队友。语气真实接地气，像论坛骂街，严禁重复。作者昵称要有创意。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY + influenceCtx,
-
-      intel: '你是无限回廊论坛「势力情报分享区」的资深分析员。以不同契约者口吻生成8条情报帖。\n必须遵守：每条分析不同的势力动态、模块策略或系统机制。情报要有具体数据。可分析特定模块组合的最优策略。语气理性客观，热评要有质疑或补充。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY + influenceCtx,
-
-      dungeon: '你是无限回廊论坛「副本经历分享区」的闯关者。以不同契约者口吻生成8条副本经历帖。\n必须遵守：每条帖子=一个具体副本经历，8条覆盖至少6个不同主模块。必须包含：副本来源(具体作品名)、主模块类型、副模块、副本类型、具体战斗/解谜过程、奖励收获。经历要有戏剧性。严禁重复相同副本来源。语气像亲身经历。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY + influenceCtx,
-
-      build: '你是无限回廊论坛「构筑分享区」的配装研究者。以不同契约者口吻生成8条构筑帖。\n必须遵守：每条讨论针对特定模块类型的构筑方案。必须包含属性分配/推荐职业/核心装备/适合模块类型/实战测试数据。覆盖不同流派。数据要具体，流派间要有争论，热评要有反驳。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY + influenceCtx,
-
-      trade: '你是无限回廊论坛「装备道具交易区」的买卖双方。以不同契约者口吻生成8条交易帖。\n必须遵守：一半出售一半求购。物品要具体且来源明确。必须包含物品名称+品质+属性加成+来源副本+价格(UP币)。评论要有砍价竞价。语气真实。\n\n输出格式说明：返回一个JSON对象，包含threads数组，每个元素有title/preview/author/hotComment/hotAuthor/hotLikes字段。\n\n世界观参考：' + worldCtx + '\n' + WORLD_SUMMARY + influenceCtx,
-    }
-    return prompts[sectionKey] || ''
-  }
-
   async function refreshSection(sectionKey: string) {
     const cfg = getActiveCfg(settings)
     if (!cfg.url || !cfg.apiKey) { lastError.value='请先在设置中配置API'; return }
     refreshing.value = true; lastError.value = ''
     try {
       const wb = await getWorldbookContent()
-      const prompt = buildRefreshPrompt(sectionKey, wb)
+      // 按分区过滤玩家影响事件, 组装成一段上下文字符串
+      let influenceCtx = ''
+      if (influenceEvents.value.length > 0) {
+        const relevant = influenceEvents.value.filter(e => !e.section || e.section === sectionKey)
+        if (relevant.length > 0) {
+          influenceCtx = '\n【最近圈内大事】\n' + relevant.map(e => '- ' + e.event + (e.impact ? '（影响力：' + e.impact + '）' : '') + (e.nickname ? '——契约者被称作「' + e.nickname + '」' : '')).join('\n') + '\n请让生成的帖子自然地讨论这些事件，可以有部分帖子围绕这些大事展开。'
+        }
+      }
+      const prompt = buildRefreshPrompt(sectionKey as ForumSectionKey, wb, influenceCtx)
       const raw = await aiGenerate(cfg, prompt, THREAD_LIST_SCHEMA)
       const data = extractJSON(raw)
       const posts: any[] = Array.isArray(data) ? data : (data.threads || [])
@@ -383,7 +361,7 @@ ${wb || WORLD_SUMMARY}
     generating.value = true; lastError.value = ''
     try {
       const wb = await getWorldbookContent()
-      const raw = await aiGenerate(cfg, '无限回廊论坛「'+(secNames[thread.section]||'论坛')+'」帖子：标题：'+thread.title+' 预览：'+thread.preview+' 发帖人：'+thread.author+' 已有'+thread.replies+'条回复。请生成完整帖子和评论。要求：fullContent详细300-600字、comments生成4-6条、每条最多1-2条子回复、昵称内容符合世界观'+(wb?'\n世界观：\n'+wb:''), THREAD_DETAIL_SCHEMA)
+      const raw = await aiGenerate(cfg, buildThreadDetailPrompt(thread.section as ForumSectionKey, thread, wb), THREAD_DETAIL_SCHEMA)
       const data = extractJSON(raw)
       const posts: ForumPost[] = []
       let floor = 1
@@ -408,7 +386,7 @@ ${wb || WORLD_SUMMARY}
     try {
       const context = thread.posts.map(p => '[#'+p.floor+' '+p.author+(p.depth&&p.depth>0?'(回复)':'(楼主)')+']: '+p.content.slice(0,300)).join('\n')
       const wb = await getWorldbookContent()
-      const raw = await aiGenerate(cfg, '无限回廊帖子「'+thread.title+'」当前讨论：\n'+context+'\n\n有契约者刚发表了新回复（上面最后一条）。请以帖子里已出现的其他契约者身份（不要扮演楼主和刚回复的那位），生成2-3条回应。只使用上面讨论中已出现的昵称、语气符合角色'+(wb?'\n世界观：\n'+wb:''), REPLY_LIST_SCHEMA)
+      const raw = await aiGenerate(cfg, buildRepliesPrompt(thread.section as ForumSectionKey, thread, context, wb), REPLY_LIST_SCHEMA)
       const data = extractJSON(raw)
       const replies: any[] = Array.isArray(data) ? data : (data.replies || [])
       const now = Date.now()
@@ -596,7 +574,7 @@ ${CAREER_SYSTEM_RULES}
 ${worldCtx}
 
 【世界观模块摘要】
-${WORLD_SUMMARY}
+${CORE_WORLD}
 
 【契约者的想法】
 ${keywords}
