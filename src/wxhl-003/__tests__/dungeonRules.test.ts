@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { BuildRoll, RewardSet } from '../dice';
-import { DungeonGenResultSchema, assemblePanelText, mapToVariables } from '../dungeonRules';
+import { DungeonGenResultSchema, assemblePanelText, mapToVariables, clamp固有角色等级 } from '../dungeonRules';
 
 const build: BuildRoll = {
   副本类型: '血腥',
@@ -56,8 +56,8 @@ const result = {
     { 名称: '成就六', 说明: '说明六', 难度: '触碰世界底层规则', 物品名: '挂件' },
   ],
   固有角色: [
-    { 名称: '摩根·黑手', 位阶: '四阶', 等级: 70 },
-    { 名称: '强尼·银手', 位阶: '三阶', 等级: 55 },
+    { 名称: '摩根·黑手', 位阶: '四阶' as const, 等级: 70 },
+    { 名称: '强尼·银手', 位阶: '三阶' as const, 等级: 55 },
   ],
   其他契约者: [
     { 真名: '陈默', 称号: '无', 等级: 11, 阵营: '中立' },
@@ -86,6 +86,21 @@ describe('DungeonGenResultSchema', () => {
     expect(() => DungeonGenResultSchema.parse(改等级(201))).toThrow();
     expect(() => DungeonGenResultSchema.parse(改等级(11.5))).toThrow();
     expect(() => DungeonGenResultSchema.parse(改等级(11))).not.toThrow();
+  });
+
+  it('拒绝不在枚举里的位阶', () => {
+    const 坏 = { ...result, 固有角色: [{ 名称: '某人', 位阶: '三阶·战略兵器级', 等级: 50 }, result.固有角色[1]] };
+    expect(() => DungeonGenResultSchema.parse(坏)).toThrow();
+  });
+});
+
+describe('clamp固有角色等级', () => {
+  it('把越界的固有角色等级夹进该阶位区间', () => {
+    expect(clamp固有角色等级('三阶', 5)).toBe(41);
+    expect(clamp固有角色等级('三阶', 999)).toBe(60);
+    expect(clamp固有角色等级('三阶', 50)).toBe(50);
+    expect(clamp固有角色等级('凡人极限', 77)).toBe(1);
+    expect(clamp固有角色等级('超脱', 3)).toBe(101);
   });
 });
 
@@ -148,6 +163,12 @@ describe('mapToVariables', () => {
   it('固有角色名单带位阶与等级', () => {
     const 名单 = vars.固有角色名单 as any;
     expect(名单['摩根·黑手']).toEqual({ 位阶: '四阶', 等级: 70, 状态: '存活' });
+  });
+
+  it('落库时等级已被夹进区间', () => {
+    const 低 = { ...result, 固有角色: [{ 名称: '弱者', 位阶: '五阶', 等级: 3 }, result.固有角色[1]] };
+    const v = mapToVariables(DungeonGenResultSchema.parse(低), build, rewards, player);
+    expect((v.固有角色名单 as any).弱者.等级).toBe(81);
   });
 });
 

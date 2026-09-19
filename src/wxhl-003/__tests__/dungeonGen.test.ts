@@ -25,7 +25,7 @@ const records: RollRecord[] = [
 ];
 
 describe('buildDungeonPrompt', () => {
-  const p = buildDungeonPrompt(build, records, '契约者: 刘林\n等级: Lv.11', '世界书内容', '人榜候选…', '二阶');
+  const p = buildDungeonPrompt(build, records, '契约者: 刘林\n等级: Lv.11', '世界书内容', '人榜候选…', '二阶', 11);
 
   it('包含规则原文的关键节', () => {
     expect(p).toContain('副本生成');
@@ -61,8 +61,14 @@ describe('buildDungeonPrompt', () => {
   });
 
   it('把契约者阶位作为物品的硬性约束写进 prompt', () => {
-    const p2 = buildDungeonPrompt(build, records, '契约者: 刘林', '世界书内容', '人榜候选…', '三阶');
+    const p2 = buildDungeonPrompt(build, records, '契约者: 刘林', '世界书内容', '人榜候选…', '三阶', 47);
     expect(p2).toContain('阶位固定为【三阶】');
+  });
+
+  it('把固有角色锚定规则与队伍最高等级写进 prompt', () => {
+    const p3 = buildDungeonPrompt(build, records, '契约者: 刘林', '世界书内容', '人榜候选…', '三阶', 47);
+    expect(p3).toContain('固有角色锚定与战力表现');
+    expect(p3).toContain('队伍最高等级】Lv.47');
   });
 });
 

@@ -1,4 +1,4 @@
-import { DUNGEON_GENERATION_RULES } from './data';
+import { DUNGEON_GENERATION_RULES, INHERENT_CHARACTER_ANCHOR_RULES } from './data';
 import type { BuildRoll, RollRecord } from './dice';
 import type { DungeonGenResult } from './dungeonRules';
 
@@ -18,6 +18,7 @@ function formatLockedRolls(records: RollRecord[]): string {
  * @param worldbookText 选中的世界书内容, 可为空
  * @param 匹配池        按 CR 规则取出的榜单候选, 或「自由生成同阶契约者」指令
  * @param 阶位          契约者当前阶位, 作为物品阶位的硬性约束写进 prompt
+ * @param 队伍最高等级   契约者小队的最高等级, 用于「固有角色动态升维机制」判定
  */
 export function buildDungeonPrompt(
   build: BuildRoll,
@@ -26,6 +27,7 @@ export function buildDungeonPrompt(
   worldbookText: string,
   匹配池: string,
   阶位: string,
+  队伍最高等级: number,
 ): string {
   return `${DUNGEON_GENERATION_RULES}
 
@@ -52,6 +54,19 @@ ${formatLockedRolls(records)}
 
 注: UP / EXP / RP / 物品品质 / 物品类型的**数值与档位已由系统掷定**, 你不要输出这些数值,
 只需要为每个需要物品的任务给出一个符合本副本世界观的具体物品名。
+
+============ 固有角色锚定规则（强制） ============
+${INHERENT_CHARACTER_ANCHOR_RULES}
+
+【本次契约者队伍最高等级】Lv.${队伍最高等级}
+请按上述「固有角色动态升维机制」判断：若该世界观的**原著战力天花板**高于 Lv.${队伍最高等级}，
+则严格保持原著等级与实力锚点、不执行向上修正；若低于或等于，则对固有角色升维，
+强制拉升至契约者同阶或更高，以保证压迫感。
+
+固有角色的「位阶」只能取: 凡人极限 / 一阶 / 二阶 / 三阶 / 四阶 / 五阶 / 超脱。
+其「等级」必须落在该阶位对应的等级区间内（凡人极限固定 Lv.1；一阶 1~20；二阶 21~40；
+三阶 41~60；四阶 61~80；五阶 81~100；超脱 101 以上）。
+请自行确保两者一致 —— 系统会校验并把越界的等级夹回区间，但那会偏离你的本意。
 
 ============ 契约者数据 ============
 ${playerText || '（未读取到玩家数据）'}

@@ -16,6 +16,27 @@ const 成就档位 = [
   '★★★★★★ 世界天花板',
 ] as const;
 
+/** 固有角色位阶枚举（用户的 schema 里 `位阶` 是自由字符串，此处收紧为固定集合） */
+export const 固有角色位阶枚举 = ['凡人极限', '一阶', '二阶', '三阶', '四阶', '五阶', '超脱'] as const;
+
+/** 固有角色「位阶 → 等级区间」，依据 <固有角色锚定与战力表现> 的锚定表 */
+export const 固有角色阶位区间: Record<(typeof 固有角色位阶枚举)[number], readonly [number, number]> = {
+  凡人极限: [1, 1],
+  一阶: [1, 20],
+  二阶: [21, 40],
+  三阶: [41, 60],
+  四阶: [61, 80],
+  五阶: [81, 100],
+  超脱: [101, 999],
+};
+
+/** 把等级夹进该阶位的区间；未知阶位原样返回（schema 的 enum 已拦住未知值） */
+export function clamp固有角色等级(位阶: string, 等级: number): number {
+  const 区间 = 固有角色阶位区间[位阶 as (typeof 固有角色位阶枚举)[number]];
+  if (!区间) return 等级;
+  return Math.min(Math.max(等级, 区间[0]), 区间[1]);
+}
+
 const 主线任务Schema = z.object({ 名称: z.string(), 说明: z.string() });
 const 支线任务Schema = z.object({ 名称: z.string(), 说明: z.string(), 物品名: z.string().prefault('') });
 const 隐藏任务Schema = z.object({ 名称: z.string(), 说明: z.string(), 物品名: z.string().prefault('') });
@@ -42,7 +63,7 @@ export const DungeonGenResultSchema = z.object({
   隐藏任务: z.array(隐藏任务Schema).length(2),
   副本成就: z.array(成就Schema).length(6),
   固有角色: z.array(
-    z.object({ 名称: z.string().min(1), 位阶: z.string(), 等级: z.coerce.number().int().min(1).max(200) }),
+    z.object({ 名称: z.string().min(1), 位阶: z.enum(固有角色位阶枚举), 等级: z.coerce.number().int().min(1).max(999) }),
   ),
   其他契约者: z.array(
     z.object({ 真名: z.string().min(1), 称号: z.string(), 等级: z.coerce.number().int().min(1).max(200), 阵营: z.string() }),
@@ -114,7 +135,7 @@ export function mapToVariables(
 
   const 固有角色名单: Record<string, unknown> = {};
   result.固有角色.forEach(r => {
-    固有角色名单[r.名称] = { 位阶: r.位阶, 等级: r.等级, 状态: '存活' };
+    固有角色名单[r.名称] = { 位阶: r.位阶, 等级: clamp固有角色等级(r.位阶, r.等级), 状态: '存活' };
   });
 
   const 其他契约者名单: Record<string, unknown> = {};
@@ -200,7 +221,7 @@ export function assemblePanelText(
   ];
   L.push(`契约者: ${契约者.join('，')}`);
   L.push('## 固有角色');
-  L.push(`角色列表: ${result.固有角色.map(r => `${r.名称} (Lv.${r.等级} | ${r.位阶})`).join('，')}`);
+  L.push(`角色列表: ${result.固有角色.map(r => `${r.名称} (Lv.${clamp固有角色等级(r.位阶, r.等级)} | ${r.位阶})`).join('，')}`);
   L.push('</副本人物生成>');
   L.push('</Panel Enhancement>');
   return L.join('\n');

@@ -1719,8 +1719,8 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
   }
 
   /** 读 stat_data 里的副本周期与玩家简报 */
-  function readPlayerBrief(): { 副本周期: number; player: PlayerBrief; text: string } {
-    const 兜底 = { 副本周期: 1, player: { 姓名: '', 等级: 1, 阶位: '一阶', CR: 3 }, text: '' }
+  function readPlayerBrief(): { 副本周期: number; player: PlayerBrief; text: string; 队伍最高等级: number } {
+    const 兜底 = { 副本周期: 1, player: { 姓名: '', 等级: 1, 阶位: '一阶', CR: 3 }, text: '', 队伍最高等级: 1 }
     try {
       let vars: any = {}
       try {
@@ -1739,6 +1739,13 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
         CR: Number(h.CR) || 3,
       }
       const 副本周期 = Number(c.赛季信息?.当前副本周期) || 1
+      // 队伍最高等级: 玩家自身与小队成员的最高等级 (成员为空时 Math.max 仍安全)
+      const 成员 = Object.values((c.小队?.成员 ?? {}) as Record<string, any>);
+      const 队伍最高等级 = Math.max(
+        player.等级,
+        ...成员.map(m => Number(m?.头部?.等级) || 0),
+        0,
+      );
       const lines = [
         '【头部】' + JSON.stringify(h),
         '【职业】' + JSON.stringify(c.职业 ?? {}),
@@ -1746,7 +1753,7 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
         '【小队】' + JSON.stringify(c.小队 ?? {}),
         '【副本经历】' + JSON.stringify(c.副本经历 ?? {}),
       ]
-      return { 副本周期, player, text: lines.join('\n') }
+      return { 副本周期, player, text: lines.join('\n'), 队伍最高等级 }
     } catch (_) { return 兜底 }
   }
 
@@ -1790,10 +1797,10 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     generating.value = true
     lastError.value = ''
     try {
-      const { player, text: playerText } = readPlayerBrief()
+      const { player, text: playerText, 队伍最高等级 } = readPlayerBrief()
       const wb = await forumStore.getWorldbookContent()
       const 匹配池 = buildMatchPool(player.CR, player.阶位)
-      const prompt = buildDungeonPrompt(entry.build, [...entry.buildRecords, ...entry.rewardRecords], playerText, wb, 匹配池, player.阶位)
+      const prompt = buildDungeonPrompt(entry.build, [...entry.buildRecords, ...entry.rewardRecords], playerText, wb, 匹配池, player.阶位, 队伍最高等级)
       const raw = await aiGenerate(cfg, prompt, {
         name: 'dungeon_generation',
         value: JSON.parse(JSON.stringify(z.toJSONSchema(DungeonGenResultSchema, { io: 'input' }))),
