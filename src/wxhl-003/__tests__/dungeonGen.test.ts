@@ -71,6 +71,7 @@ describe('buildDungeonPrompt', () => {
     expect(p3).toContain('队伍最高等级】Lv.47');
     expect(p3).toContain('本次副本剧情实际牵涉到');
     expect(p3).toContain('不要一律挑该世界观');
+    expect(p3).toContain('不代表该档就该是这些名角色');
   });
 });
 
