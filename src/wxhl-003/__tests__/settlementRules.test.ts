@@ -275,3 +275,190 @@ describe('computeSettlement · 第 2 轮补钉', () => {
     expect(computeSettlement({ ...基准输入, 旧周期: 9 }, 满骰()).新周期).toBe(10);
   });
 });
+
+import { assembleSettlementPanel, buildSettlementWrites, 汇总基础奖励 } from '../settlementRules';
+
+/** 与 SettlementSnapshot 逐字对应的假快照 */
+const 假快照 = {
+  副本名称: '血色黎明',
+  当前EXP: 0,
+  当前UP: 0,
+  当前RP: 40,
+  当前PEXP: 100,
+  军衔: '上等兵',
+  职业等级: 5,
+  PEXP_升级所需: 200,
+  当前CR: 5,
+  当前现实时间: '凌晨00:01',
+  任务奖励: {
+    '主线': '250 UP + 500 EXP',
+    '收集物资': '30 UP + 60 EXP + 1 RP',
+    '旧日回响': '80 UP + 150 EXP',
+    '初见': '20 UP + 40 EXP + 2 RP',
+    '没做完的支线': '999 UP + 999 EXP',
+  } as Record<string, string>,
+  小队成员: [{ 名称: '阿澈', 当前EXP: 0, 当前UP: 0 }],
+};
+
+const 假AI = {
+  评价等级: 'S', 评价依据: '…', 击杀: { 精英: 2, BOSS: 1, 隐藏BOSS: 1 },
+  濒死次数: 0, 副本天数: 3,
+  完成的支线: ['收集物资'], 完成的隐藏任务: ['旧日回响'], 达成的成就: ['初见'],
+  职业专属支线条数: 2, 天赋试炼次数: 1,
+  掉落物品: [{ 名称: '血刃', 品质: '金色', 属性: 'STR+5', 效果: '流血', 数量: 1 }],
+  称号: { 名称: '血夜行者', 效果: { 嗜血: '击杀回血' } },
+  史诗记录: '他在血雨里站成了碑。',
+} as any;
+
+describe('汇总基础奖励', () => {
+  it('只汇总主线 + AI 报告完成的那些, 未完成的支线不计入', () => {
+    const r = 汇总基础奖励(假快照 as any, 假AI);
+    expect(r.EXP).toBe(500 + 60 + 150 + 40);   // 主线 + 收集物资 + 旧日回响 + 初见
+    expect(r.UP).toBe(250 + 30 + 80 + 20);
+    expect(r.EXP).not.toBe(500 + 60 + 150 + 40 + 999);   // 「没做完的支线」不计入
+  });
+
+  it('AI 报告了变量里不存在的键名时, 以 0 计并在结果里列出', () => {
+    const r = 汇总基础奖励(假快照 as any, { ...假AI, 完成的支线: ['收集物资', '不存在的任务'] } as any);
+    expect(r.EXP).toBe(500 + 60 + 150 + 40);
+    expect(r.未找到).toEqual(['不存在的任务']);
+  });
+
+  it('某条奖励文本非法时抛错, 不静默当 0', () => {
+    const 坏快照 = { ...假快照, 任务奖励: { ...假快照.任务奖励, '收集物资': '坏掉的奖励' } };
+    expect(() => 汇总基础奖励(坏快照 as any, 假AI)).toThrow(/收集物资|坏掉的奖励/);
+  });
+});
+
+describe('assembleSettlementPanel', () => {
+  const c = computeSettlement(基准输入, 满骰());
+  const p = assembleSettlementPanel(c, 假AI, 假快照 as any);
+
+  it('被 <Settlement Beautification> 包裹', () => {
+    expect(p.trimStart().startsWith('<Settlement Beautification>')).toBe(true);
+    expect(p.trimEnd().endsWith('</Settlement Beautification>')).toBe(true);
+  });
+
+  it('含全部 ## 行', () => {
+    for (const k of ['## 最终评价:', '## 评价倍率:', '## CR态度:', '## CR奖励倍率:', '## 位阶修正:',
+      '## 基础EXP汇总:', '## 基础UP汇总:', '## 最终EXP:', '## 最终UP:', '## RP获得:', '## 当前RP余额:',
+      '## 军衔状态:', '## PEXP获得:', '## 当前PEXP:', '## 职业进度:', '## 称号获得:', '## 称号效果:',
+      '## 称号选择:', '## 掉落清单:', '## 副本成就已达成:', '## 副本成就未达成:', '## 隐藏任务公示:',
+      '## CR变动:', '## 更新后CR:', '## 回廊态度:', '## 史诗记录:', '## 副本周期:', '## 现实时间:']) {
+      expect(p).toContain(k);
+    }
+    expect(p).toContain('<基础结算奖励>');
+    expect(p).toContain('<特殊结算奖励>');
+  });
+
+  it('数字来自 computed 而不是 AI', () => {
+    expect(p).toContain('## 最终EXP: 900');
+    expect(p).toContain('## 位阶修正: ×3');
+    expect(p).toContain('## CR奖励倍率: ×150%');
+  });
+
+  it('当前RP余额 = 旧余额 + 本次获得', () => {
+    expect(p).toContain('## 当前RP余额: ' + (40 + c.RP));
+  });
+
+  it('CR 为 0 时显示「不变」而不是 +0', () => {
+    const r = computeSettlement({ ...基准输入, 评价等级: 'B' }, 满骰());
+    expect(assembleSettlementPanel(r, 假AI, 假快照 as any)).toContain('## CR变动: 不变');
+  });
+
+  it('称号行在非 A/S 级时留空', () => {
+    const r = computeSettlement({ ...基准输入, 评价等级: 'C' }, 满骰());
+    const p2 = assembleSettlementPanel(r, { ...假AI, 称号: null } as any, 假快照 as any);
+    expect(p2).not.toContain('## 称号获得: 血夜行者');
+  });
+
+  it('末尾列出结算后流程的两个选项', () => {
+    expect(p).toContain('休息周期');
+    expect(p).toContain('50 UP/天');
+  });
+});
+
+describe('buildSettlementWrites', () => {
+  const c = computeSettlement(基准输入, 满骰());
+  const w = buildSettlementWrites(c, 假AI, 假快照 as any);
+  const 取 = (路径: string[]) => w.find(x => x.路径.join('.') === 路径.join('.'))?.值;
+
+  it('四个增量是「旧值 + 增量」而不是增量本身', () => {
+    expect(取(['头部', 'EXP_当前'])).toBe(0 + c.最终EXP);
+    expect(取(['经济', 'UP'])).toBe(0 + c.最终UP);
+    expect(取(['头部', 'RP_当前'])).toBe(40 + c.RP);
+    expect(取(['职业', 'PEXP_当前'])).toBe(100 + c.PEXP);
+  });
+
+  it('队友拿到与玩家完全相同的 EXP / UP', () => {
+    expect(取(['小队', '成员', '阿澈', '头部', 'EXP_当前'])).toBe(0 + c.最终EXP);
+    expect(取(['小队', '成员', '阿澈', '背包', '现金UP', '数量'])).toBe(0 + c.最终UP);
+  });
+
+  it('清空与清零', () => {
+    for (const k of ['其他契约者', '副本角色', '其他契约者名单', '固有角色名单']) {
+      expect(取([k])).toEqual({});
+    }
+    expect(取(['当前副本元数据', '副本名称'])).toBe('未生成');
+    expect(取(['当前副本任务', '主线任务', '名称'])).toBe('无');
+  });
+
+  it('副本经历写入「副本名 → {评价等级, 简要说明}」', () => {
+    expect(取(['副本经历', '血色黎明'])).toEqual({ 评价等级: 'S', 简要说明: '他在血雨里站成了碑。' });
+  });
+
+  it('称号只写「备用称号（只记录不生效）」, 绝不碰「当前称号」', () => {
+    expect(取(['头部', '称号', '备用称号（只记录不生效）'])).toEqual(假AI.称号);
+    expect(w.some(x => x.路径.join('.') === '头部.称号.当前称号')).toBe(false);
+  });
+
+  it('只允许写这三个 *_当前, 其余一律不出现', () => {
+    const 允许 = new Set(['EXP_当前', 'RP_当前', 'PEXP_当前']);
+    const 坏键 = ['实际', '加成', '属性修正值', 'HP_最大', 'MP_最大', '耐力_最大', '防御', '闪避值',
+      '移动距离', '负重_上限', 'HP_当前', 'MP_当前', '耐力_当前',
+      'EXP_升级所需', 'RP_下一级', 'PEXP_升级所需', '职业等级', '军衔'];
+    for (const x of w) {
+      for (const k of x.路径) {
+        expect(坏键).not.toContain(k);
+        if (k.endsWith('_当前')) expect(允许.has(k)).toBe(true);
+      }
+    }
+  });
+
+  it('掉落物品写进背包', () => {
+    expect(取(['背包', '血刃', '数量'])).toBe(1);
+    expect(取(['背包', '血刃', '描述'])).toContain('金色');
+  });
+});
+
+/**
+ * 第 3 轮补钉 —— 变异体实测出的洞（Task 3 实现者补, 不在 brief 的代码块里）。
+ *
+ * 上面那句「四个增量是『旧值 + 增量』而不是增量本身」**在给定的 fixture 下是空的**:
+ * 假快照的 `当前EXP: 0` / `当前UP: 0`（队友也是 0）, 于是 `0 + 增量` 与 `增量` 恒等 ——
+ * 把实现改成 `记(['头部','EXP_当前'], c.最终EXP)`（丢掉旧值）整份测试仍然全绿。
+ * 给旧值一个非零起点, 这条断言才真的钉得住「累加」。
+ */
+describe('buildSettlementWrites · 旧值非零时才钉得住累加', () => {
+  const c = computeSettlement(基准输入, 满骰());
+  const 有底快照 = {
+    ...假快照,
+    当前EXP: 1234,
+    当前UP: 77,
+    小队成员: [{ 名称: '阿澈', 当前EXP: 500, 当前UP: 9 }],
+  };
+  const w = buildSettlementWrites(c, 假AI, 有底快照 as any);
+  const 取 = (路径: string[]) => w.find(x => x.路径.join('.') === 路径.join('.'))?.值;
+
+  it('四个增量 + 队友的 EXP / UP 都是旧值加上增量', () => {
+    expect(取(['头部', 'EXP_当前'])).toBe(1234 + c.最终EXP);
+    expect(取(['经济', 'UP'])).toBe(77 + c.最终UP);
+    expect(取(['头部', 'RP_当前'])).toBe(40 + c.RP);
+    expect(取(['职业', 'PEXP_当前'])).toBe(100 + c.PEXP);
+    expect(取(['小队', '成员', '阿澈', '头部', 'EXP_当前'])).toBe(500 + c.最终EXP);
+    expect(取(['小队', '成员', '阿澈', '背包', '现金UP', '数量'])).toBe(9 + c.最终UP);
+    // 证明这条不是「怎么写都绿」: 新旧值必须真的不同, 否则上面的断言又退化成空的
+    expect(1234 + c.最终EXP).not.toBe(c.最终EXP);
+    expect(40 + c.RP).not.toBe(c.RP);
+  });
+});
