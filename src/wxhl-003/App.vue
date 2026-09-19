@@ -528,6 +528,71 @@
       <button class="confirm-btn" :disabled="dungeonGenStore.generating" @click="onGenerateDungeon">
         {{ dungeonGenStore.generating ? '生成中...' : '生成副本' }}
       </button>
+
+      <div v-if="dungeonGenStore.latest?.result" class="dungeon-card">
+        <div class="dc-name">{{ dungeonGenStore.latest.result.副本名称 }}</div>
+        <div class="dc-meta">{{ dungeonGenStore.latest.result.副本来源 }}</div>
+        <div class="dc-meta">【{{ dungeonGenStore.latest.build.副本类型 }}】 · {{ dungeonGenStore.latest.build.时间限制天 }}天 · 基准等级 Lv.{{ playerLevel }}</div>
+        <div class="dc-bg">{{ dungeonGenStore.latest.result.副本背景 }}</div>
+
+        <details class="dc-details"><summary>主线任务</summary>
+          <div class="dc-line">{{ dungeonGenStore.latest.result.主线任务.名称 }}</div>
+          <div class="dc-sub">{{ dungeonGenStore.latest.result.主线任务.说明 }}</div>
+        </details>
+
+        <details class="dc-details"><summary>支线任务 ×3</summary>
+          <div v-for="t in dungeonGenStore.latest.result.支线任务" :key="t.名称" class="dc-line">
+            <b>{{ t.名称 }}</b><div class="dc-sub">{{ t.说明 }}</div>
+          </div>
+        </details>
+
+        <details class="dc-details"><summary>隐藏任务 ×2</summary>
+          <div v-for="t in dungeonGenStore.latest.result.隐藏任务" :key="t.名称" class="dc-line">
+            <b>{{ t.名称 }}</b><div class="dc-sub">{{ t.说明 }}</div>
+          </div>
+        </details>
+
+        <details class="dc-details"><summary>世界事件 ×2</summary>
+          <div v-for="e in dungeonGenStore.latest.result.世界事件" :key="e.名称" class="dc-line">
+            <b>{{ e.名称 }}</b><div class="dc-sub">{{ e.说明 }}</div><div class="dc-sub">影响：{{ e.影响 }}</div>
+          </div>
+        </details>
+
+        <details class="dc-details"><summary>副本成就 ×6</summary>
+          <div v-for="(a, i) in dungeonGenStore.latest.result.副本成就" :key="a.名称" class="dc-line">
+            <b>{{ ACHIEVEMENT_TIERS[i] }} {{ a.名称 }}</b><div class="dc-sub">{{ a.难度 }}</div>
+          </div>
+        </details>
+
+        <details class="dc-details"><summary>契约者名单 / 固有角色</summary>
+          <div class="dc-line"><b>契约者</b>
+            <div class="dc-sub">{{ dungeonGenStore.latest.result.其他契约者.map(c => '[' + (c.称号 === '无' ? '无称号' : c.称号) + ']' + c.真名 + ' Lv.' + c.等级).join('，') }}</div>
+          </div>
+          <div class="dc-line"><b>固有角色</b>
+            <div class="dc-sub">{{ dungeonGenStore.latest.result.固有角色.map(r => r.名称 + ' (Lv.' + r.等级 + ' | ' + r.位阶 + ')').join('，') }}</div>
+          </div>
+        </details>
+
+        <div class="dc-actions">
+          <button class="confirm-btn" :disabled="dungeonGenStore.writing" @click="onWriteDungeon(dungeonGenStore.latest.id)">
+            {{ dungeonGenStore.latest.written ? '已写入存档' : '写入存档' }}
+          </button>
+          <button class="confirm-btn modify" @click="onFillDungeonInput(dungeonGenStore.latest.id)">填入输入框</button>
+          <button class="confirm-btn modify" @click="onCopyPanel(dungeonGenStore.latest)">复制面板文本</button>
+          <button class="confirm-btn reroll" :disabled="dungeonGenStore.rolling || dungeonGenStore.generating" @click="onRerollDungeonGen">🔄 重roll</button>
+          <button class="confirm-btn" @click="onEnemyGenPlaceholder">敌人生成</button>
+        </div>
+      </div>
+
+      <div v-if="dungeonGenStore.rolledDungeons.length > 1" class="roll-section">
+        <div class="roll-section-title">历史记录</div>
+        <div v-for="d in dungeonGenStore.rolledDungeons" :key="d.id" class="roll-row">
+          <span class="roll-label">{{ d.result?.副本名称 || '（未生成）' }}</span>
+          <span class="roll-expr">{{ d.build.副本类型 }}</span>
+          <span class="roll-map">{{ d.createdAt }}</span>
+          <button class="retry-link" @click="dungeonGenStore.remove(d.id)">删除</button>
+        </div>
+      </div>
     </template>
 
     <div v-else class="empty-state">
@@ -750,6 +815,7 @@ function refreshPlayerCycle() {
     if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type: 'message', message_id: -1 }) ?? {} } catch (_) {} }
     if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type: 'chat' }) ?? {} } catch (_) {} }
     playerCycle.value = Number(vars?.stat_data?.契约者?.赛季信息?.当前副本周期) || 1
+    playerLevel.value = Number(vars?.stat_data?.契约者?.头部?.等级) || 1
   } catch (_) { playerCycle.value = 1 }
 }
 
@@ -761,6 +827,27 @@ function openDungeonRoll() {
 
 function onRollDungeon() { dungeonGenStore.doRoll() }
 async function onGenerateDungeon() { await dungeonGenStore.generate() }
+
+const ACHIEVEMENT_TIERS = ['★ 探索级', '★★ 挑战级', '★★★ 破局级', '★★★★ 史诗级', '★★★★★ 传说级', '★★★★★★ 世界天花板']
+const playerLevel = ref(1)
+
+async function onWriteDungeon(id: number) { await dungeonGenStore.writeToSave(id) }
+async function onFillDungeonInput(id: number) { await dungeonGenStore.fillInput(id) }
+function onRerollDungeonGen() { dungeonGenStore.reroll() }
+
+/** 复制 <Panel Enhancement> 面板文本, 用于贴给别人或存底 */
+async function onCopyPanel(entry: { panelText?: string }) {
+  if (!entry?.panelText) { toastr.info('还没有面板文本'); return }
+  try {
+    await navigator.clipboard.writeText(entry.panelText)
+    toastr.success('面板文本已复制')
+  } catch (e: any) {
+    toastr.error('复制失败: ' + (e?.message || e))
+  }
+}
+
+/** 敌人生成占位（阶段 C 实现） */
+function onEnemyGenPlaceholder() { toastr.info('敌人生成规则待补，下一阶段实现') }
 
 // ============ 构筑编辑 · 六字段模块 ============
 const editModules = [
@@ -1254,4 +1341,12 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .roll-value{font-weight:700;color:#f0c674;font-family:monospace}
 .roll-map{text-align:right;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .dungeonroll-icon{background:linear-gradient(135deg,#7c3aed,#4c1d95)}
+.dungeon-card{margin:10px 12px;padding:10px;border:1px solid rgba(120,80,40,.35);border-radius:10px;background:rgba(30,20,15,.5)}
+.dc-name{font-size:15px;font-weight:700;color:#f0c674}
+.dc-meta{font-size:11px;color:var(--chalk-d);margin-top:2px}
+.dc-bg{font-size:12px;margin-top:6px;line-height:1.5}
+.dc-details{margin-top:6px;font-size:12px;& summary{cursor:pointer;color:#c9a227;font-weight:700}}
+.dc-line{margin-top:4px}
+.dc-sub{font-size:11px;color:var(--chalk-d);line-height:1.45}
+.dc-actions{display:flex;flex-wrap:wrap;gap:6px;margin-top:10px}
 </style>
