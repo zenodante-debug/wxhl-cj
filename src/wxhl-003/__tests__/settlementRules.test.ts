@@ -509,11 +509,13 @@ describe('副本成就 / 隐藏任务公示 · 按变量清单 + AI 名单比对
   const p = assembleSettlementPanel(c, 假AI, 清单快照 as any);
   const 取行 = (文本: string, k: string) => 文本.split('\n').find(l => l.startsWith(k)) ?? '';
 
-  it('已达成行只列 AI 名单里的那个; 未达成行列另一个, 且带上它的说明（达成条件）', () => {
+  it('已达成行列 AI 名单里的那个（带说明=完成描述）; 未达成行列另一个, 且带上它的说明（达成条件）', () => {
     const 已 = 取行(p, '## 副本成就已达成:');
     const 未 = 取行(p, '## 副本成就未达成:');
     expect(已).toContain('初见');
     expect(已).not.toContain('血雨行者');
+    // 规则第九步: 已达成也要明文展示「完成描述」= 变量里的 `说明`, 与 未达成 行同构
+    expect(已).toContain('完成描述: 第一次踏进回廊');
     expect(未).toContain('血雨行者');
     expect(未).not.toContain('初见');
     // 规则第九步要公示的就是「本次错过的成就达成条件」
@@ -526,6 +528,8 @@ describe('副本成就 / 隐藏任务公示 · 按变量清单 + AI 名单比对
     const 段 = (名: string) => 公示.split('；').find(s => s.includes(名)) ?? '';
     expect(段('旧日回响')).toContain('已完成');
     expect(段('旧日回响')).not.toContain('未触发');
+    // 规则第九步: 公示要「展示隐藏任务**内容**和奖励」—— 内容就是变量里的 `说明`
+    expect(段('旧日回响')).toContain('钟楼下把旧日的回响听完');
     expect(段('无人知晓')).toContain('未触发');
     expect(段('无人知晓')).not.toContain('已完成');
   });
@@ -635,5 +639,17 @@ describe('说明 为空时印显式占位, 不静默丢掉整段', () => {
     expect(公示).toContain('旧日回响');
     expect(公示).toContain('（变量中未记录说明）');
     expect(公示).toContain('已完成');
+  });
+
+  it('已达成行的说明为空 → 同样印占位（「完成描述」那段不许消失）, 成就名与奖励仍在', () => {
+    const 空说明已达成 = {
+      ...假快照,
+      成就清单: [{ 名称: '初见', 说明: '', 难度: '★ 探索级 · 顺路可完成', 奖励: '20 UP + 40 EXP + 2 RP' }],
+    };
+    const 已 = assembleSettlementPanel(c, 假AI, 空说明已达成 as any)
+      .split('\n').find(l => l.startsWith('## 副本成就已达成:')) ?? '';
+    expect(已).toContain('初见');
+    expect(已).toContain('（变量中未记录说明）');
+    expect(已).toContain('20 UP + 40 EXP + 2 RP');
   });
 });
