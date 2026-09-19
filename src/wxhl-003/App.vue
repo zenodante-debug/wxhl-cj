@@ -710,14 +710,16 @@
 
       <div class="dc-actions">
         <button class="confirm-btn modify" @click="onCopySettlementPanel">复制面板文本</button>
-        <button class="confirm-btn reroll" :disabled="settlementStore.generating || settlementStore.writing" @click="onGenerateSettlement">
+        <button class="confirm-btn reroll" :disabled="settlementStore.generating || settlementStore.writing || settlementStore.settlement.已写入" @click="onGenerateSettlement">
           {{ settlementStore.generating ? '结算中...' : '🔄 重算' }}
         </button>
-        <button class="confirm-btn" :disabled="settlementStore.generating || settlementStore.writing" @click="onConfirmSettlement">
-          {{ settlementStore.writing ? '写入中...' : '确认结算' }}
+        <button class="confirm-btn" :disabled="settlementStore.generating || settlementStore.writing || settlementStore.settlement.已写入" @click="onConfirmSettlement">
+          {{ settlementStore.settlement.已写入 ? '已写入（回读失败）' : (settlementStore.writing ? '写入中...' : '确认结算') }}
         </button>
       </div>
-      <div class="set-hint settle-warn">⚠ 确认后会写入存档并清空副本资料，不可撤销</div>
+      <!-- 已写入 = 变量已经落进存档（只是回读没核对上）: 累加语义下重试会让整份结算翻倍, 两个入口都锁掉 -->
+      <div v-if="settlementStore.settlement.已写入" class="set-hint settle-warn">⚠ 本次结算已经写进存档（回读校验失败, 明细见上方红框）。累加语义下再次结算会让数值翻倍，请先读存档确认。</div>
+      <div v-else class="set-hint settle-warn">⚠ 确认后会写入存档并清空副本资料，不可撤销</div>
     </template>
   </div>
 
@@ -958,8 +960,10 @@ async function onGenerateDungeon() { await dungeonGenStore.generate() }
 
 function openSettlement() {
   currentView.value = 'settlement'
-  // 进入即清空: 结算预览是「本次结算」的临时产物, 不该把上一轮留下的面板当成这一轮的
-  settlementStore.reset()
+  // 只清错误, **不清预览**（与 openDungeonRoll 同款）: `computeSettlement` 的 RP/PEXP 带随机掷骰,
+  // 重新结算会得到一组不同的数 —— 若玩家已把上一份面板复制给聊天, 清掉它就会造出
+  // 「聊天里看到的」与「写进存档的」不同源, 恰好违反本模块的核心不变量。
+  settlementStore.lastError = ''
 }
 async function onGenerateSettlement() { await settlementStore.generateSettlement() }
 async function onConfirmSettlement() { await settlementStore.writeSettlement() }

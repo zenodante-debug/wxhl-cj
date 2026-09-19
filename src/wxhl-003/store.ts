@@ -2224,6 +2224,26 @@ export interface SettlementPreview {
   ai: SettlementGenResult
   /** `assembleSettlementPanel` 的产物, 逐行照规则模板 */
   面板: string
+  /**
+   * `replaceMvuData` 已返回、但回读校验没过 —— 变量**已经写进存档**了, 只是没能核对上。
+   *
+   * 本模块是**累加**语义（旧值 + 增量）, 与 `writeToSave`/`writeEnemies` 的覆盖语义不同:
+   * 覆盖语义下失败重试基本幂等, 这里重试会让 EXP/UP/RP/PEXP/资格分**翻倍**。视图据此禁用写入入口。
+   */
+  已写入: boolean
+}
+
+/**
+ * 「0 数量的背包条目」是 **no-op**, 该跳过: 卡的 `背包` schema 带
+ * `transform: _.pickBy(data, ({数量}) => 数量 > 0)`, MVU 在 parse 时会把数量 ≤ 0 的条目整个丢掉 ——
+ * 写了等于没写, 却会让回读校验读到 `undefined` 而误报「写入未生效」, 把一次成功的写入推进
+ * 「已提交但未核对」的分支（进而锁死重试, 见 `SettlementPreview.已写入`）。
+ *
+ * **只对末段是 `数量` 的路径放行, 不用 `值 === 0` 一刀切** —— 后者会顺带掩盖「某个本该非 0 的字段
+ * 被算成 0」这种真 bug; 也**不给 `数量` 兜 `|| 1`**, 那会凭空给队友发一个「现金UP」。
+ */
+function 是零数量(路径: string[], 值: unknown): boolean {
+  return 值 === 0 && 路径[路径.length - 1] === '数量'
 }
 
 export const useSettlementStore = defineStore('settlement', () => {
@@ -2328,6 +2348,7 @@ export const useSettlementStore = defineStore('settlement', () => {
         计算结果,
         ai: parsed,
         面板: assembleSettlementPanel(计算结果, parsed, 快照),
+        已写入: false,
       }
     } catch (e: any) {
       lastError.value = e.message || '结算失败'
@@ -2344,6 +2365,9 @@ export const useSettlementStore = defineStore('settlement', () => {
 
     writing.value = true
     lastError.value = ''
+    // `已提交` = `replaceMvuData` 是否已经返回（= 变量已经落进存档）。**必须带到 catch**,
+    // 因为本模块是累加语义: 失败后再点一次会让 EXP/UP/RP/PEXP/资格分整个翻倍, 且不可撤销。
+    let 已提交 = false
     try {
       await waitGlobalInitialized('Mvu')
       // 与竞技场写「当前敌人」/ writeToSave 一致的楼层探测: 全局脚本 iframe 无楼层上下文时回退最新楼层
@@ -2358,14 +2382,22 @@ export const useSettlementStore = defineStore('settlement', () => {
       const writes = buildSettlementWrites(预览.计算结果, 预览.ai, 预览.快照)
       const mvu = Mvu.getMvuData({ type: 'message', message_id })
       for (const w of writes) {
+        if (是零数量(w.路径, w.值)) continue
         // 数组路径: 物品名 / 角色名可能含「.」(如 J.K.罗琳), 不能走字符串路径
         _.set(mvu, ['stat_data', '契约者', ...w.路径], w.值)
       }
+
+      // 这一对赋值之间是唯一的窗口: 之后变量就一定在存档里了（无论回读校验过不过）。
+      // 把 已提交 夹在 replaceMvuData 两侧, 是为了让「没写」与「写了但没核对上」在 catch 里可分辨。
+      已提交 = false
       await Mvu.replaceMvuData(mvu, { type: 'message', message_id })
+      已提交 = true
 
       // 回读校验: MVU 按注册的 zod schema 处理写入, 未声明的键会被静默剥掉 —— 这里主动暴露, 避免"看起来写成功"
       const after = Mvu.getMvuData({ type: 'message', message_id })
       for (const w of writes) {
+        // 0 数量是 no-op（卡 schema 自己就会把该条目丢掉）, 不写也不校验 —— 否则这里会误报「写入未生效」
+        if (是零数量(w.路径, w.值)) continue
         if (_.get(after, ['stat_data', '契约者', ...w.路径]) === undefined) {
           throw new Error('写入未生效: 字段名与存档 schema 不匹配 → ' + w.路径.join('.'))
         }
@@ -2376,8 +2408,18 @@ export const useSettlementStore = defineStore('settlement', () => {
       toastr.success('副本结算已写入')
       return true
     } catch (e: any) {
-      lastError.value = e?.message || '写入结算失败'
-      toastr.error('写入结算失败: ' + lastError.value)
+      const 原因 = e?.message || String(e)
+      if (已提交) {
+        // 变量**已经写进去了**, 只是回读没核对上。既不能谎报成功, 也绝不能让玩家直接重试 ——
+        // 累加语义下重试 = 整份结算应用第二次。标记预览并锁住写入入口（光改文案挡不住手快的人）。
+        预览.已写入 = true
+        lastError.value = '变量已写入存档，但回读校验失败（' + 原因 + '）。请先读存档确认，不要直接重试'
+        toastr.error('变量已写入存档，但回读校验失败，请先读存档确认: ' + 原因)
+      } else {
+        // 写入根本没发生（含 buildSettlementWrites 的校验抛错、Mvu 初始化失败）—— 可以安全重试
+        lastError.value = 原因 || '写入结算失败'
+        toastr.error('写入结算失败: ' + lastError.value)
+      }
       return false
     } finally {
       writing.value = false
