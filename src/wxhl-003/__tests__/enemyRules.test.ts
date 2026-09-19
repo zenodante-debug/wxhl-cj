@@ -156,10 +156,10 @@ describe('assembleEnemyPanelFromEntity（前端已代算）', () => {
     expect(前端已代算({})).toBe(false);
   });
 
-  it('判据是多信号: HP_最大 = 0 但 闪避值 > 0 仍算已代算（CON=0 的合法 dump 角色）', () => {
-    // 单看 HP_最大 会把这批合法角色误判成未代算 → 静默回退 → 装备加成不可见
-    const 零HP: any = { ...基础实体, 衍生属性: { ...基础实体.衍生属性, HP_最大: 0, 闪避值: 7 } };
-    expect(前端已代算(零HP)).toBe(true);
+  it('判据是四信号: 前三项都为 0 时, 负重_上限 > 0 仍算已代算', () => {
+    // 把判据改回两信号 / 三信号, 这条必红
+    const 零前三: any = { ...基础实体, 衍生属性: { ...基础实体.衍生属性, HP_最大: 0, 闪避值: 0, MP_最大: 0, 负重_上限: 200 } };
+    expect(前端已代算(零前三)).toBe(true);
   });
 
   it('[名称] 行取传入的角色名（实体本身不存名字）', () => {
@@ -170,6 +170,13 @@ describe('assembleEnemyPanelFromEntity（前端已代算）', () => {
   it('[威胁] 未传时不抛错, 回退成 `阶位 · Lv.等级`', () => {
     const p = assembleEnemyPanelFromEntity('腐化游民', 基础实体);
     expect(p).toContain('[威胁|一阶 · Lv.6]');
+  });
+
+  it('[生命] 已代算但缺 HP_当前 时印 `—/最大`, 不拿 HP_最大 顶成满血', () => {
+    const 无当前HP: any = { ...已代算实体, 衍生属性: { ...已代算实体.衍生属性, HP_当前: undefined } };
+    const p = assembleEnemyPanelFromEntity('腐化游民', 无当前HP, '极低单体，集群麻烦');
+    expect(p).toContain('[生命|—/900]');
+    expect(p).not.toContain('[生命|900/900]'); // 受伤的敌人不能被印成满血
   });
 
   it('[生命] 取实体里的 HP_当前/HP_最大, 不是模块自算值', () => {
