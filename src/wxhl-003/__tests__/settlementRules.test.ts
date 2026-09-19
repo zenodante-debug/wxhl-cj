@@ -90,6 +90,7 @@ describe('computeSettlement · 倍率', () => {
     const r = computeSettlement({ ...基准输入, 评价等级: 'D', CR: 1, 阶位: '一阶' }, 满骰());
     expect(r.评价倍率).toBe(0.7);
     expect(r.最终EXP).toBe(Math.round(100 * 0.7 * 1.0 * 1));
+    expect(r.更新后CR).toBe(1);   // D 级 −0.5 → 0.5, 被 clamp 回下限 1（此前只摆了输入没断言）
   });
 });
 
@@ -206,5 +207,65 @@ describe('SettlementGenResultSchema', () => {
   it('评价等级非法或缺省时 parse 直接抛错', () => {
     expect(() => SettlementGenResultSchema.parse({ 评价等级: 'X' })).toThrow();
     expect(() => SettlementGenResultSchema.parse({})).toThrow();
+  });
+});
+
+/**
+ * 第 2 轮补钉 —— 审查者用变异体实测出的一批「**改坏了测试也照样绿**」的洞, 逐条堵上。
+ * 每条都能红: 括号里的变异体就是它要挡的那种改法。
+ */
+describe('computeSettlement · 第 2 轮补钉', () => {
+  it('CR奖励倍率六档数值都钉住（把炼狱 15.0 改成 150 曾全绿）', () => {
+    const 倍率 = (CR: number) => computeSettlement({ ...基准输入, CR }, 满骰()).CR奖励倍率;
+    expect(倍率(1.0)).toBe(1.0);
+    expect(倍率(2.0)).toBe(1.0);    // 漠视（2.0 的 floor 边界, 2.5 之外此前没覆盖）
+    expect(倍率(3.0)).toBe(1.2);    // 观察
+    expect(倍率(4.0)).toBe(1.2);
+    expect(倍率(5.0)).toBe(1.5);    // 关注
+    expect(倍率(6.0)).toBe(1.5);
+    expect(倍率(7.0)).toBe(3.0);    // 重视
+    expect(倍率(8.0)).toBe(3.0);
+    expect(倍率(9.0)).toBe(6.0);    // 期待
+    expect(倍率(9.9)).toBe(6.0);
+    expect(倍率(10.0)).toBe(15.0);  // 炼狱
+  });
+
+  it('CR=10(炼狱) 的 CR奖励倍率 仍按结算前的 10 查表 = 15.0; 「回调至 3」只影响 更新后CR', () => {
+    const r = computeSettlement({ ...基准输入, CR: 10 }, 满骰());
+    expect(r.CR态度).toBe('炼狱');
+    expect(r.CR奖励倍率).toBe(15.0);
+    expect(r.最终EXP).toBe(9000);    // 100 × 2.0 × 15.0 × 3 —— 倍率真的用进了存档数值
+    expect(r.最终UP).toBe(4500);     // 50 × 2.0 × 15.0 × 3
+    expect(r.更新后CR).toBe(3);
+  });
+
+  it('资格分的支线项取 完成的支线数, 不是 职业专属支线条数', () => {
+    const r = computeSettlement({ ...基准输入, 完成的支线数: 5, 职业专属支线条数: 3 }, 满骰());
+    expect(r.资格分_任务).toBe(5 * 5 + 2 * 20 + 3 * 10);    // 95
+    expect(r.PEXP).toBe(Math.round((100 + 3 * 100) * 2.0));  // 800 → 同时钉住 PEXP 用的是另一个字段
+  });
+
+  it('阶位别名归一: 汉字 / N阶 / 裸数字 都认（五阶曾被从表里删掉而全绿）', () => {
+    const 位阶修正 = (阶位: string) => computeSettlement({ ...基准输入, 阶位 }, 满骰()).位阶修正;
+    expect(位阶修正('三阶')).toBe(3);   // 基准输入的写法
+    expect(位阶修正('五阶')).toBe(5);
+    expect(位阶修正('1阶')).toBe(1);
+    expect(位阶修正('4')).toBe(4);
+    // 五阶若被静默按一阶算, 写进存档的最终 EXP 会少 5 倍
+    expect(computeSettlement({ ...基准输入, 阶位: '五阶' }, 满骰()).最终EXP).toBe(1500);
+  });
+
+  it('阶位认不出来时抛错, 不静默按一阶算', () => {
+    expect(() => computeSettlement({ ...基准输入, 阶位: '六阶' }, 满骰())).toThrow();
+    expect(() => computeSettlement({ ...基准输入, 阶位: '无' }, 满骰())).toThrow();
+    expect(() => computeSettlement({ ...基准输入, 阶位: '' }, 满骰())).toThrow();
+  });
+
+  it('评价等级 F 直接抛错（主线失败 = 抹杀, 不进入结算流程）', () => {
+    expect(() => computeSettlement({ ...基准输入, 评价等级: 'F' }, 满骰())).toThrow(/抹杀/);
+  });
+
+  it('周期 9 + 1 = 10（不是「>= 10 就归 1」）', () => {
+    expect(computeSettlement({ ...基准输入, 旧周期: 9 }, 满骰()).新周期).toBe(10);
   });
 });
