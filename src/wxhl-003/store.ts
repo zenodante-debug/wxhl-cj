@@ -2,10 +2,15 @@ import { type ForumThread, type ForumPost, INITIAL_THREADS, RANK_BOARDS, type Ca
 import { buildRefreshPrompt, buildRepliesPrompt, buildThreadDetailPrompt, type ForumSectionKey } from './forumPrompts'
 import { WORKSHOP_WORLDBOOK_NAME, PvPSaveSchema, type WorkshopCard, type PvPSave } from './data'
 import { extractContractSave, buildIntroPrompt, tierOf, generateDefaultAppearance, buildBattleIntroMessage } from './workshop'
-import { rollBuild, rollRewards, type BuildRoll, type RewardSet, type RollRecord } from './dice'
+import { rollBuild, rollRewards, rollDie, type BuildRoll, type RewardSet, type RollRecord } from './dice'
 import { DungeonGenResultSchema, assemblePanelText, mapToVariables, type DungeonGenResult, type PlayerBrief } from './dungeonRules'
 import { buildDungeonPrompt, buildEnterPrompt, buildEnemyPrompt } from './dungeonGen'
 import { EnemyGenResultSchema, mapEnemyToVariables, assembleEnemyPanelFromEntity, 前端已代算, type GeneratedEnemy } from './enemyRules'
+import {
+  SettlementGenResultSchema, computeSettlement, 汇总基础奖励, assembleSettlementPanel, buildSettlementWrites,
+  type SettlementGenResult, type SettlementSnapshot, type SettlementComputed,
+} from './settlementRules'
+import { buildSettlementPrompt } from './settlementGen'
 
 const SK = 'wxhl003_settings'
 
@@ -490,7 +495,7 @@ ${wb || CORE_WORLD}
     influenceEvents, influenceAnalyzing, influenceError,
     init, loadWorldbookList, fetchModels, testConnection,
     refreshSection, refreshRankings, generateThreadDetail, generateReplies, getWorldbookContent,
-    extractInfluence, clearInfluence, createThread,
+    extractInfluence, clearInfluence, createThread, readRecentChat,
   }
 })
 
@@ -2077,4 +2082,307 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     generatingEnemies, writingEnemies, generateEnemies, writeEnemies,
     doRoll, generate, reroll, writeToSave, fillInput, remove,
   }
+})
+
+// ================================================================
+// 副本结算 Store
+//
+// 分工: 算术 / 面板 / 写入清单全在 settlementRules.ts（纯函数, 由单测覆盖）;
+// 本文件只负责「读 MVU 变量 → 组装输入 → 调 AI → 把产物摆给视图」与「按清单写回 MVU」。
+// ================================================================
+
+/** 变量里的字段一律可能是 undefined / 非字符串 —— 取文本时统一成 `''`, 让下游的占位逻辑生效 */
+function 取文本(v: unknown): string {
+  return v === undefined || v === null ? '' : String(v);
+}
+
+/** 同上, 但转成有限数字; 非数字（含 undefined / 空串 / 'abc'）一律 0 */
+function 取数字(v: unknown): number {
+  const n = Number(v);
+  return Number.isFinite(n) ? n : 0;
+}
+
+/**
+ * 楼层探测读取 `stat_data.契约者` 的**原文**（与 `readPlayerBrief` 同款回退链）。
+ *
+ * `readSettlementSnapshot` 要把它压成只读快照, 但 prompt 的「变量快照」段要的是原文
+ * （AI 需要看到 `当前副本任务` 里逐字的任务名与奖励文本）。两处共用这一个读取口。
+ */
+function read契约者(): any {
+  try {
+    let vars: any = {}
+    try {
+      const mid = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : -1
+      if (mid && mid !== -1) vars = getVariables?.({ type: 'message', message_id: mid }) ?? {}
+    } catch (_) {}
+    if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type: 'message', message_id: -1 }) ?? {} } catch (_) {} }
+    if (!vars?.stat_data?.契约者) { try { vars = getVariables?.({ type: 'chat' }) ?? {} } catch (_) {} }
+    return vars?.stat_data?.契约者 ?? undefined
+  } catch (_) { return undefined }
+}
+
+/**
+ * 把一个任务容器（`支线任务` / `隐藏任务` / `副本成就`）摊平进 `任务奖励`：键名用容器里的原文, 值取条目的 `奖励`。
+ *
+ * **只收字符串 `奖励`**：`奖励` 缺失或不是字符串时**不放进表** —— 于是 `汇总基础奖励` 会把它记进
+ * `未找到`, 由 UI 如实展示。若退而塞 `''`, 会被 `parseRewardText` 当成「这条任务没有奖励」静默算 0
+ * （玩家少拿奖励而无人察觉）; 塞 `String(undefined)` 则会印出 'undefined'。
+ */
+function 摊平奖励(容器: unknown, 出: Record<string, string>) {
+  if (!容器 || typeof 容器 !== 'object') return
+  for (const [名, 条目] of Object.entries(容器 as Record<string, any>)) {
+    const 原文 = (条目 as any)?.奖励
+    if (typeof 原文 === 'string') 出[名] = 原文
+  }
+}
+
+/**
+ * 从 `stat_data` 里摘出结算需要的**只读快照**（纯读取, 不改任何变量）。
+ *
+ * 字段名必须与 `settlementRules.ts` 的 `SettlementSnapshot` **逐字一致** —— 对不上不会报错,
+ * 只会让下游读到 `undefined`。
+ */
+function readSettlementSnapshot(): SettlementSnapshot | null {
+  const c = read契约者()
+  if (!c) return null
+
+  // ── 任务名 → 奖励原文 ─────────────────────────────────────────────
+  // 主线**固定用 `'主线'` 作键**（主线没有名字可当键）; 支线/隐藏/成就用容器里的键名原文。
+  // **世界事件不摊平** —— 它的 `奖励` 字段存的是「影响」文本, 不是数值, 计进来会把影响描述当奖励解析。
+  const 任务奖励: Record<string, string> = {}
+  const 主线任务 = c.当前副本任务?.主线任务
+  if (typeof 主线任务?.奖励 === 'string') 任务奖励['主线'] = 主线任务.奖励
+  for (const 容器名 of ['支线任务', '隐藏任务', '副本成就']) {
+    摊平奖励(c.当前副本任务?.[容器名], 任务奖励)
+  }
+
+  // ── 背包：物品名 → **已有**数量 ───────────────────────────────────
+  // 掉落写入要在它上面**累加**。缺席会被 buildSettlementWrites 抛错挡住（那是最后一道防线）,
+  // 这里必须真的供上, 否则玩家原有的同名物品会被结算冲掉。
+  const 已有背包: Record<string, number> = {}
+  for (const [名, 条目] of Object.entries((c.背包 ?? {}) as Record<string, any>)) {
+    if (条目 && typeof 条目 === 'object') 已有背包[名] = 取数字((条目 as any).数量)
+  }
+
+  // ── 成就 / 隐藏任务的**全量**清单（含未达成 / 未触发）─────────────────
+  // 规则第九步要公示「本次错过的」, 所以不能只留已达成的那几条; 已完否由面板拿 AI 的名单比对。
+  const 成就清单 = Object.entries((c.当前副本任务?.副本成就 ?? {}) as Record<string, any>).map(([名称, a]: [string, any]) => ({
+    名称, 说明: 取文本(a?.说明), 难度: 取文本(a?.难度), 奖励: 取文本(a?.奖励),
+  }))
+  const 隐藏任务清单 = Object.entries((c.当前副本任务?.隐藏任务 ?? {}) as Record<string, any>).map(([名称, t]: [string, any]) => ({
+    名称, 说明: 取文本(t?.说明), 奖励: 取文本(t?.奖励),
+  }))
+
+  // ── 小队成员：结算要给每个队友发与玩家相同的 EXP / UP ──────────────
+  const 小队成员 = Object.entries((c.小队?.成员 ?? {}) as Record<string, any>).map(([名称, m]: [string, any]) => ({
+    名称,
+    当前EXP: 取数字((m as any)?.头部?.EXP_当前),
+    // 实体 schema 没有 `经济` 字段, 队友的 UP 落在背包的「现金UP」条目上（与写入清单同一口径）
+    当前UP: 取数字((m as any)?.背包?.['现金UP']?.数量),
+  }))
+
+  return {
+    副本名称: 取文本(c.当前副本元数据?.副本名称),
+    当前EXP: 取数字(c.头部?.EXP_当前),
+    当前UP: 取数字(c.经济?.UP),
+    当前RP: 取数字(c.头部?.RP_当前),
+    当前PEXP: 取数字(c.职业?.PEXP_当前),
+    军衔: 取文本(c.头部?.军衔),
+    职业等级: 取数字(c.职业?.职业等级),
+    PEXP_升级所需: 取数字(c.职业?.PEXP_升级所需),
+    当前CR: 取数字(c.头部?.CR),
+    当前现实时间: 取文本(c.当前时间?.现实时间),
+    任务奖励,
+    已有背包,
+    成就清单,
+    隐藏任务清单,
+    小队成员,
+  }
+}
+
+/**
+ * AI 报告的已达成成就 → 星数数组（★=1 … ★★★★★★=6）。
+ *
+ * 星数从 `副本成就.<名>.难度` 的**开头**数 `★`（格式由 `dungeonRules.ts` 固定为
+ * `'★ 探索级 · <难度描述>'`, 见设计 §5.4）。名单里有、清单里没有的名字记 0 星 ——
+ * 它同时也会落进 `汇总基础奖励(...).未找到`, 由 UI 如实展示, 不是静默的。
+ * 名单以 `快照.成就清单` 为准而非 AI 自报的数字, 与「完成与否看 AI、数值/条件看变量」同一口径。
+ */
+function 成就星数(快照: SettlementSnapshot, 已达成名: string[]): number[] {
+  const 难度表 = new Map((快照.成就清单 ?? []).map(a => [a.名称, a.难度]))
+  return (已达成名 ?? []).map(名 => {
+    const 难度 = 难度表.get(名)
+    if (难度 === undefined) return 0
+    return (难度.match(/★/g) ?? []).length
+  })
+}
+
+/** 一次结算的完整产物（只在内存里, 不落盘） */
+export interface SettlementPreview {
+  快照: SettlementSnapshot
+  计算结果: SettlementComputed
+  ai: SettlementGenResult
+  /** `assembleSettlementPanel` 的产物, 逐行照规则模板 */
+  面板: string
+}
+
+export const useSettlementStore = defineStore('settlement', () => {
+  const generating = ref(false)
+  const writing = ref(false)
+  const lastError = ref('')
+  /** 当前预览; 为 null = 尚未结算。写入成功后清空（结算是一次性的） */
+  const settlement = ref<SettlementPreview | null>(null)
+
+  function reset() {
+    settlement.value = null
+    lastError.value = ''
+  }
+
+  function getForumStore() { return useForumStore() }
+
+  async function generateSettlement() {
+    if (generating.value) return
+
+    const 快照 = readSettlementSnapshot()
+    if (!快照) { lastError.value = '读取不到契约者数据'; return }
+    // 副本资料被清空后 副本名称 是 '未生成'（见 buildSettlementWrites 的清除清单）——
+    // 它正是「这一轮副本已经结算过了」的标志, 第二次点结算会停在这里
+    if (快照.副本名称 === '' || 快照.副本名称 === '未生成') { lastError.value = '当前没有进行中的副本'; return }
+
+    // 原文另读一份: prompt 的「变量快照」段要的是**原文**（AI 需要逐字的任务名与奖励文本）,
+    // 而快照是给纯函数用的只读视图 —— 它不含 阶位 / 当前副本周期 / 资格分 这些组装 SettlementInputs 才要的字段
+    const c = read契约者() ?? {}
+
+    // 先判主线状态: 失败 = 抹杀, **不调 AI、不写任何变量**。
+    // computeSettlement 对 'F' 也会抛错, 但那是花掉一次 AI 调用之后的事 —— 这里用变量里的状态先挡住
+    if (c.当前副本任务?.主线任务?.状态 === '失败') {
+      lastError.value = '主线失败 = 抹杀，不进入结算流程'
+      return
+    }
+
+    const forumStore = getForumStore()
+    const cfg = getActiveCfg(forumStore.settings)
+    if (!cfg.url || !cfg.apiKey) { lastError.value = '请先在终端设置中配置 API'; return }
+
+    generating.value = true
+    lastError.value = ''
+    try {
+      // 变量快照: 给 AI 看「逐字的任务名与奖励」, 由它判定哪些完成了。
+      // 只摘结算用得到的段落 —— 不作全量 JSON.stringify（契约者里还有背包/技能等大块内容）。
+      const 变量快照 = [
+        '【当前副本元数据】' + JSON.stringify(c.当前副本元数据 ?? {}),
+        '【当前副本任务】' + JSON.stringify(c.当前副本任务 ?? {}),
+        '【其他契约者名单】' + JSON.stringify(c.其他契约者名单 ?? {}),
+        '【固有角色名单】' + JSON.stringify(c.固有角色名单 ?? {}),
+        '【副本角色】' + (Object.keys(c.副本角色 ?? {}).join('、') || '（无）'),
+        '【头部】' + JSON.stringify(c.头部 ?? {}),
+        '【职业】' + JSON.stringify(c.职业 ?? {}),
+        '【经济】' + JSON.stringify(c.经济 ?? {}),
+      ].join('\n')
+
+      const wb = await forumStore.getWorldbookContent()
+      const prompt = buildSettlementPrompt(变量快照, forumStore.readRecentChat(30), wb)
+      const raw = await aiGenerate(cfg, prompt, {
+        name: 'dungeon_settlement',
+        value: JSON.parse(JSON.stringify(z.toJSONSchema(SettlementGenResultSchema, { io: 'input' }))),
+      })
+      const parsed = SettlementGenResultSchema.parse(extractJSON(raw))
+
+      // 第二道 F 守卫: AI 也可以直接把评价定成 F（规则原文「若主线失败, 填 F」）。
+      // 走到这里说明变量里的状态没写「失败」, 但 AI 从聊天记录里判出了失败 —— 同样不产出画面、不写任何变量。
+      if (parsed.评价等级 === 'F') { lastError.value = '主线失败 = 抹杀，不进入结算流程'; return }
+
+      // 基础奖励汇总（纯函数）。变量里**存在**的奖励文本解析失败会在这里抛错 → 由 catch 接住并报出任务名,
+      // 绝不静默当 0。`未找到` 是 AI 报告了、但变量里没有的键名: 不阻断结算, 但必须让玩家看见。
+      const 基础 = 汇总基础奖励(快照, parsed)
+      if (基础.未找到.length > 0) {
+        lastError.value = '变量中未找到这些任务：' + 基础.未找到.join('、') + '（这些任务的奖励按 0 计, 请核对键名）'
+      }
+
+      const 计算结果 = computeSettlement({
+        评价等级: parsed.评价等级,
+        击杀: parsed.击杀,
+        濒死次数: parsed.濒死次数,
+        副本天数: parsed.副本天数,
+        基础EXP汇总: 基础.EXP,
+        基础UP汇总: 基础.UP,
+        // 资格分的「支线+5/条」用 **AI 报告的数组长度**（见 SettlementInputs 的注释）
+        完成的支线数: parsed.完成的支线.length,
+        隐藏任务数: parsed.完成的隐藏任务.length,
+        成就星数: 成就星数(快照, parsed.达成的成就),
+        天赋试炼次数: parsed.天赋试炼次数,
+        // 只用于第六步 PEXP 的「每条掷 50~100」；**不是**上面那个 完成的支线数, 别混
+        职业专属支线条数: parsed.职业专属支线条数,
+        CR: 快照.当前CR,
+        // 下面三项不在 SettlementSnapshot 里, 从 `契约者` 另读。
+        // 阶位**不做 `|| '一阶'` 兜底**: 缺失/不可识别时让 computeSettlement 抛错并在 UI 上点名,
+        // 否则会静默按 ×1 算（五阶真实是 ×5, 写进存档的最终 EXP/UP 会差 5 倍）。
+        阶位: 取文本(c.头部?.阶位),
+        旧周期: 取数字(c.赛季信息?.当前副本周期) || 1,
+        旧资格分: 取数字(c.资格分),
+        现实日期: 快照.当前现实时间,
+      }, rollDie)
+
+      settlement.value = {
+        快照,
+        计算结果,
+        ai: parsed,
+        面板: assembleSettlementPanel(计算结果, parsed, 快照),
+      }
+    } catch (e: any) {
+      lastError.value = e.message || '结算失败'
+      toastr.error('结算失败: ' + lastError.value)
+    } finally {
+      generating.value = false
+    }
+  }
+
+  /** 把预览的写入清单落进 MVU。照 writeToSave / writeEnemies 的模式: 逐条 _.set → replaceMvuData → 回读校验 */
+  async function writeSettlement(): Promise<boolean> {
+    const 预览 = settlement.value
+    if (!预览) { lastError.value = '请先结算'; return false }
+
+    writing.value = true
+    lastError.value = ''
+    try {
+      await waitGlobalInitialized('Mvu')
+      // 与竞技场写「当前敌人」/ writeToSave 一致的楼层探测: 全局脚本 iframe 无楼层上下文时回退最新楼层
+      let message_id: number | 'latest' = -1
+      try {
+        const mid = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : -1
+        if (mid && mid !== -1) message_id = mid
+      } catch (_) {}
+
+      // 清单在写入前一次性生成。`buildSettlementWrites` 会先校验 `快照.已有背包` 是否供上 ——
+      // 缺席时抛错, 绝不退化成「覆盖写」把玩家原有的同名物品冲掉。
+      const writes = buildSettlementWrites(预览.计算结果, 预览.ai, 预览.快照)
+      const mvu = Mvu.getMvuData({ type: 'message', message_id })
+      for (const w of writes) {
+        // 数组路径: 物品名 / 角色名可能含「.」(如 J.K.罗琳), 不能走字符串路径
+        _.set(mvu, ['stat_data', '契约者', ...w.路径], w.值)
+      }
+      await Mvu.replaceMvuData(mvu, { type: 'message', message_id })
+
+      // 回读校验: MVU 按注册的 zod schema 处理写入, 未声明的键会被静默剥掉 —— 这里主动暴露, 避免"看起来写成功"
+      const after = Mvu.getMvuData({ type: 'message', message_id })
+      for (const w of writes) {
+        if (_.get(after, ['stat_data', '契约者', ...w.路径]) === undefined) {
+          throw new Error('写入未生效: 字段名与存档 schema 不匹配 → ' + w.路径.join('.'))
+        }
+      }
+
+      // 结算是一次性的: 副本资料已被清空, 同一份面板再写一次只会把刚清空的资料重新填回去
+      settlement.value = null
+      toastr.success('副本结算已写入')
+      return true
+    } catch (e: any) {
+      lastError.value = e?.message || '写入结算失败'
+      toastr.error('写入结算失败: ' + lastError.value)
+      return false
+    } finally {
+      writing.value = false
+    }
+  }
+
+  return { settlement, generating, writing, lastError, generateSettlement, writeSettlement, reset }
 })

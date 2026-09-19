@@ -25,6 +25,7 @@
       <div class="app-icon-wrapper" @click="openDungeon"><div class="app-icon dungeon-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M12 2L20 6v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z"/><path d="M9 12l2 2 4-4"/></svg></div><span class="app-label">副本攻略</span></div>
       <div class="app-icon-wrapper" @click="openArena"><div class="app-icon arena-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M7 3L3 7v6l4 4h6l4-4V7l-4-4H7z"/><path d="M7 7l3 3m2-3l3 3"/><path d="M12 10l3 6M12 10l-3 6"/></svg></div><span class="app-label">PvP竞技场</span></div>
       <div class="app-icon-wrapper" @click="openDungeonRoll"><div class="app-icon dungeonroll-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="4"/><circle cx="8.5" cy="8.5" r="1.3"/><circle cx="15.5" cy="8.5" r="1.3"/><circle cx="8.5" cy="15.5" r="1.3"/><circle cx="15.5" cy="15.5" r="1.3"/><circle cx="12" cy="12" r="1.3"/></svg></div><span class="app-label">副本生成</span></div>
+      <div class="app-icon-wrapper" @click="openSettlement"><div class="app-icon settlement-icon"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M6 3h12v18l-6-4-6 4V3z"/><path d="M9 8h6M9 12h4"/></svg></div><span class="app-label">副本结算</span></div>
     </div>
     <div class="desktop-footer"><span>◆ 无 限 回 廊 ◆</span></div>
   </div>
@@ -677,6 +678,54 @@
   <div v-if="dungeonGenStore.generating" class="gen-overlay"><div class="gen-spinner"></div><span>AI 正在构建副本...</span></div>
 </div>
 
+<!-- ============ 副本结算 ============ -->
+<div v-if="currentView==='settlement'" class="app-page">
+  <div class="app-header"><button class="hdr-btn" @click="goDesktop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button><span class="hdr-title">副本结算</span><span class="hdr-spacer"></span></div>
+
+  <div class="scroll-area">
+    <div v-if="settlementStore.lastError" class="refresh-err">{{ settlementStore.lastError }}</div>
+
+    <template v-if="!settlementStore.settlement">
+      <div class="set-hint">结算会读取当前副本的任务与奖励、并读取聊天记录判定完成情况。确认写入前不会改动任何变量。</div>
+      <button class="roll-btn" :disabled="settlementStore.generating" @click="onGenerateSettlement">
+        {{ settlementStore.generating ? '结算中...' : '副本结算' }}
+      </button>
+    </template>
+
+    <template v-else>
+      <!-- 资格分逐项: 规则第二步要求「明文逐项展示」, 而规则给的面板模板里没有分项行 —— 面板保持严格模板, 分项放这里 -->
+      <div class="settlement-scores">
+        <div class="ss-title">资格分逐项 · 本次 {{ settlementStore.settlement.计算结果.资格分_本次 }}</div>
+        <div class="ss-row"><span>评价分</span><span>{{ settlementStore.settlement.计算结果.资格分_评价 }}</span></div>
+        <div class="ss-row"><span>击杀分</span><span>{{ settlementStore.settlement.计算结果.资格分_击杀 }}</span></div>
+        <div class="ss-row"><span>任务分</span><span>{{ settlementStore.settlement.计算结果.资格分_任务 }}</span></div>
+      </div>
+
+      <div class="roll-section">
+        <div class="roll-section-title">结算面板（数字全部来自模块计算, 可直接复制）</div>
+        <pre class="enemy-panel-text">{{ settlementStore.settlement.面板 }}</pre>
+      </div>
+
+      <div class="set-hint">面板的「掉落清单」列的是本次掉落量；写进存档的「背包.数量」是已有 + 本次的余额 —— 两者语义不同, 不是不一致。</div>
+
+      <div class="dc-actions">
+        <button class="confirm-btn modify" @click="onCopySettlementPanel">复制面板文本</button>
+        <button class="confirm-btn reroll" :disabled="settlementStore.generating || settlementStore.writing" @click="onGenerateSettlement">
+          {{ settlementStore.generating ? '结算中...' : '🔄 重算' }}
+        </button>
+        <button class="confirm-btn" :disabled="settlementStore.generating || settlementStore.writing" @click="onConfirmSettlement">
+          {{ settlementStore.writing ? '写入中...' : '确认结算' }}
+        </button>
+      </div>
+      <div class="set-hint settle-warn">⚠ 确认后会写入存档并清空副本资料，不可撤销</div>
+    </template>
+  </div>
+
+  <div v-if="settlementStore.generating" class="gen-overlay"><div class="gen-spinner"></div><span>AI 正在结算副本...</span></div>
+  <!-- writing 期间全屏遮罩: 遮住返回按钮与整页, 结算写入不可中断也不可半途切走 -->
+  <div v-if="settlementStore.writing" class="write-mask"><div class="gen-spinner"></div><span>正在写入存档...</span></div>
+</div>
+
   <!-- ============ PVP ARENA ============ -->
   <div v-if="currentView==='arena'&&arenaView==='list'" class="app-page">
     <div class="app-header"><button class="hdr-btn" @click="goDesktop"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button><span class="hdr-title">PvP竞技场</span><span class="hdr-spacer"></span></div>
@@ -797,7 +846,7 @@
 </template>
 
 <script setup lang="ts">
-import { useForumStore, useCareerStore, useDungeonStore, useWorkshopStore, useDungeonGenStore } from './store'
+import { useForumStore, useCareerStore, useDungeonStore, useWorkshopStore, useDungeonGenStore, useSettlementStore } from './store'
 import { SECTIONS, RANK_BOARDS, type ForumThread, type CareerPlan, type CareerRoadmap, type DungeonStrategy, type Faction, type DungeonMode, type WorkshopCard, DUNGEON_MODES, TIER_ORDER } from './data'
 import ApiFields from './ApiFields.vue'
 import EditableObject from './EditableObject.vue'
@@ -809,6 +858,7 @@ const careerStore = useCareerStore()
 const dungeonStore = useDungeonStore()
 const workshopStore = useWorkshopStore()
 const dungeonGenStore = useDungeonGenStore()
+const settlementStore = useSettlementStore()
 const SK = 'wxhl003_btn_pos'
 
 // ============ 视口尺寸（visualViewport → 自身 → 父窗口回退）============
@@ -831,7 +881,7 @@ function getVH():number{
 
 // ============ 状态 ============
 const expanded = ref(false)
-const currentView = ref<'desktop'|'forum'|'settings'|'career'|'dungeon'|'arena'|'dungeonRoll'>('desktop')
+const currentView = ref<'desktop'|'forum'|'settings'|'career'|'dungeon'|'arena'|'dungeonRoll'|'settlement'>('desktop')
 const settingsPage = ref('')
 const activeThread = ref<ForumThread|null>(null)
 const replyDraft = ref('')
@@ -905,6 +955,16 @@ function openDungeonRoll() {
 
 function onRollDungeon() { dungeonGenStore.doRoll() }
 async function onGenerateDungeon() { await dungeonGenStore.generate() }
+
+function openSettlement() {
+  currentView.value = 'settlement'
+  // 进入即清空: 结算预览是「本次结算」的临时产物, 不该把上一轮留下的面板当成这一轮的
+  settlementStore.reset()
+}
+async function onGenerateSettlement() { await settlementStore.generateSettlement() }
+async function onConfirmSettlement() { await settlementStore.writeSettlement() }
+/** 复制结算面板（复用副本生成的面板复制逻辑, 只是文本来源不同） */
+async function onCopySettlementPanel() { await onCopyPanel({ panelText: settlementStore.settlement?.面板 }) }
 
 const ACHIEVEMENT_TIERS = ['★ 探索级', '★★ 挑战级', '★★★ 破局级', '★★★★ 史诗级', '★★★★★ 传说级', '★★★★★★ 世界天花板']
 const playerLevel = ref(1)
@@ -1599,4 +1659,12 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .enemy-wrote{flex-shrink:0;font-size:10px;color:var(--amber)}
 .enemy-panel{margin-top:10px}
 .enemy-panel-text{white-space:pre-wrap;word-break:break-all;font-size:11px;line-height:1.5;color:var(--chalk);background:var(--iron-d);border:1px solid var(--iron);border-radius:6px;padding:8px;margin:6px 0;max-height:320px;overflow:auto;font-family:'Courier New',monospace}
+
+// ============ 副本结算 ============
+.settlement-icon{background:linear-gradient(135deg,#3a1a2a,#20101a);border:1.5px solid rgba(200,120,160,0.25)}
+.settlement-scores{margin:10px 12px;border:1px solid rgba(120,80,40,.3);border-radius:8px;overflow:hidden}
+.ss-title{padding:6px 8px;background:rgba(120,80,40,.18);font-size:11px;font-weight:700}
+.ss-row{display:flex;justify-content:space-between;padding:4px 8px;font-size:11px;border-top:1px solid rgba(120,80,40,.12)}
+.settle-warn{color:var(--blood-b);opacity:1}
+.write-mask{position:absolute;inset:0;z-index:40;background:rgba(0,0,0,0.75);display:flex;flex-direction:column;align-items:center;justify-content:center;gap:12px;color:var(--amber-d);font-size:12px}
 </style>
