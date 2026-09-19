@@ -127,6 +127,17 @@
   <div v-if="currentView==='settings'&&settingsPage==='api'" class="app-page">
     <div class="app-header"><button class="hdr-btn" @click="settingsPage=''"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polyline points="15 18 9 12 15 6"/></svg></button><span class="hdr-title">API 设置</span><span class="hdr-spacer"></span></div>
     <div class="scroll-area settings-inner">
+      <div class="set-block">
+        <div class="set-label">API 方案</div>
+        <div class="set-row">
+          <select class="prof-select" :value="store.settings.activeApiProfile" @change="applyApiProfile(($event.target as HTMLSelectElement).value)">
+            <option value="">（未使用方案）</option>
+            <option v-for="p in store.settings.apiProfiles" :key="p.name" :value="p.name">{{ p.name }}</option>
+          </select>
+          <button class="test-btn" @click="saveApiProfile">保存为方案</button>
+          <button class="test-btn" @click="store.settings.activeApiProfile && deleteApiProfile(store.settings.activeApiProfile)">删除方案</button>
+        </div>
+      </div>
       <div class="set-block"><div class="set-label">API 模式</div><div class="set-row"><button class="mode-btn" :class="{active:store.settings.apiMode==='single'}" @click="store.settings.apiMode='single'">单 API</button><button class="mode-btn" :class="{active:store.settings.apiMode==='multi'}" @click="store.settings.apiMode='multi'">多 API</button></div></div>
       <div class="set-block"><div class="set-label">主 API</div><ApiFields :cfg="store.settings.primary" :models="store.models" :loading="store.loadingModels" @fetch-models="store.fetchModels(store.settings.primary)"/><button class="test-btn" @click="store.testConnection(store.settings.primary)" :disabled="store.testing">{{ store.testing?'测试中...':'测试连接' }}</button></div>
       <div v-if="store.settings.apiMode==='multi'" class="set-block"><div class="set-label">副 API</div><ApiFields :cfg="store.settings.secondary" :models="store.models" :loading="store.loadingModels" @fetch-models="store.fetchModels(store.settings.secondary)"/><button class="test-btn" @click="store.testConnection(store.settings.secondary)" :disabled="store.testing">{{ store.testing?'测试中...':'测试连接' }}</button></div>
@@ -1088,6 +1099,9 @@ function saveWorldbookProfile() {
 }
 
 function applyWorldbookProfile(name: string) {
+  // 空名 = 「未使用方案」: 必须先清空状态, 否则 find 找不到就 early return,
+  // 而 :value 没变 Vue 也不会补 DOM —— 显示残留成「未使用方案」但状态仍是旧方案名
+  if (!name) { store.settings.activeWorldbookProfile = ''; return }
   const p = store.settings.worldbookProfiles.find(x => x.name === name)
   if (!p) return
   store.settings.selectedWorldbooks = [...p.value.selectedWorldbooks]
@@ -1098,6 +1112,39 @@ function applyWorldbookProfile(name: string) {
 function deleteWorldbookProfile(name: string) {
   store.settings.worldbookProfiles = store.settings.worldbookProfiles.filter(p => p.name !== name)
   if (store.settings.activeWorldbookProfile === name) store.settings.activeWorldbookProfile = ''
+}
+
+// ---- API 方案（快照 = apiMode + primary + secondary；与世界书方案各自独立）----
+function saveApiProfile() {
+  const name = prompt('方案名称', 'API 方案 ' + (store.settings.apiProfiles.length + 1))
+  if (!name) return
+  const value = {
+    apiMode: store.settings.apiMode,
+    primary: { ...store.settings.primary },
+    secondary: { ...store.settings.secondary },
+  }
+  const i = store.settings.apiProfiles.findIndex(p => p.name === name)
+  if (i >= 0) store.settings.apiProfiles[i] = { name, value }
+  else store.settings.apiProfiles.push({ name, value })
+  store.settings.activeApiProfile = name
+}
+
+function applyApiProfile(name: string) {
+  // 空名 = 「未使用方案」: 同 applyWorldbookProfile, 必须先清空状态
+  if (!name) { store.settings.activeApiProfile = ''; return }
+  const p = store.settings.apiProfiles.find(x => x.name === name)
+  if (!p) return
+  store.settings.apiMode = p.value.apiMode
+  // 关键: 拷贝回活字段, 不能把方案的 cfg 对象引用直接赋给 settings.primary,
+  // 否则之后编辑主 API 会连带改掉方案里存的值
+  store.settings.primary = { ...p.value.primary }
+  store.settings.secondary = { ...p.value.secondary }
+  store.settings.activeApiProfile = name
+}
+
+function deleteApiProfile(name: string) {
+  store.settings.apiProfiles = store.settings.apiProfiles.filter(p => p.name !== name)
+  if (store.settings.activeApiProfile === name) store.settings.activeApiProfile = ''
 }
 async function onRefresh(){lastErrorSection.value=store.activeSection;await store.refreshSection(store.activeSection)}
 async function onExtractInfluence(){await store.extractInfluence()}
