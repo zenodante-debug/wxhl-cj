@@ -2,7 +2,7 @@ import { type ForumThread, type ForumPost, INITIAL_THREADS, RANK_BOARDS, type Ca
 import { WORKSHOP_WORLDBOOK_NAME, PvPSaveSchema, type WorkshopCard, type PvPSave } from './data'
 import { extractContractSave, buildIntroPrompt, tierOf, generateDefaultAppearance, buildBattleIntroMessage } from './workshop'
 import { rollBuild, rollRewards, type BuildRoll, type RewardSet, type RollRecord } from './dice'
-import { DungeonGenResultSchema, assemblePanelText, type DungeonGenResult, type PlayerBrief } from './dungeonRules'
+import { DungeonGenResultSchema, assemblePanelText, mapToVariables, type DungeonGenResult, type PlayerBrief } from './dungeonRules'
 import { buildDungeonPrompt, buildEnterPrompt } from './dungeonGen'
 
 const SK = 'wxhl003_settings'
@@ -1813,16 +1813,68 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     doRoll()
   }
 
-  /** 写入 MVU 变量（Task 8 实现） */
-  async function writeToSave(_id: number): Promise<boolean> {
-    lastError.value = '写入存档将在下一步实现'
-    return false
+  /** 把生成结果写进 MVU 变量。逐条 _.set, 不清空不覆盖无关字段 */
+  async function writeToSave(id: number): Promise<boolean> {
+    const entry = rolledDungeons.value.find(d => d.id === id)
+    if (!entry?.result) { lastError.value = '该条目还没有生成结果'; return false }
+    writing.value = true
+    lastError.value = ''
+    try {
+      await waitGlobalInitialized('Mvu')
+      // 与竞技场写「当前敌人」保持一致的楼层探测: 全局脚本 iframe 无楼层上下文时回退最新楼层
+      let message_id: number | 'latest' = -1
+      try {
+        const mid = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : -1
+        if (mid && mid !== -1) message_id = mid
+      } catch (_) {}
+      const { player } = readPlayerBrief()
+      const vars = mapToVariables(entry.result, entry.build, entry.rewards, player)
+      const mvu = Mvu.getMvuData({ type: 'message', message_id })
+      for (const [key, value] of Object.entries(vars)) {
+        // 数组路径: 每个元素都是字面量 key, 名字含「.」也不会被 lodash 当作层级分隔
+        _.set(mvu, ['stat_data', '契约者', key], value)
+      }
+      await Mvu.replaceMvuData(mvu, { type: 'message', message_id })
+      const idx = rolledDungeons.value.findIndex(d => d.id === id)
+      if (idx >= 0) {
+        rolledDungeons.value[idx] = { ...rolledDungeons.value[idx], written: { at: nowStamp(), messageId: message_id } }
+      }
+      toastr.success('副本已写入存档')
+      return true
+    } catch (e: any) {
+      lastError.value = e?.message || '写入存档失败'
+      toastr.error('写入存档失败: ' + lastError.value)
+      return false
+    } finally {
+      writing.value = false
+    }
   }
 
-  /** 填入酒馆输入框（Task 8 实现） */
-  async function fillInput(_id: number): Promise<boolean> {
-    lastError.value = '填入输入框将在下一步实现'
-    return false
+  /** 把「进入副本」提示词填入酒馆输入框, 只填入不发送 */
+  async function fillInput(id: number): Promise<boolean> {
+    const entry = rolledDungeons.value.find(d => d.id === id)
+    if (!entry?.enterPrompt) { lastError.value = '该条目还没有进本提示词'; return false }
+    lastError.value = ''
+    const text = entry.enterPrompt
+    // 优先直接操作输入框并派发 input 事件（行为可预测）；失败再退回 STScript /setinput
+    try {
+      const $ta = $('#send_textarea')
+      if ($ta.length === 0) throw new Error('未找到输入框 #send_textarea')
+      $ta.val(text).trigger('input')
+      toastr.success('已填入输入框')
+      return true
+    } catch (e: any) {
+      try {
+        // /setinput 取整行剩余内容, 换行会截断命令, 故压成单行
+        await triggerSlash('/setinput ' + text.replace(/\r?\n/g, ' '))
+        toastr.success('已填入输入框')
+        return true
+      } catch (_) {
+        lastError.value = e?.message || '填入输入框失败'
+        toastr.error('填入输入框失败: ' + lastError.value)
+        return false
+      }
+    }
   }
 
   function remove(id: number) {
