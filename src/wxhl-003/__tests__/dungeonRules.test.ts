@@ -76,6 +76,17 @@ describe('DungeonGenResultSchema', () => {
     expect(() => DungeonGenResultSchema.parse({ ...result, 支线任务: result.支线任务.slice(0, 2) })).toThrow();
     expect(() => DungeonGenResultSchema.parse({ ...result, 副本成就: result.副本成就.slice(0, 5) })).toThrow();
   });
+
+  it('拒绝越界的 AI 等级', () => {
+    const 改等级 = (n: number) => ({
+      ...result,
+      其他契约者: [{ ...result.其他契约者[0], 等级: n }, result.其他契约者[1]],
+    });
+    expect(() => DungeonGenResultSchema.parse(改等级(0))).toThrow();
+    expect(() => DungeonGenResultSchema.parse(改等级(201))).toThrow();
+    expect(() => DungeonGenResultSchema.parse(改等级(11.5))).toThrow();
+    expect(() => DungeonGenResultSchema.parse(改等级(11))).not.toThrow();
+  });
 });
 
 describe('mapToVariables', () => {

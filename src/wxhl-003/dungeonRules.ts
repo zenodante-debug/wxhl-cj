@@ -41,9 +41,11 @@ export const DungeonGenResultSchema = z.object({
   世界事件: z.array(世界事件Schema).length(2),
   隐藏任务: z.array(隐藏任务Schema).length(2),
   副本成就: z.array(成就Schema).length(6),
-  固有角色: z.array(z.object({ 名称: z.string().min(1), 位阶: z.string(), 等级: z.coerce.number() })),
+  固有角色: z.array(
+    z.object({ 名称: z.string().min(1), 位阶: z.string(), 等级: z.coerce.number().int().min(1).max(200) }),
+  ),
   其他契约者: z.array(
-    z.object({ 真名: z.string().min(1), 称号: z.string(), 等级: z.coerce.number(), 阵营: z.string() }),
+    z.object({ 真名: z.string().min(1), 称号: z.string(), 等级: z.coerce.number().int().min(1).max(200), 阵营: z.string() }),
   ),
 });
 

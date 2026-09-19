@@ -1702,7 +1702,13 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
 
   watchEffect(() => saveRolledDungeons(rolledDungeons.value))
 
-  const latest = computed(() => rolledDungeons.value[0] ?? null)
+  /** 用户在历史里选中的条目 id; 为 null 时展示最新一条 */
+  const selectedId = ref<number | null>(null)
+  /** 卡片当前展示的条目: 选中的那条, 否则最新一条 */
+  const current = computed(
+    () => rolledDungeons.value.find(d => d.id === selectedId.value) ?? rolledDungeons.value[0] ?? null,
+  )
+  function select(id: number) { selectedId.value = id }
 
   function getForumStore() { return useForumStore() }
 
@@ -1748,6 +1754,8 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
   function doRoll() {
     rolling.value = true
     lastError.value = ''
+    // 掷骰是「新一次副本」的入口: 清掉历史选中, 否则卡片仍停留在旧条目、看不到刚掷出的骰值
+    selectedId.value = null
     try {
       const { 副本周期 } = readPlayerBrief()
       const { build, records: buildRecords } = rollBuild(副本周期)
@@ -1769,10 +1777,10 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     }
   }
 
-  /** 生成: 用最新一次掷骰结果调 AI 产出副本内容 */
+  /** 生成: 用当前展示条目的掷骰结果调 AI 产出副本内容 */
   async function generate() {
     if (generating.value) return
-    const entry = latest.value
+    const entry = current.value
     if (!entry) { lastError.value = '请先掷骰'; return }
 
     const forumStore = getForumStore()
@@ -1806,9 +1814,9 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     }
   }
 
-  /** 重roll: 丢弃 AI 产物, 重新掷骰 */
+  /** 重roll: 丢弃当前展示条目的 AI 产物, 重新掷骰 */
   function reroll() {
-    const entry = latest.value
+    const entry = current.value
     if (entry) rolledDungeons.value = rolledDungeons.value.filter(d => d.id !== entry.id)
     doRoll()
   }
@@ -1835,6 +1843,14 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
         _.set(mvu, ['stat_data', '契约者', key], value)
       }
       await Mvu.replaceMvuData(mvu, { type: 'message', message_id })
+      // 回读校验: MVU 按注册的 zod schema 处理写入, 未声明的键会被静默剥掉 —— 这里主动暴露, 避免"看起来写成功"
+      const after = Mvu.getMvuData({ type: 'message', message_id })
+      for (const key of Object.keys(vars)) {
+        // 数组路径: 键名可能含「.」, 不能走字符串路径
+        if (_.get(after, ['stat_data', '契约者', key]) === undefined) {
+          throw new Error('写入未生效: 字段名与存档 schema 不匹配 → ' + key)
+        }
+      }
       const idx = rolledDungeons.value.findIndex(d => d.id === id)
       if (idx >= 0) {
         rolledDungeons.value[idx] = { ...rolledDungeons.value[idx], written: { at: nowStamp(), messageId: message_id } }
@@ -1854,6 +1870,11 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
   async function fillInput(id: number): Promise<boolean> {
     const entry = rolledDungeons.value.find(d => d.id === id)
     if (!entry?.enterPrompt) { lastError.value = '该条目还没有进本提示词'; return false }
+    if (!entry.written) {
+      lastError.value = '请先写入存档，再填入输入框'
+      toastr.info('请先点「写入存档」')
+      return false
+    }
     lastError.value = ''
     const text = entry.enterPrompt
     // 优先直接操作输入框并派发 input 事件（行为可预测）；失败再退回 STScript /setinput
@@ -1879,10 +1900,11 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
 
   function remove(id: number) {
     rolledDungeons.value = rolledDungeons.value.filter(d => d.id !== id)
+    if (selectedId.value === id) selectedId.value = null
   }
 
   return {
-    rolledDungeons, rolling, generating, writing, lastError, latest,
+    rolledDungeons, rolling, generating, writing, lastError, current, select,
     doRoll, generate, reroll, writeToSave, fillInput, remove,
   }
 })

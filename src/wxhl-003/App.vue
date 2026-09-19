@@ -502,14 +502,14 @@
 
     <div v-if="playerCycleLabel" class="roll-cycle">{{ playerCycleLabel }}</div>
 
-    <button class="roll-btn" :disabled="dungeonGenStore.rolling" @click="onRollDungeon">
+    <button class="roll-btn" :disabled="dungeonGenStore.rolling || dungeonGenStore.generating" @click="onRollDungeon">
       {{ dungeonGenStore.rolling ? '掷骰中...' : '🎲 掷骰' }}
     </button>
 
-    <template v-if="dungeonGenStore.latest">
+    <template v-if="dungeonGenStore.current">
       <div class="roll-section">
         <div class="roll-section-title">世界底色与局势</div>
-        <div v-for="r in dungeonGenStore.latest.buildRecords" :key="r.标签" class="roll-row">
+        <div v-for="r in dungeonGenStore.current.buildRecords" :key="r.标签" class="roll-row">
           <span class="roll-label">{{ r.标签 }}</span>
           <span class="roll-expr">{{ r.表达式 }}</span>
           <span class="roll-value">{{ r.骰值 }}</span>
@@ -517,8 +517,8 @@
         </div>
       </div>
       <div class="roll-section">
-        <div class="roll-section-title">奖励骰（{{ dungeonGenStore.latest.rewardRecords.length }} 个）</div>
-        <div v-for="r in dungeonGenStore.latest.rewardRecords" :key="r.标签" class="roll-row">
+        <div class="roll-section-title">奖励骰（{{ dungeonGenStore.current.rewardRecords.length }} 个）</div>
+        <div v-for="r in dungeonGenStore.current.rewardRecords" :key="r.标签" class="roll-row">
           <span class="roll-label">{{ r.标签 }}</span>
           <span class="roll-expr">{{ r.表达式 }}</span>
           <span class="roll-value">{{ r.骰值 }}</span>
@@ -529,56 +529,56 @@
         {{ dungeonGenStore.generating ? '生成中...' : '生成副本' }}
       </button>
 
-      <div v-if="dungeonGenStore.latest?.result" class="dungeon-card">
-        <div class="dc-name">{{ dungeonGenStore.latest.result.副本名称 }}</div>
-        <div class="dc-meta">{{ dungeonGenStore.latest.result.副本来源 }}</div>
-        <div class="dc-meta">【{{ dungeonGenStore.latest.build.副本类型 }}】 · {{ dungeonGenStore.latest.build.时间限制天 }}天 · 基准等级 Lv.{{ playerLevel }}</div>
-        <div class="dc-bg">{{ dungeonGenStore.latest.result.副本背景 }}</div>
+      <div v-if="dungeonGenStore.current?.result" class="dungeon-card">
+        <div class="dc-name">{{ dungeonGenStore.current.result.副本名称 }}</div>
+        <div class="dc-meta">{{ dungeonGenStore.current.result.副本来源 }}</div>
+        <div class="dc-meta">【{{ dungeonGenStore.current.build.副本类型 }}】 · {{ dungeonGenStore.current.build.时间限制天 }}天 · 基准等级 Lv.{{ playerLevel }}</div>
+        <div class="dc-bg">{{ dungeonGenStore.current.result.副本背景 }}</div>
 
         <details class="dc-details"><summary>主线任务</summary>
-          <div class="dc-line">{{ dungeonGenStore.latest.result.主线任务.名称 }}</div>
-          <div class="dc-sub">{{ dungeonGenStore.latest.result.主线任务.说明 }}</div>
+          <div class="dc-line">{{ dungeonGenStore.current.result.主线任务.名称 }}</div>
+          <div class="dc-sub">{{ dungeonGenStore.current.result.主线任务.说明 }}</div>
         </details>
 
         <details class="dc-details"><summary>支线任务 ×3</summary>
-          <div v-for="t in dungeonGenStore.latest.result.支线任务" :key="t.名称" class="dc-line">
+          <div v-for="t in dungeonGenStore.current.result.支线任务" :key="t.名称" class="dc-line">
             <b>{{ t.名称 }}</b><div class="dc-sub">{{ t.说明 }}</div>
           </div>
         </details>
 
         <details class="dc-details"><summary>隐藏任务 ×2</summary>
-          <div v-for="t in dungeonGenStore.latest.result.隐藏任务" :key="t.名称" class="dc-line">
+          <div v-for="t in dungeonGenStore.current.result.隐藏任务" :key="t.名称" class="dc-line">
             <b>{{ t.名称 }}</b><div class="dc-sub">{{ t.说明 }}</div>
           </div>
         </details>
 
         <details class="dc-details"><summary>世界事件 ×2</summary>
-          <div v-for="e in dungeonGenStore.latest.result.世界事件" :key="e.名称" class="dc-line">
+          <div v-for="e in dungeonGenStore.current.result.世界事件" :key="e.名称" class="dc-line">
             <b>{{ e.名称 }}</b><div class="dc-sub">{{ e.说明 }}</div><div class="dc-sub">影响：{{ e.影响 }}</div>
           </div>
         </details>
 
         <details class="dc-details"><summary>副本成就 ×6</summary>
-          <div v-for="(a, i) in dungeonGenStore.latest.result.副本成就" :key="a.名称" class="dc-line">
+          <div v-for="(a, i) in dungeonGenStore.current.result.副本成就" :key="a.名称" class="dc-line">
             <b>{{ ACHIEVEMENT_TIERS[i] }} {{ a.名称 }}</b><div class="dc-sub">{{ a.难度 }}</div>
           </div>
         </details>
 
         <details class="dc-details"><summary>契约者名单 / 固有角色</summary>
           <div class="dc-line"><b>契约者</b>
-            <div class="dc-sub">{{ dungeonGenStore.latest.result.其他契约者.map(c => '[' + (c.称号 === '无' ? '无称号' : c.称号) + ']' + c.真名 + ' Lv.' + c.等级).join('，') }}</div>
+            <div class="dc-sub">{{ dungeonGenStore.current.result.其他契约者.map(c => '[' + (c.称号 === '无' ? '无称号' : c.称号) + ']' + c.真名 + ' Lv.' + c.等级).join('，') }}</div>
           </div>
           <div class="dc-line"><b>固有角色</b>
-            <div class="dc-sub">{{ dungeonGenStore.latest.result.固有角色.map(r => r.名称 + ' (Lv.' + r.等级 + ' | ' + r.位阶 + ')').join('，') }}</div>
+            <div class="dc-sub">{{ dungeonGenStore.current.result.固有角色.map(r => r.名称 + ' (Lv.' + r.等级 + ' | ' + r.位阶 + ')').join('，') }}</div>
           </div>
         </details>
 
         <div class="dc-actions">
-          <button class="confirm-btn" :disabled="dungeonGenStore.writing" @click="onWriteDungeon(dungeonGenStore.latest.id)">
-            {{ dungeonGenStore.latest.written ? '已写入存档' : '写入存档' }}
+          <button class="confirm-btn" :disabled="dungeonGenStore.writing" @click="onWriteDungeon(dungeonGenStore.current.id)">
+            {{ dungeonGenStore.current.written ? '已写入存档' : '写入存档' }}
           </button>
-          <button class="confirm-btn modify" @click="onFillDungeonInput(dungeonGenStore.latest.id)">填入输入框</button>
-          <button class="confirm-btn modify" @click="onCopyPanel(dungeonGenStore.latest)">复制面板文本</button>
+          <button class="confirm-btn modify" @click="onFillDungeonInput(dungeonGenStore.current.id)">填入输入框</button>
+          <button class="confirm-btn modify" @click="onCopyPanel(dungeonGenStore.current)">复制面板文本</button>
           <button class="confirm-btn reroll" :disabled="dungeonGenStore.rolling || dungeonGenStore.generating" @click="onRerollDungeonGen">🔄 重roll</button>
           <button class="confirm-btn" @click="onEnemyGenPlaceholder">敌人生成</button>
         </div>
@@ -586,11 +586,11 @@
 
       <div v-if="dungeonGenStore.rolledDungeons.length > 1" class="roll-section">
         <div class="roll-section-title">历史记录</div>
-        <div v-for="d in dungeonGenStore.rolledDungeons" :key="d.id" class="roll-row">
+        <div v-for="d in dungeonGenStore.rolledDungeons" :key="d.id" class="roll-row" :class="{active: dungeonGenStore.current?.id === d.id}" @click="dungeonGenStore.select(d.id)">
           <span class="roll-label">{{ d.result?.副本名称 || '（未生成）' }}</span>
           <span class="roll-expr">{{ d.build.副本类型 }}</span>
           <span class="roll-map">{{ d.createdAt }}</span>
-          <button class="retry-link" @click="dungeonGenStore.remove(d.id)">删除</button>
+          <button class="retry-link" @click.stop="dungeonGenStore.remove(d.id)">删除</button>
         </div>
       </div>
     </template>
@@ -1336,6 +1336,7 @@ onUnmounted(()=>{window.clearInterval(clockTimer);window.removeEventListener('re
 .roll-section{margin:10px 12px;border:1px solid rgba(120,80,40,.3);border-radius:8px;overflow:hidden}
 .roll-section-title{padding:6px 8px;background:rgba(120,80,40,.18);font-size:11px;font-weight:700}
 .roll-row{display:grid;grid-template-columns:1fr auto auto 1fr;gap:6px;align-items:center;padding:4px 8px;font-size:11px;border-top:1px solid rgba(120,80,40,.12)}
+.roll-row.active{background:rgba(120,80,40,.28)}
 .roll-label{color:var(--chalk-d);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .roll-expr{color:var(--chalk-d);font-family:monospace;font-size:10px}
 .roll-value{font-weight:700;color:#f0c674;font-family:monospace}
