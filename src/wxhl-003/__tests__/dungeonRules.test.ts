@@ -170,6 +170,18 @@ describe('mapToVariables', () => {
     const v = mapToVariables(DungeonGenResultSchema.parse(低), build, rewards, player);
     expect((v.固有角色名单 as any).弱者.等级).toBe(81);
   });
+
+  it('超脱的极大等级被夹进区间而不是让整次生成失败', () => {
+    // 3000 落在超脱区间 [101, 99999] 内 → 原样保留; 关键是上限放宽后不再拒绝整次生成
+    // (上限为旧值 999 时, 这里会抛 ZodError 让整次生成失败)
+    const 大 = { ...result, 固有角色: [{ 名称: '背景板', 位阶: '超脱' as const, 等级: 3000 }, result.固有角色[1]] };
+    const v = mapToVariables(DungeonGenResultSchema.parse(大), build, rewards, player);
+    expect((v.固有角色名单 as any).背景板.等级).toBe(3000);
+    // 低于区间下界的超脱值 → 夹到 101
+    const 小 = { ...result, 固有角色: [{ 名称: '背景板', 位阶: '超脱' as const, 等级: 3 }, result.固有角色[1]] };
+    const v2 = mapToVariables(DungeonGenResultSchema.parse(小), build, rewards, player);
+    expect((v2.固有角色名单 as any).背景板.等级).toBe(101);
+  });
 });
 
 describe('assemblePanelText', () => {

@@ -27,7 +27,7 @@ export const 固有角色阶位区间: Record<(typeof 固有角色位阶枚举)[
   三阶: [41, 60],
   四阶: [61, 80],
   五阶: [81, 100],
-  超脱: [101, 999],
+  超脱: [101, 99999],
 };
 
 /** 把等级夹进该阶位的区间；未知阶位原样返回（schema 的 enum 已拦住未知值） */
@@ -63,7 +63,7 @@ export const DungeonGenResultSchema = z.object({
   隐藏任务: z.array(隐藏任务Schema).length(2),
   副本成就: z.array(成就Schema).length(6),
   固有角色: z.array(
-    z.object({ 名称: z.string().min(1), 位阶: z.enum(固有角色位阶枚举), 等级: z.coerce.number().int().min(1).max(999) }),
+    z.object({ 名称: z.string().min(1), 位阶: z.enum(固有角色位阶枚举), 等级: z.coerce.number().int().min(1).max(99999) }),
   ),
   其他契约者: z.array(
     z.object({ 真名: z.string().min(1), 称号: z.string(), 等级: z.coerce.number().int().min(1).max(200), 阵营: z.string() }),

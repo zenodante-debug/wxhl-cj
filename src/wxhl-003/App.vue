@@ -569,7 +569,7 @@
             <div class="dc-sub">{{ dungeonGenStore.current.result.其他契约者.map(c => '[' + (c.称号 === '无' ? '无称号' : c.称号) + ']' + c.真名 + ' Lv.' + c.等级).join('，') }}</div>
           </div>
           <div class="dc-line"><b>固有角色</b>
-            <div class="dc-sub">{{ dungeonGenStore.current.result.固有角色.map(r => r.名称 + ' (Lv.' + r.等级 + ' | ' + r.位阶 + ')').join('，') }}</div>
+            <div class="dc-sub">{{ dungeonGenStore.current.result.固有角色.map(r => r.名称 + ' (Lv.' + clamp固有角色等级(r.位阶, r.等级) + ' | ' + r.位阶 + ')').join('，') }}</div>
           </div>
         </details>
 
@@ -729,6 +729,7 @@ import { SECTIONS, RANK_BOARDS, type ForumThread, type CareerPlan, type CareerRo
 import ApiFields from './ApiFields.vue'
 import EditableObject from './EditableObject.vue'
 import { isNewbieDungeon } from './dice'
+import { clamp固有角色等级 } from './dungeonRules'
 
 const store = useForumStore()
 const careerStore = useCareerStore()
