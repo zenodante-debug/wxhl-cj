@@ -3,9 +3,11 @@ import {
   CAREER_SYSTEM_RULES,
   CORE_WORLD,
   DUNGEON_GENERATION_RULES,
+  FACTION_PROFILES,
   FORUM_SECTION_PROMPTS,
   MODULE_TABLES,
   PERSONA_MATRIX,
+  RANK_BOARDS,
   TIEBA_STYLE,
   TRADE_MECHANICS,
 } from './data';
@@ -26,13 +28,20 @@ const OUTPUT_FORMAT =
   'hotComment 是最热评论, hotAuthor 是热评作者昵称, hotLikes 是热评点赞数(数字)。' +
   '不要输出 markdown 代码块, 不要任何解释文字。';
 
+/** 把排行榜渲染成给 AI 读的名单文本 */
+function renderLeaderboard(): string {
+  return RANK_BOARDS.map(b =>
+    `【${b.key}】${b.title}\n` + b.items.map(i => `- [${i.name}]${i.realName} Lv.${i.lv}（${i.team} · ${i.className}）—— ${i.bio}`).join('\n'),
+  ).join('\n\n');
+}
+
 /** 按分区挑出该分区该读的参考 */
 function referencesFor(sectionKey: ForumSectionKey): string {
   switch (sectionKey) {
     case 'complaints':
-      return [CORE_WORLD, MODULE_TABLES].join('\n\n');
+      return [CORE_WORLD, MODULE_TABLES, FACTION_PROFILES].join('\n\n');
     case 'intel':
-      return CORE_WORLD;
+      return [CORE_WORLD, FACTION_PROFILES, renderLeaderboard()].join('\n\n');
     case 'dungeon':
       return [CORE_WORLD, MODULE_TABLES, DUNGEON_GENERATION_RULES].join('\n\n');
     case 'build':

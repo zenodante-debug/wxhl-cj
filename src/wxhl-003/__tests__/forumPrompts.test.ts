@@ -43,6 +43,27 @@ describe('buildRefreshPrompt 的注入矩阵', () => {
     }
   });
 
+  it('只有吐槽区与情报区拿到势力基础资料', () => {
+    expect(buildRefreshPrompt('complaints', '', '')).toContain('现实势力_海外官方与企业');
+    expect(buildRefreshPrompt('complaints', '', '')).toContain('势力详情_神圣教会');
+    expect(buildRefreshPrompt('intel', '', '')).toContain('现实势力_海外官方与企业');
+    expect(buildRefreshPrompt('intel', '', '')).toContain('势力详情_神圣教会');
+    for (const s of ['dungeon', 'build', 'trade'] as const) {
+      expect(buildRefreshPrompt(s, '', '')).not.toContain('现实势力_海外官方与企业');
+      expect(buildRefreshPrompt(s, '', '')).not.toContain('势力详情_神圣教会');
+    }
+  });
+
+  it('只有情报区拿到排行榜完整名单', () => {
+    const p = buildRefreshPrompt('intel', '', '');
+    expect(p).toContain('「天榜之首·执剑镇国」');
+    expect(p).toContain('[「天榜之首·执剑镇国」]燕琉璃 Lv.100');
+    expect(p).toContain('[「人榜之首·无距之刃」]林千尺 Lv.20');
+    for (const s of ['complaints', 'dungeon', 'build', 'trade'] as const) {
+      expect(buildRefreshPrompt(s, '', '')).not.toContain('「天榜之首·执剑镇国」');
+    }
+  });
+
   it('注入世界书与影响事件上下文', () => {
     const p = buildRefreshPrompt('trade', '世界书内容ABC', '最近圈内大事XYZ');
     expect(p).toContain('世界书内容ABC');

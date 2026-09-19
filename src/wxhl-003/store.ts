@@ -1665,10 +1665,10 @@ function buildMatchPool(cr: number, 阶位: string): string {
   }
   const 偏移 = cr >= 10 ? 4 - idx : cr >= 7 ? 2 : cr >= 6 ? 1 : 0
   const board = RANK_BOARDS[Math.min(4, idx + 偏移)]
-  const lines = board.items.map(i => `- ${i.name} ${i.team} Lv.${i.lv}`)
-  return `玩家 CR=${cr}，阶位=${阶位}：从【${board.title}】中挑选队友。榜单候选（只有称号与势力，真名由你补全）：
+  const lines = board.items.map(i => `- [${i.name}]${i.realName} Lv.${i.lv}（${i.team} · ${i.className}）`)
+  return `玩家 CR=${cr}，阶位=${阶位}：从【${board.title}】中挑选队友。榜单候选（称号/真名/职业/势力均已公开）：
 ${lines.join('\n')}
-要求：被选中的契约者必须补上真名（禁止代号），并给出阵营。`;
+要求：被选中的契约者必须使用其真名（真名公开，禁止代号），并给出阵营。`;
 }
 
 export const useDungeonGenStore = defineStore('dungeonGen', () => {
