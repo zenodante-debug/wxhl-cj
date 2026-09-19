@@ -40,7 +40,7 @@ describe('buildDungeonPrompt', () => {
 
   it('带禁止改动骰值的死命令', () => {
     expect(p).toContain('严禁');
-    expect(p).toContain('骰');
+    expect(p).toContain('改动、重掷、忽略、四舍五入或自行编造');
   });
 
   it('带上玩家数据与匹配池原文', () => {
@@ -52,8 +52,12 @@ describe('buildDungeonPrompt', () => {
     expect(p).toContain('JSON');
   });
 
+  it('含「规则原文格式不适用本次生成」的优先级声明', () => {
+    expect(p).toContain('不适用于本次生成');
+  });
+
   it('时间限制天数写进 prompt', () => {
-    expect(p).toContain('5');
+    expect(p).toContain('时间限制: 5 天');
   });
 });
 
