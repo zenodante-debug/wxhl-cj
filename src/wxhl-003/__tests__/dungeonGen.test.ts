@@ -69,6 +69,8 @@ describe('buildDungeonPrompt', () => {
     const p3 = buildDungeonPrompt(build, records, '契约者: 刘林', '世界书内容', '人榜候选…', '三阶', 47);
     expect(p3).toContain('固有角色锚定与战力表现');
     expect(p3).toContain('队伍最高等级】Lv.47');
+    expect(p3).toContain('本次副本剧情实际牵涉到');
+    expect(p3).toContain('不要一律挑该世界观');
   });
 });
 
