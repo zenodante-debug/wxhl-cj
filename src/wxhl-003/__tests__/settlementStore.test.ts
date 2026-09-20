@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import { computeSettlement, type SettlementGenResult, type SettlementSnapshot } from '../settlementRules';
 import { useSettlementStore } from '../store';
 
@@ -77,8 +77,14 @@ describe('useSettlementStore · 写入后的状态与守卫', () => {
   /** MVU 的内存替身: getMvuData 返回上一次 replaceMvuData 交出来的对象（写入即生效） */
   let 存档: any;
 
+  /** 本文件挂到 globalThis 上的构建期全局（照原值还原, 见 afterEach） */
+  const 桩键 = ['Mvu', 'waitGlobalInitialized', 'getCurrentMessageId', 'toastr', '$', 'triggerSlash'] as const;
+  let 原值: Record<string, unknown> = {};
+
   beforeEach(() => {
     setActivePinia(createPinia());
+    原值 = {};
+    for (const k of 桩键) 原值[k] = (globalThis as any)[k];
     存档 = {};
     (globalThis as any).Mvu = {
       getMvuData: () => 存档,
@@ -89,6 +95,15 @@ describe('useSettlementStore · 写入后的状态与守卫', () => {
     (globalThis as any).toastr = { success: () => {}, error: () => {}, info: () => {}, warning: () => {} };
     (globalThis as any).$ = () => ({ length: 0 });
     (globalThis as any).triggerSlash = async () => {};
+  });
+
+  // 这些桩是本文件**私有**的: 用完必须还原。vitest 默认 `isolate: true` 时它们不会泄漏,
+  // 但一旦有人用 `--no-isolate`（或关掉隔离）, 残留的 `Mvu` / `toastr` 会污染同 worker 的其它文件。
+  afterEach(() => {
+    for (const k of 桩键) {
+      if (原值[k] === undefined) delete (globalThis as any)[k];
+      else (globalThis as any)[k] = 原值[k];
+    }
   });
 
   it('正常路径（toastr 不抛）: 写入成功保留预览、标 写入完成, 且不出现 已写入', async () => {
