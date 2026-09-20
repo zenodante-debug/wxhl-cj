@@ -1,117 +1,88 @@
 <div id="container">
   <div class="scene">
-    <!-- ============ 顶檐：吊灯 + 全局坐标 ============ -->
-    <div class="scene-ceiling">
-      <div class="ceiling-bulb">
-        <div class="bulb-wire"></div>
-        <div class="bulb-glass"></div>
+    <!-- ============ 顶行注脚：时间 · 地点 · 进度 ============ -->
+    <div class="scene-head">
+      <span class="head-item"
+        >现实 · <span class="head-value" id="ceil-real-date">---</span>
+        <span class="head-value" id="ceil-real-time">---</span></span
+      >
+      <span class="head-sep">─</span>
+      <span class="head-item">副本 · <span class="head-value" id="ceil-dungeon-time">不在副本中</span></span>
+      <span class="head-sep">─</span>
+      <span class="head-item">地点 · <span class="head-value" id="ceil-loc">未知</span></span>
+      <span class="head-sep">─</span>
+      <span class="head-item">进度 · <span class="head-value" id="ceil-prog">0%</span></span>
+    </div>
+
+    <!-- ============ 主体：左模块卡列 + 右下角色卡 ============ -->
+    <div class="scene-main">
+      <div class="module-list">
+        <div class="mod-card c-identity" data-target="tab-status">
+          <div class="mc-name">契约者档案</div>
+          <div class="mc-status" id="door-status-identity">---</div>
+        </div>
+        <div class="mod-card c-dungeon" data-target="tab-dungeon">
+          <div class="mc-name">副本情报</div>
+          <div class="mc-status" id="door-status-dungeon">---</div>
+        </div>
+        <div class="mod-card c-entity" data-target="tab-entity">
+          <div class="mc-name">实体名单</div>
+          <div class="mc-status" id="door-status-entity">---</div>
+        </div>
+        <div class="mod-card c-map" data-target="tab-map">
+          <div class="mc-name">回廊地图</div>
+          <div class="mc-status" id="door-status-map">---</div>
+        </div>
+        <div class="mod-card c-jobtree" data-target="tab-jobtree">
+          <div class="mc-name">职业树</div>
+          <div class="mc-status" id="door-status-jobtree">---</div>
+        </div>
       </div>
-      <div class="ceiling-items">
-        <div class="ceiling-item">
-          <span class="ceiling-label">现实</span>
-          <span class="ceiling-value" id="ceil-real-date">---</span>
-          <span class="ceiling-value" id="ceil-real-time">---</span>
+
+      <!-- 右下：DE 角色卡式铭牌 -->
+      <div class="hero-card" data-target="tab-status">
+        <div class="hero-name" id="plate-name">---</div>
+        <div class="hero-rule"></div>
+        <div class="hero-line">
+          <span id="plate-lv">Lv.1</span> · <span id="plate-rank">一阶</span> · <span id="plate-army">列兵</span>
         </div>
-        <div class="ceiling-item">
-          <span class="ceiling-label">副本</span><span class="ceiling-value" id="ceil-dungeon-time">不在副本中</span>
-        </div>
-        <div class="ceiling-item">
-          <span class="ceiling-label">地点</span><span class="ceiling-value" id="ceil-loc">未知</span>
-        </div>
-        <div class="ceiling-item">
-          <span class="ceiling-label">进度</span><span class="ceiling-value" id="ceil-prog">0%</span>
+        <div class="hero-line dim">CR <span id="plate-cr">3.0</span> · <span id="plate-att">观察</span></div>
+        <div class="hero-line small">
+          天赋 <span id="plate-talent">无</span> · 血统 <span id="plate-blood">无</span>
         </div>
       </div>
     </div>
 
-    <!-- ============ 长廊：双墙门洞 + 中央铭牌 ============ -->
-    <div class="scene-walls">
-      <div class="wall wall-left">
-        <div class="flesh-veins"></div>
-        <div class="door door-near" data-target="tab-status">
-          <div class="door-recess">
-            <div class="door-plate">契 约 者 档 案</div>
-            <div class="door-status" id="door-status-identity">---</div>
-            <div class="door-slit"></div>
-          </div>
-        </div>
-        <div class="door door-mid" data-target="tab-entity">
-          <div class="door-recess">
-            <div class="door-plate">实 体 名 单</div>
-            <div class="door-status" id="door-status-entity">---</div>
-            <div class="door-slit"></div>
-          </div>
-        </div>
-        <div class="door door-far" data-target="tab-jobtree">
-          <div class="door-recess">
-            <div class="door-plate">职 业 树</div>
-            <div class="door-status" id="door-status-jobtree">---</div>
-            <div class="door-slit"></div>
-          </div>
-        </div>
-        <div class="wall-scratch">NO RETURN</div>
-      </div>
-
-      <div class="wall wall-right">
-        <div class="flesh-veins right"></div>
-        <div class="door door-near" data-target="tab-dungeon">
-          <div class="door-recess">
-            <div class="door-plate">副 本 情 报</div>
-            <div class="door-status" id="door-status-dungeon">---</div>
-            <div class="door-slit"></div>
-          </div>
-          <div class="door-alert-light" id="alert-dungeon"></div>
-        </div>
-        <div class="door door-mid" data-target="tab-map">
-          <div class="door-recess">
-            <div class="door-plate">回 廊 地 图</div>
-            <div class="door-status" id="door-status-map">---</div>
-            <div class="door-slit"></div>
-          </div>
-        </div>
-        <div class="wall-scratch right">契约即枷锁</div>
-      </div>
-
-      <!-- 中央：契约者铭牌（替代原尽头传送门） -->
-      <div class="center-plate" data-target="tab-status">
-        <div class="plate-frame">
-          <div class="plate-title">◆ 契 约 者 ◆</div>
-          <div class="plate-name" id="plate-name">---</div>
-          <div class="plate-line">
-            <span id="plate-lv">Lv.1</span> · <span id="plate-rank">一阶</span> · <span id="plate-army">列兵</span>
-          </div>
-          <div class="plate-line dim">CR <span id="plate-cr">3.0</span> · <span id="plate-att">观察</span></div>
-          <div class="plate-divider"></div>
-          <div class="plate-line small">天赋 <span id="plate-talent">无</span></div>
-          <div class="plate-line small">血统 <span id="plate-blood">无</span></div>
-        </div>
-      </div>
-    </div>
-
-    <!-- ============ 底部 HUD ============ -->
+    <!-- ============ 底栏：检定条 ============ -->
     <div class="scene-hud">
-      <div class="hud-stat">
-        <span class="hud-label">HP</span>
-        <div class="hud-track"><div class="hud-fill hp" id="hud-hp"></div></div>
-        <span class="hud-num" id="hud-hp-num">0/0</span>
+      <div class="hud-row">
+        <div class="hud-stat">
+          <span class="hud-label">HP</span>
+          <div class="hud-track"><div class="hud-fill hp" id="hud-hp"></div></div>
+          <span class="hud-num" id="hud-hp-num">0/0</span>
+        </div>
+        <div class="hud-stat">
+          <span class="hud-label">MP</span>
+          <div class="hud-track"><div class="hud-fill mp" id="hud-mp"></div></div>
+          <span class="hud-num" id="hud-mp-num">0/0</span>
+        </div>
       </div>
-      <div class="hud-stat">
-        <span class="hud-label">MP</span>
-        <div class="hud-track"><div class="hud-fill mp" id="hud-mp"></div></div>
-        <span class="hud-num" id="hud-mp-num">0/0</span>
+      <div class="hud-row">
+        <div class="hud-stat">
+          <span class="hud-label">耐力</span>
+          <div class="hud-track"><div class="hud-fill sp" id="hud-sp"></div></div>
+          <span class="hud-num" id="hud-sp-num">0/0</span>
+        </div>
+        <div class="hud-stat">
+          <span class="hud-label">EXP</span>
+          <div class="hud-track"><div class="hud-fill exp" id="hud-exp"></div></div>
+          <span class="hud-num" id="hud-exp-num">0/0</span>
+        </div>
       </div>
-      <div class="hud-stat">
-        <span class="hud-label">耐力</span>
-        <div class="hud-track"><div class="hud-fill sp" id="hud-sp"></div></div>
-        <span class="hud-num" id="hud-sp-num">0/0</span>
+      <div class="hud-row meta">
+        <span class="hud-meta">状态 <b id="hud-life">健康</b></span>
+        <span class="hud-meta">UP <b class="amber" id="hud-up">0</b></span>
       </div>
-      <div class="hud-stat">
-        <span class="hud-label">EXP</span>
-        <div class="hud-track"><div class="hud-fill exp" id="hud-exp"></div></div>
-        <span class="hud-num" id="hud-exp-num">0/0</span>
-      </div>
-      <div class="hud-stat"><span class="hud-label">状态</span><span class="hud-num" id="hud-life">健康</span></div>
-      <div class="hud-stat"><span class="hud-label">UP</span><span class="hud-num amber" id="hud-up">0</span></div>
     </div>
 
     <!-- ============ 模块覆盖面板（点门展开） ============ -->
@@ -587,6 +558,15 @@
                       </div>
                       <div class="fac-desc">
                         接取回廊发布的定向击杀/采集/侦查悬赏任务，在下一个常规副本中自动激活，奖励UP和少量EXP。
+                      </div>
+                    </div>
+                    <div class="facility-item">
+                      <div class="fac-header">
+                        <span class="fac-name">回廊竞技场</span
+                        ><span class="fac-req unlocked" data-req="0">已解锁</span>
+                      </div>
+                      <div class="fac-desc">
+                        供契约者之间匹配对战的练手场。对战输赢并无奖励，战斗中死亡也是虚拟死亡，不会造成任何损失——因此你可能匹配到任何人，从一阶到五阶，甚至超脱者。可选择随机匹配或自由选择对手。
                       </div>
                     </div>
                   </div>
