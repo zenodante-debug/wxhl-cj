@@ -981,7 +981,7 @@ async function onConfirmSettlement() { await settlementStore.writeSettlement() }
 function onDiscardSettlement() {
   if (!settlementStore.settlement) return
   if (settlementStore.settlement.已写入) return
-  if (!confirm('放弃这份结算预览？\n\n· 面板文本将无法再复制（本次 AI 费用不退）\n· 已写入存档的数值不会因此撤销\n\n确定放弃？')) return
+  if (!window.confirm('放弃这份结算预览？\n\n· 面板文本将无法再复制（本次 AI 费用不退）\n· 已写入存档的数值不会因此撤销\n\n确定放弃？')) return
   settlementStore.reset()
 }
 /** 复制结算面板（复用副本生成的面板复制逻辑, 只是文本来源不同） */
