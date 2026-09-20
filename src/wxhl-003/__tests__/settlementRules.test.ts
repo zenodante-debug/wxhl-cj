@@ -42,7 +42,6 @@ const 壹骰 = () => () => 1;
 const 基准输入 = {
   评价等级: 'S' as const,
   击杀: { 精英: 2, BOSS: 1, 隐藏BOSS: 1 },
-  濒死次数: 0,
   副本天数: 3,
   基础EXP汇总: 100,
   基础UP汇总: 50,
@@ -276,7 +275,7 @@ describe('computeSettlement · 第 2 轮补钉', () => {
   });
 });
 
-import { assembleSettlementPanel, buildSettlementWrites, 汇总基础奖励 } from '../settlementRules';
+import { assembleSettlementPanel, buildSettlementWrites, 汇总基础奖励, 成就星数, 存在条目数 } from '../settlementRules';
 
 /** 与 SettlementSnapshot 逐字对应的假快照 */
 const 假快照 = {
@@ -289,7 +288,12 @@ const 假快照 = {
   职业等级: 5,
   PEXP_升级所需: 200,
   当前CR: 5,
+  // `当前时间` 分组里是两个字段: 日期（参与「加天数」）与 时刻（只做面板 `## 现实时间` 的后缀）。
+  // 此前快照只有 当前现实时间, store 把**时刻**当日期喂进去 —— 于是现实日期永不更新。
+  当前现实日期: '2025年5月10日',
   当前现实时间: '凌晨00:01',
+  // 结算前的赛季资格分（写入的是「它 + 本次」; 缺失会被 buildSettlementWrites 的入口守卫拦住）
+  旧资格分: 100,
   任务奖励: {
     '主线': '250 UP + 500 EXP',
     '收集物资': '30 UP + 60 EXP + 1 RP',
@@ -651,5 +655,160 @@ describe('说明 为空时印显式占位, 不静默丢掉整段', () => {
     expect(已).toContain('初见');
     expect(已).toContain('（变量中未记录说明）');
     expect(已).toContain('20 UP + 40 EXP + 2 RP');
+  });
+});
+
+// ────────────────────────────────────────────────────────────────────
+// 全分支终审修复波（1~8）
+//
+// 这些洞的共性: 面板 / 存档上的数字「看起来都对」, 而实现是错的 ——
+// 所以下面每条都尽量按**值**断言（不断前缀、不断「包含了某几个词」）。
+// ────────────────────────────────────────────────────────────────────
+
+describe('现实日期 与 现实时间是两个字段（跨模块接缝, 终审 #1）', () => {
+  it('喂进来的是**时刻**时 加天数 如实返回空串（此前零覆盖的降级分支）', () => {
+    // store 曾把 `当前时间.现实时间`（凌晨00:01）当 `现实日期` 传进来 —— 正则锚定 `年月日`,
+    // 于是恒返回 '', `当前时间.现实日期` 永不更新, 面板还恒印「现实日期格式无法识别」
+    expect(computeSettlement({ ...基准输入, 现实日期: '凌晨00:01' }, 满骰()).新现实日期).toBe('');
+    expect(computeSettlement({ ...基准输入, 现实日期: '00:01' }, 满骰()).新现实日期).toBe('');
+    // 反退化: 同一份输入换成**日期**就必须算得出, 否则上面那句在「加天数恒返回空串」下也绿
+    expect(computeSettlement({ ...基准输入, 现实日期: '2025年5月10日' }, 满骰()).新现实日期).toBe('2025年5月13日');
+  });
+
+  it('面板的现实时间 = 新日期 + 时刻后缀（按整值断言, 不只断前缀）', () => {
+    const c = computeSettlement(基准输入, 满骰());   // 2025年5月10日 + 副本天数 3
+    const p = assembleSettlementPanel(c, 假AI, 假快照 as any);
+    expect(p).toContain('## 现实时间: 2025年5月13日 凌晨00:01');
+    expect(p).not.toContain('现实日期格式无法识别');
+  });
+
+  it('日期认不出来时, 面板如实说「未更新」并把时刻原样摆出来（不猜）', () => {
+    const c = computeSettlement({ ...基准输入, 现实日期: '凌晨00:01' }, 满骰());
+    const p = assembleSettlementPanel(c, 假AI, 假快照 as any);
+    expect(p).toContain('## 现实时间: 凌晨00:01（现实日期格式无法识别, 本次未更新现实日期）');
+  });
+});
+
+describe('成就星数 · 只数变量里存在的成就, 且只数开头连续的 ★（终审 #3 / #8）', () => {
+  const 星快照 = {
+    成就清单: [
+      { 名称: '初见', 说明: '', 难度: '★ 探索级 · 顺路可完成', 奖励: '' },
+      { 名称: '血雨行者', 说明: '', 难度: '★★★★★★ 世界天花板 · 绝无仅有', 奖励: '' },
+      { 名称: '虚增', 说明: '', 难度: '★★ 精英 · 比 ★ 更难', 奖励: '' },
+    ],
+  };
+
+  it('按难度开头的 ★ 数取星（1 / 6）', () => {
+    expect(成就星数(星快照 as any, ['初见', '血雨行者'])).toEqual([1, 6]);
+  });
+
+  it('AI 报了变量里没有的名字 → 不计入（不是记 0 占位）', () => {
+    expect(成就星数(星快照 as any, ['初见', '不存在的成就'])).toEqual([1]);
+    expect(成就星数(星快照 as any, ['不存在的成就'])).toEqual([]);
+  });
+
+  it('难度描述里的 ★ 不虚增星数（只数开头连续的那串）', () => {
+    // 全串匹配会得到 3 —— 星数直接决定写进存档的 RP 与资格分, 虚增就是多给
+    expect(成就星数(星快照 as any, ['虚增'])).toEqual([2]);
+  });
+
+  it('星数真的喂进资格分与 RP（不是只算给人看）', () => {
+    const 星 = 成就星数(星快照 as any, ['初见', '虚增']);   // [1, 2]
+    const r = computeSettlement({ ...基准输入, 成就星数: 星, 隐藏任务数: 0, 完成的支线数: 0 }, 壹骰());
+    expect(r.资格分_任务).toBe(2 * 10);                      // 成就 2 条 × 10
+    // 壹骰: 隐藏 0×1 + 成就 1+2 + S级 3 + 隐藏BOSS 1×(2+1−1) + 天赋试炼 1×1 = 9
+    expect(r.RP).toBe(3 + 3 + 2 + 1);
+  });
+});
+
+describe('资格分 的成就项 / 隐藏项只计变量里存在的条目（终审 #7）', () => {
+  const 清单快照 = {
+    ...假快照,
+    成就清单: [{ 名称: '初见', 说明: '', 难度: '★ 探索级 · 顺路可完成', 奖励: '20 UP + 40 EXP + 2 RP' }],
+    隐藏任务清单: [{ 名称: '旧日回响', 说明: '', 奖励: '80 UP + 150 EXP' }],
+  };
+
+  it('AI 多报一个不存在的成就 → 资格分_任务 不因它增加', () => {
+    const 任务分 = (名: string[]) => computeSettlement({
+      ...基准输入,
+      成就星数: 成就星数(清单快照 as any, 名),
+      隐藏任务数: 0,
+      完成的支线数: 0,
+    }, 满骰()).资格分_任务;
+    expect(任务分(['初见'])).toBe(10);
+    // 同一份名单在 `汇总基础奖励` 那边是按 0 计、UI 还明说「按 0 计」—— 资格分不能另算一套
+    expect(任务分(['初见', '不存在的成就'])).toBe(10);
+  });
+
+  it('AI 多报一个不存在的隐藏任务 → 资格分_任务 不因它增加', () => {
+    const 任务分 = (名: string[]) => computeSettlement({
+      ...基准输入,
+      隐藏任务数: 存在条目数(清单快照.隐藏任务清单 as any, 名),
+      成就星数: [],
+      完成的支线数: 0,
+    }, 满骰()).资格分_任务;
+    expect(任务分(['旧日回响'])).toBe(20);
+    expect(任务分(['旧日回响', '不存在的隐藏任务'])).toBe(20);
+  });
+
+  it('存在条目数 就是「变量里真的有几个」（清单缺席时是 0, 不是抛错）', () => {
+    expect(存在条目数(清单快照.隐藏任务清单 as any, ['旧日回响', '旧日回响2'])).toBe(1);
+    expect(存在条目数(undefined, ['任何'])).toBe(0);
+  });
+});
+
+describe('旧周期 不做 `|| 1` 静默兜底（终审 #5）', () => {
+  it('1~10 的整数照算', () => {
+    expect(computeSettlement({ ...基准输入, 旧周期: 1 }, 满骰()).新周期).toBe(2);
+    expect(computeSettlement({ ...基准输入, 旧周期: 10 }, 满骰()).新周期).toBe(1);
+  });
+
+  it('缺失 / 0 / 非整数一律抛错, 不静默按「周期 1」算', () => {
+    // `|| 1` 会把「字段缺失/为 0」静默换成 1, 于是玩家与存档都拿到一个「像真的」的新周期
+    expect(() => computeSettlement({ ...基准输入, 旧周期: 0 }, 满骰())).toThrow(/副本周期/);
+    expect(() => computeSettlement({ ...基准输入, 旧周期: undefined as any }, 满骰())).toThrow(/副本周期/);
+    expect(() => computeSettlement({ ...基准输入, 旧周期: 3.5 }, 满骰())).toThrow(/副本周期/);
+    // 反退化: 缺省时若悄悄按 0 算, 新周期会是 1 —— 断言错误信息里点名了字段
+    expect(() => computeSettlement({ ...基准输入, 旧周期: 0 }, 满骰())).toThrow(/当前副本周期/);
+  });
+});
+
+describe('喂进写入的快照字段缺失 = 接线 bug, 不是 0（终审 #4）', () => {
+  const c = computeSettlement(基准输入, 满骰());
+
+  it('逐个缺失都抛错, 且错误信息点名是哪个字段', () => {
+    for (const 名 of ['当前EXP', '当前UP', '当前RP', '当前PEXP', '旧资格分'] as const) {
+      const 坏 = { ...假快照, [名]: undefined };
+      expect(() => buildSettlementWrites(c, 假AI, 坏 as any)).toThrow(名);
+    }
+  });
+
+  it('队友的 当前EXP / 当前UP 缺失同样抛错, 并点名队友', () => {
+    for (const 名 of ['当前EXP', '当前UP'] as const) {
+      const 坏 = { ...假快照, 小队成员: [{ 名称: '阿澈', 当前EXP: 0, 当前UP: 0, [名]: undefined }] };
+      expect(() => buildSettlementWrites(c, 假AI, 坏 as any)).toThrow(名);
+      expect(() => buildSettlementWrites(c, 假AI, 坏 as any)).toThrow(/阿澈/);
+    }
+  });
+
+  it('只挡 undefined: 0 与 null 都是合法值, 不抛错（与 已有背包 同款口径）', () => {
+    const 合法 = { ...假快照, 当前EXP: 0, 当前UP: null as any, 当前RP: 0, 当前PEXP: 0, 旧资格分: 0 };
+    expect(() => buildSettlementWrites(c, 假AI, 合法 as any)).not.toThrow();
+  });
+
+  it('守卫先于一切写入: 缺 `旧资格分` 时连一个字段都不许被写出去', () => {
+    // 若守卫只是「跳过那一行」, 玩家会拿到一份「其余都写了、资格分没动」的半成品结算
+    let 抛错 = false;
+    try { buildSettlementWrites(c, 假AI, { ...假快照, 旧资格分: undefined } as any); }
+    catch (_) { 抛错 = true; }
+    expect(抛错).toBe(true);
+  });
+});
+
+describe('濒死次数 不是算术入参（终审 #6）', () => {
+  it('传了也不影响任何产物（它是 AI 的判定依据, 模块不算它）', () => {
+    const a = computeSettlement(基准输入, 满骰());
+    const b = computeSettlement({ ...基准输入, 濒死次数: 5 } as any, 满骰());
+    expect(b).toEqual(a);
   });
 });

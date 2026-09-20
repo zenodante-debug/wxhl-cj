@@ -8,6 +8,7 @@ import { buildDungeonPrompt, buildEnterPrompt, buildEnemyPrompt } from './dungeo
 import { EnemyGenResultSchema, mapEnemyToVariables, assembleEnemyPanelFromEntity, 前端已代算, type GeneratedEnemy } from './enemyRules'
 import {
   SettlementGenResultSchema, computeSettlement, 汇总基础奖励, assembleSettlementPanel, buildSettlementWrites,
+  成就星数, 存在条目数,
   type SettlementGenResult, type SettlementSnapshot, type SettlementComputed,
 } from './settlementRules'
 import { buildSettlementPrompt } from './settlementGen'
@@ -2191,30 +2192,19 @@ function readSettlementSnapshot(): SettlementSnapshot | null {
     职业等级: 取数字(c.职业?.职业等级),
     PEXP_升级所需: 取数字(c.职业?.PEXP_升级所需),
     当前CR: 取数字(c.头部?.CR),
+    // `当前时间` 分组里是**两个不同的字段**: `现实日期` 是日期（`2025年5月10日`）, `现实时间` 是时刻
+    // （`凌晨00:01`）。第十一步的「加天数」只认日期, 拿时刻去顶会恒返回空串 —— 两个都照原文读出来,
+    // 各归各的用途（日期参与算术, 时刻只做面板后缀）。
+    当前现实日期: 取文本(c.当前时间?.现实日期),
     当前现实时间: 取文本(c.当前时间?.现实时间),
+    // 赛季资格分（写入的是「它 + 本次」）—— `buildSettlementWrites` 入口会挡住它的缺失
+    旧资格分: 取数字(c.资格分),
     任务奖励,
     已有背包,
     成就清单,
     隐藏任务清单,
     小队成员,
   }
-}
-
-/**
- * AI 报告的已达成成就 → 星数数组（★=1 … ★★★★★★=6）。
- *
- * 星数从 `副本成就.<名>.难度` 的**开头**数 `★`（格式由 `dungeonRules.ts` 固定为
- * `'★ 探索级 · <难度描述>'`, 见设计 §5.4）。名单里有、清单里没有的名字记 0 星 ——
- * 它同时也会落进 `汇总基础奖励(...).未找到`, 由 UI 如实展示, 不是静默的。
- * 名单以 `快照.成就清单` 为准而非 AI 自报的数字, 与「完成与否看 AI、数值/条件看变量」同一口径。
- */
-function 成就星数(快照: SettlementSnapshot, 已达成名: string[]): number[] {
-  const 难度表 = new Map((快照.成就清单 ?? []).map(a => [a.名称, a.难度]))
-  return (已达成名 ?? []).map(名 => {
-    const 难度 = 难度表.get(名)
-    if (难度 === undefined) return 0
-    return (难度.match(/★/g) ?? []).length
-  })
 }
 
 /** 一次结算的完整产物（只在内存里, 不落盘） */
@@ -2270,7 +2260,7 @@ export const useSettlementStore = defineStore('settlement', () => {
     if (快照.副本名称 === '' || 快照.副本名称 === '未生成') { lastError.value = '当前没有进行中的副本'; return }
 
     // 原文另读一份: prompt 的「变量快照」段要的是**原文**（AI 需要逐字的任务名与奖励文本）,
-    // 而快照是给纯函数用的只读视图 —— 它不含 阶位 / 当前副本周期 / 资格分 这些组装 SettlementInputs 才要的字段
+    // 而快照是给纯函数用的只读视图 —— 它不含 阶位 / 当前副本周期 这些组装 SettlementInputs 才要的字段
     const c = read契约者() ?? {}
 
     // 先判主线状态: 失败 = 抹杀, **不调 AI、不写任何变量**。
@@ -2325,25 +2315,29 @@ export const useSettlementStore = defineStore('settlement', () => {
       const 计算结果 = computeSettlement({
         评价等级: parsed.评价等级,
         击杀: parsed.击杀,
-        濒死次数: parsed.濒死次数,
         副本天数: parsed.副本天数,
         基础EXP汇总: 基础.EXP,
         基础UP汇总: 基础.UP,
         // 资格分的「支线+5/条」用 **AI 报告的数组长度**（见 SettlementInputs 的注释）
         完成的支线数: parsed.完成的支线.length,
-        隐藏任务数: parsed.完成的隐藏任务.length,
+        // 隐藏项与成就项**只计变量里真的存在的条目**（与 `汇总基础奖励` 同口径）——
+        // 否则 AI 多报的名字会让资格分 +20 / +10, 而同一份名单它的奖励已被按 0 计、UI 还明说「按 0 计」
+        隐藏任务数: 存在条目数(快照.隐藏任务清单, parsed.完成的隐藏任务),
         成就星数: 成就星数(快照, parsed.达成的成就),
         天赋试炼次数: parsed.天赋试炼次数,
         // 只用于第六步 PEXP 的「每条掷 50~100」；**不是**上面那个 完成的支线数, 别混
         职业专属支线条数: parsed.职业专属支线条数,
         CR: 快照.当前CR,
-        // 下面三项不在 SettlementSnapshot 里, 从 `契约者` 另读。
-        // 阶位**不做 `|| '一阶'` 兜底**: 缺失/不可识别时让 computeSettlement 抛错并在 UI 上点名,
-        // 否则会静默按 ×1 算（五阶真实是 ×5, 写进存档的最终 EXP/UP 会差 5 倍）。
+        // 下面两项不在 SettlementSnapshot 里, 从 `契约者` 另读。
+        // 阶位与旧周期**都不做兜底**（不写 `?? '一阶'` / `|| 1`）: 缺失/不可识别时让 computeSettlement
+        // 抛错并在 UI 上点名, 否则会静默按 ×1 / 周期 1 算（五阶真实是 ×5, 写进存档的最终 EXP/UP 会差 5 倍）。
         阶位: 取文本(c.头部?.阶位),
-        旧周期: 取数字(c.赛季信息?.当前副本周期) || 1,
-        旧资格分: 取数字(c.资格分),
-        现实日期: 快照.当前现实时间,
+        旧周期: 取数字(c.赛季信息?.当前副本周期),
+        // 旧资格分（写入「它 + 本次」）与现实日期都在快照里 —— 快照字段缺失由 buildSettlementWrites 的入口守卫挡住
+        旧资格分: 快照.旧资格分,
+        // ⚠️ 是 `当前现实日期`（日期）而不是 `当前现实时间`（时刻 `凌晨00:01`）:
+        // 后者喂给「加天数」会恒返回空串, 现实日期于是永不更新、面板还照印「格式无法识别」。
+        现实日期: 快照.当前现实日期,
       }, rollDie)
 
       settlement.value = {

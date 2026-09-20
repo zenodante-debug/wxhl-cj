@@ -699,6 +699,9 @@
         <div class="ss-row"><span>评价分</span><span>{{ settlementStore.settlement.计算结果.资格分_评价 }}</span></div>
         <div class="ss-row"><span>击杀分</span><span>{{ settlementStore.settlement.计算结果.资格分_击杀 }}</span></div>
         <div class="ss-row"><span>任务分</span><span>{{ settlementStore.settlement.计算结果.资格分_任务 }}</span></div>
+        <!-- 规则第十一步要求「本次资格分**累加进赛季资格分**并明文展示」: 上面三行只有「本次」,
+             而真正写进存档的是「旧资格分 + 本次」= 新资格分 —— 不摆出来玩家无从核对写进去的是什么。 -->
+        <div class="ss-row"><span>赛季累计（结算后）</span><span>{{ settlementStore.settlement.计算结果.新资格分 }}</span></div>
       </div>
 
       <div class="roll-section">
