@@ -22,6 +22,14 @@ describe('buildSettlementPrompt', () => {
     expect(p).toContain('填 "F"');
   });
 
+  it('副本天数指向 客观时间', () => {
+    // 天数来自 当前时间.客观时间（= 本次副本已度过的天数）, 不是已废弃的 副本日期。
+    // 真断言: '客观时间'/'副本日期' 都不在规则原文 SETTLEMENT_RULES 里（见 data.ts 的 grep）,
+    // 所以这两条只在 settlementGen.ts 的这句话上成立 —— 改回 副本日期 即红。
+    expect(p).toContain('客观时间');
+    expect(p).not.toContain('副本日期');
+  });
+
   it('点名了 JSON 的每个字段', () => {
     for (const k of ['评价等级', '击杀', '濒死次数', '副本天数', '完成的支线',
       '完成的隐藏任务', '达成的成就', '职业专属支线条数', '天赋试炼次数', '掉落物品', '称号', '史诗记录']) {

@@ -2291,6 +2291,9 @@ export const useSettlementStore = defineStore('settlement', () => {
       // 只摘结算用得到的段落 —— 不作全量 JSON.stringify（契约者里还有背包/技能等大块内容）。
       const 变量快照 = [
         '【当前副本元数据】' + JSON.stringify(c.当前副本元数据 ?? {}),
+        // 第十一步「按副本内所待天数更新现实时间」的天数来源: 当前时间.客观时间 = 本次副本已度过的天数。
+        // 不摘这一段, AI 就看不到 当前时间, 【副本天数】只能靠聊天记录猜。
+        '【当前时间】' + JSON.stringify(c.当前时间 ?? {}),
         '【当前副本任务】' + JSON.stringify(c.当前副本任务 ?? {}),
         '【其他契约者名单】' + JSON.stringify(c.其他契约者名单 ?? {}),
         '【固有角色名单】' + JSON.stringify(c.固有角色名单 ?? {}),
