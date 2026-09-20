@@ -69,6 +69,13 @@
             <div class="door-slit"></div>
           </div>
         </div>
+        <div class="door door-far" data-target="tab-attributes">
+          <div class="door-recess">
+            <div class="door-plate">属 性 加 点</div>
+            <div class="door-status" id="door-status-attr">---</div>
+            <div class="door-slit"></div>
+          </div>
+        </div>
         <div class="wall-scratch right">契约即枷锁</div>
       </div>
 
@@ -735,6 +742,62 @@
                 <span class="group-toggle">▼</span>
               </div>
               <div class="group-body"><div id="job-tree-content"></div></div>
+            </div>
+          </div>
+
+          <!-- ===== 模块 6：属性加点 ===== -->
+          <div id="tab-attributes" class="tab-content">
+            <!-- 四维总览：四方块 -->
+            <div class="attr-home" id="attr-home">
+              <div class="attr-grid">
+                <div class="attr-square" data-attr="STR">
+                  <img class="as-img" id="attr-img-STR" alt="力量" />
+                  <div class="as-mask">
+                    <div class="as-name">力量 STR</div>
+                    <div class="as-val" id="as-val-STR">5</div>
+                  </div>
+                </div>
+                <div class="attr-square" data-attr="AGI">
+                  <img class="as-img" id="attr-img-AGI" alt="敏捷" />
+                  <div class="as-mask">
+                    <div class="as-name">敏捷 AGI</div>
+                    <div class="as-val" id="as-val-AGI">5</div>
+                  </div>
+                </div>
+                <div class="attr-square" data-attr="CON">
+                  <img class="as-img" id="attr-img-CON" alt="体质" />
+                  <div class="as-mask">
+                    <div class="as-name">体质 CON</div>
+                    <div class="as-val" id="as-val-CON">5</div>
+                  </div>
+                </div>
+                <div class="attr-square" data-attr="PER">
+                  <img class="as-img" id="attr-img-PER" alt="感知" />
+                  <div class="as-mask">
+                    <div class="as-name">感知 PER</div>
+                    <div class="as-val" id="as-val-PER">5</div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- 单属性详情 -->
+            <div class="attr-detail-page hidden" id="attr-detail-page">
+              <div class="attr-back" id="attr-back">← 返回四维总览</div>
+              <div class="ad-img-wrap"><img id="ad-img" alt="" /></div>
+              <div class="ad-name" id="ad-name">力量</div>
+              <div class="ad-boxes">
+                <div class="ad-box">
+                  <div class="ad-box-num" id="ad-base">5</div>
+                  <div class="ad-box-label">基础属性点</div>
+                </div>
+                <div class="ad-box">
+                  <div class="ad-box-num" id="ad-free">0</div>
+                  <div class="ad-box-label">可分配点数</div>
+                </div>
+              </div>
+              <button class="ad-plus" id="ad-plus">+1 加点</button>
+              <div class="ad-hint" id="ad-hint"></div>
             </div>
           </div>
         </div>

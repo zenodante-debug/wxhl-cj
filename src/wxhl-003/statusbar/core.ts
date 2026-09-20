@@ -8,6 +8,10 @@
    ============================================================ */
 
 import template from './template.html';
+import imgStr from './assets/str.webp?url';
+import imgAgi from './assets/agi.webp?url';
+import imgCon from './assets/cons.webp?url';
+import imgPer from './assets/per.webp?url';
 
 /** 挂载状态栏到 root 元素，返回卸载函数 */
 export function mountStatusbar(root: HTMLElement): () => void {
@@ -2384,6 +2388,10 @@ export function mountStatusbar(root: HTMLElement): () => void {
       $c.find('#door-status-dungeon').text(dgActive ? doorDgName : '无活跃副本');
       $c.find('#alert-dungeon').toggleClass('on', dgActive);
       $c.find('#door-status-map').text(d('契约者.头部.军衔', '列兵') + ' · ' + d('契约者.当前世界', '现实'));
+      $c.find('#door-status-attr').text(`可分配 ${d('契约者.属性.未分配属性点', 0)} 点`);
+
+      renderAttrHome();
+      renderAttrDetail();
 
       $c.find('#hud-hp').css('width', Math.min(hpPct, 100) + '%');
       $c.find('#hud-hp-num').text(hpCur + '/' + hpMax);
@@ -2431,6 +2439,7 @@ export function mountStatusbar(root: HTMLElement): () => void {
     'tab-entity': '实 体 名 单',
     'tab-map': '回 廊 地 图',
     'tab-jobtree': '职 业 树',
+    'tab-attributes': '属 性 加 点',
   };
 
   function openModule(target: string) {
@@ -2442,6 +2451,62 @@ export function mountStatusbar(root: HTMLElement): () => void {
 
   function closeModule() {
     $c.find('#module-overlay').fadeOut(160);
+  }
+
+  /* ==================== 属性加点（第六模块） ==================== */
+  const ATTR_META: Record<string, { name: string; img: string }> = {
+    STR: { name: '力量', img: imgStr },
+    AGI: { name: '敏捷', img: imgAgi },
+    CON: { name: '体质', img: imgCon },
+    PER: { name: '感知', img: imgPer },
+  };
+  const ATTR_KEYS = ['STR', 'AGI', 'CON', 'PER'] as const;
+  let attrViewing: string | null = null;
+
+  function renderAttrHome() {
+    const data = getAllVariables();
+    ATTR_KEYS.forEach(a => {
+      $c.find('#attr-img-' + a).attr('src', ATTR_META[a].img);
+      const base = Number(_.get(data.stat_data, '契约者.属性.基础.' + a, 5)) || 5;
+      const actual = Number(_.get(data.stat_data, '契约者.属性.实际.' + a, base)) || base;
+      $c.find('#as-val-' + a).text(String(base) + (actual !== base ? ` (实际 ${actual})` : ''));
+    });
+  }
+
+  function renderAttrDetail() {
+    if (!attrViewing) return;
+    const data = getAllVariables();
+    const a = attrViewing;
+    const base = Number(_.get(data.stat_data, '契约者.属性.基础.' + a, 5)) || 5;
+    const free = Number(_.get(data.stat_data, '契约者.属性.未分配属性点', 0)) || 0;
+    const cap = softCapOf(_.get(data.stat_data, '契约者.头部.阶位', '一阶'));
+    $c.find('#ad-img').attr('src', ATTR_META[a].img);
+    $c.find('#ad-name').text(ATTR_META[a].name + ' · ' + a);
+    $c.find('#ad-base').text(String(base));
+    $c.find('#ad-free').text(String(free));
+    const capped = base >= cap;
+    $c.find('#ad-plus').prop('disabled', free <= 0 || capped);
+    $c.find('#ad-hint').text(capped ? `已达当前阶位属性上限（${cap}）` : free <= 0 ? '没有可分配的属性点了' : '');
+  }
+
+  async function attrPlusOne() {
+    if (!attrViewing) return;
+    try {
+      const data = Mvu.getMvuData({ type: 'message', message_id: 'latest' });
+      const a = attrViewing;
+      const base = Number(_.get(data.stat_data, '契约者.属性.基础.' + a, 5)) || 5;
+      const free = Number(_.get(data.stat_data, '契约者.属性.未分配属性点', 0)) || 0;
+      const cap = softCapOf(_.get(data.stat_data, '契约者.头部.阶位', '一阶'));
+      if (free <= 0 || base >= cap) return;
+      _.set(data.stat_data, '契约者.属性.基础.' + a, base + 1);
+      _.set(data.stat_data, '契约者.属性.未分配属性点', free - 1);
+      applyAutoLevelAndDerivedStats(data.stat_data, '契约者');
+      appendSystemLog(data, `你 将 1 点属性点分配给了 [${ATTR_META[a].name}]，基础 ${base} → ${base + 1}`);
+      await Mvu.replaceMvuData(data, { type: 'message', message_id: 'latest' });
+      populateCharacterData();
+    } catch (e) {
+      console.error('加点失败', e);
+    }
   }
 
   let updateListener: EventOnReturn | undefined;
@@ -2508,6 +2573,25 @@ export function mountStatusbar(root: HTMLElement): () => void {
     });
     $c.on('click', '#module-close', function () {
       closeModule();
+    });
+
+    /* 属性加点：方块 → 详情页 */
+    $c.on('click', '.attr-square', function (this: HTMLElement, e: JQuery.Event) {
+      e.stopPropagation();
+      attrViewing = String($(this).data('attr'));
+      $c.find('#attr-home').addClass('hidden');
+      $c.find('#attr-detail-page').removeClass('hidden');
+      renderAttrDetail();
+    });
+    $c.on('click', '#attr-back', function (this: HTMLElement, e: JQuery.Event) {
+      e.stopPropagation();
+      attrViewing = null;
+      $c.find('#attr-detail-page').addClass('hidden');
+      $c.find('#attr-home').removeClass('hidden');
+    });
+    $c.on('click', '#ad-plus', function (this: HTMLElement, e: JQuery.Event) {
+      e.stopPropagation();
+      errorCatched(attrPlusOne)();
     });
 
     $c.on('click', '#btn-toggle-all', function () {
