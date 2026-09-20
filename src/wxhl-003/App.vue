@@ -40,6 +40,25 @@
             <div class="corridor-floor"></div>
             <div class="corridor-end"></div>
           </div>
+          <div class="idle-plate" @click="openStatusbar">
+            <div class="ip-title">◆ 契 约 者 ◆</div>
+            <div class="ip-name">{{ idle.name }}</div>
+            <div class="ip-line">Lv.{{ idle.lv }} · {{ idle.tier }} · {{ idle.army }}</div>
+            <div class="ip-bars">
+              <div class="ip-bar">
+                <span class="ip-bl">HP</span>
+                <div class="ip-track"><div class="ip-fill hp" :style="{ width: idleHpPct + '%' }"></div></div>
+              </div>
+              <div class="ip-bar">
+                <span class="ip-bl">MP</span>
+                <div class="ip-track"><div class="ip-fill mp" :style="{ width: idleMpPct + '%' }"></div></div>
+              </div>
+              <div class="ip-bar">
+                <span class="ip-bl">SP</span>
+                <div class="ip-track"><div class="ip-fill sp" :style="{ width: idleSpPct + '%' }"></div></div>
+              </div>
+            </div>
+          </div>
           <div class="app-grid">
             <div class="app-icon-wrapper" @click="openForum">
               <div class="app-icon forum-icon">
@@ -49,6 +68,7 @@
                 </svg>
               </div>
               <span class="app-label">回廊论坛</span>
+              <span class="app-sub">{{ appSubs.forum }}</span>
             </div>
             <div class="app-icon-wrapper" @click="openSettings">
               <div class="app-icon settings-icon">
@@ -60,6 +80,7 @@
                 </svg>
               </div>
               <span class="app-label">终端设置</span>
+              <span class="app-sub">{{ appSubs.settings }}</span>
             </div>
             <div class="app-icon-wrapper" @click="openCareer">
               <div class="app-icon career-icon">
@@ -70,6 +91,7 @@
                 </svg>
               </div>
               <span class="app-label">职业规划</span>
+              <span class="app-sub">{{ appSubs.career }}</span>
             </div>
             <div class="app-icon-wrapper" @click="openDungeon">
               <div class="app-icon dungeon-icon">
@@ -79,6 +101,7 @@
                 </svg>
               </div>
               <span class="app-label">副本攻略</span>
+              <span class="app-sub">{{ appSubs.dungeon }}</span>
             </div>
             <div class="app-icon-wrapper" @click="openArena">
               <div class="app-icon arena-icon">
@@ -89,6 +112,7 @@
                 </svg>
               </div>
               <span class="app-label">PvP竞技场</span>
+              <span class="app-sub">{{ appSubs.arena }}</span>
             </div>
             <div class="app-icon-wrapper" @click="openDungeonRoll">
               <div class="app-icon dungeonroll-icon">
@@ -102,6 +126,7 @@
                 </svg>
               </div>
               <span class="app-label">副本生成</span>
+              <span class="app-sub">{{ appSubs.roll }}</span>
             </div>
             <div class="app-icon-wrapper" @click="openSettlement">
               <div class="app-icon settlement-icon">
@@ -111,6 +136,7 @@
                 </svg>
               </div>
               <span class="app-label">副本结算</span>
+              <span class="app-sub">{{ appSubs.settlement }}</span>
             </div>
             <div class="app-icon-wrapper" @click="openStatusbar">
               <div class="app-icon statusbar-icon">
@@ -121,6 +147,7 @@
                 </svg>
               </div>
               <span class="app-label">状态栏</span>
+              <span class="app-sub">{{ appSubs.statusbar }}</span>
             </div>
           </div>
           <div class="desktop-footer"><span>◆ 无 限 回 廊 ◆</span></div>
@@ -1400,14 +1427,23 @@
             <div v-if="playerCycleLabel" class="roll-cycle">{{ playerCycleLabel }}</div>
 
             <div class="roll-mode-tabs">
-              <button class="roll-mode-tab" :class="{ active: rollMode === 'random' }" @click="rollMode = 'random'">🎲 随机掷骰</button>
-              <button class="roll-mode-tab" :class="{ active: rollMode === 'custom' }" @click="rollMode = 'custom'">✍️ 自选生成</button>
+              <button class="roll-mode-tab" :class="{ active: rollMode === 'random' }" @click="rollMode = 'random'">
+                🎲 随机掷骰
+              </button>
+              <button class="roll-mode-tab" :class="{ active: rollMode === 'custom' }" @click="rollMode = 'custom'">
+                ✍️ 自选生成
+              </button>
             </div>
 
             <div v-if="rollMode === 'custom'" class="custom-panel">
               <div class="cp-field">
                 <span class="cp-label">世界观名</span>
-                <input v-model="customWorld" class="cp-input" placeholder="如：火影忍者 / 赛博朋克2077（留空则由 AI 自选）" maxlength="30" />
+                <input
+                  v-model="customWorld"
+                  class="cp-input"
+                  placeholder="如：火影忍者 / 赛博朋克2077（留空则由 AI 自选）"
+                  maxlength="30"
+                />
               </div>
               <div v-for="opt in CUSTOM_OPTIONS" :key="opt.key" class="cp-field">
                 <span class="cp-label">{{ opt.label }}</span>
@@ -2104,6 +2140,59 @@ function closeStatusbar() {
 onUnmounted(() => {
   sbUnmount?.();
 });
+
+// ============ 桌面待机铭牌 ============
+const idle = reactive({
+  name: '---',
+  lv: 1,
+  tier: '一阶',
+  army: '列兵',
+  hpCur: 0,
+  hpMax: 0,
+  mpCur: 0,
+  mpMax: 0,
+  spCur: 0,
+  spMax: 0,
+});
+const idleHpPct = computed(() => Math.min((idle.hpCur / Math.max(idle.hpMax, 1)) * 100, 100));
+const idleMpPct = computed(() => Math.min((idle.mpCur / Math.max(idle.mpMax, 1)) * 100, 100));
+const idleSpPct = computed(() => Math.min((idle.spCur / Math.max(idle.spMax, 1)) * 100, 100));
+function refreshIdle() {
+  try {
+    if (typeof Mvu === 'undefined') return;
+    const data = Mvu.getMvuData({ type: 'message', message_id: 'latest' });
+    const c = data?.stat_data?.契约者;
+    if (!c) return;
+    idle.name = c.头部?.姓名 ?? '---';
+    idle.lv = Number(c.头部?.等级) || 1;
+    idle.tier = c.头部?.阶位 ?? '一阶';
+    idle.army = c.头部?.军衔 ?? '列兵';
+    idle.hpCur = Number(c.衍生属性?.HP_当前) || 0;
+    idle.hpMax = Number(c.衍生属性?.HP_最大) || 0;
+    idle.mpCur = Number(c.衍生属性?.MP_当前) || 0;
+    idle.mpMax = Number(c.衍生属性?.MP_最大) || 0;
+    idle.spCur = Number(c.衍生属性?.耐力_当前) || 0;
+    idle.spMax = Number(c.衍生属性?.耐力_最大) || 0;
+  } catch (_) {
+    /* 读取失败保持占位 */
+  }
+}
+onMounted(refreshIdle);
+watch(expanded, v => {
+  if (v) refreshIdle();
+});
+
+// ============ 桌面图标状态行 ============
+const appSubs = computed(() => ({
+  forum: store.threads.length ? `${store.threads.length} 帖` : '暂无帖子',
+  settings: '系统',
+  career: careerStore.plans.length ? `${careerStore.plans.length} 方案` : '未规划',
+  dungeon: dungeonStore.dungeons.length ? `${dungeonStore.dungeons.length} 攻略` : '未开荒',
+  arena: workshopStore.contracts.length ? `${workshopStore.contracts.length} 契约` : '无契约',
+  roll: dungeonGenStore.rolledDungeons.length ? `${dungeonGenStore.rolledDungeons.length} 次掷骰` : '未掷骰',
+  settlement: '结算空间',
+  statusbar: idle.name,
+}));
 async function onStartBattle() {
   if (!viewingCard.value) return;
   const ok = await workshopStore.startBattle(viewingCard.value);
@@ -2968,19 +3057,21 @@ onUnmounted(() => {
 // ============ VARIABLES ============
 .float-btn,
 .panel-overlay {
-  --bg: #100c09;
-  --bg2: #1a1410;
-  --bg3: #221a14;
+  --bg: #150e0a;
+  --bg2: #241812;
+  --bg3: #2e1e14;
   --rust: #4a2010;
   --rust-l: #6a3020;
   --blood: #6a1818;
-  --blood-b: #901e1e;
+  --blood-b: #a02020;
   --amber: #f0d080;
   --amber-d: #c8a860;
-  --chalk: #eee8e0;
-  --chalk-d: #b0a090;
+  --chalk: #f0e8da;
+  --chalk-d: #c0b09a;
   --iron: #4a4440;
   --iron-d: #2a2825;
+  /* SVG 颗粒纹理（feTurbulence，无图片资源） */
+  --grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
 }
 
 // ============ FLOAT BTN ============
@@ -3114,8 +3205,8 @@ onUnmounted(() => {
   width: 320px;
   height: 640px;
   border-radius: 42px;
-  background: linear-gradient(180deg, #1a1510, #100c09);
-  border: 2px solid rgba(140, 100, 60, 0.2);
+  background: linear-gradient(180deg, #241812, #150e0a);
+  border: 2px solid rgba(140, 100, 60, 0.25);
   box-shadow:
     0 0 0 6px #2a2520,
     0 0 0 8px rgba(80, 40, 20, 0.3),
@@ -3124,6 +3215,19 @@ onUnmounted(() => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+/* 手机外壳四角铆钉 */
+.phone-frame::before {
+  content: '';
+  position: absolute;
+  inset: 8px;
+  pointer-events: none;
+  z-index: 30;
+  background:
+    radial-gradient(circle 2.5px at 14px 14px, rgba(200, 160, 110, 0.5) 50%, transparent 51%),
+    radial-gradient(circle 2.5px at calc(100% - 14px) 14px, rgba(200, 160, 110, 0.5) 50%, transparent 51%),
+    radial-gradient(circle 2.5px at 14px calc(100% - 14px), rgba(200, 160, 110, 0.5) 50%, transparent 51%),
+    radial-gradient(circle 2.5px at calc(100% - 14px) calc(100% - 14px), rgba(200, 160, 110, 0.5) 50%, transparent 51%);
 }
 .status-bar {
   display: flex;
@@ -3180,7 +3284,36 @@ onUnmounted(() => {
   position: absolute;
   inset: 0;
   overflow: hidden;
-  background: #0a0806;
+  background: #150e0a;
+  /* 顶部吊灯光锥 */
+  &::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 70%;
+    height: 60%;
+    background: radial-gradient(
+      ellipse at 50% 0%,
+      rgba(240, 208, 128, 0.12) 0%,
+      rgba(240, 208, 128, 0.04) 45%,
+      transparent 70%
+    );
+    pointer-events: none;
+    z-index: 1;
+  }
+  /* 墙面颗粒 */
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: var(--grain);
+    opacity: 0.14;
+    mix-blend-mode: overlay;
+    pointer-events: none;
+    z-index: 1;
+  }
 }
 .corridor-ceiling {
   position: absolute;
@@ -3286,14 +3419,14 @@ onUnmounted(() => {
   flex-wrap: wrap;
   justify-content: center;
   align-content: flex-start;
-  gap: 20px 28px;
-  padding: 60px 20px 0;
+  gap: 16px 24px;
+  padding: 20px 20px 0;
 }
 .app-icon-wrapper {
   display: flex;
   flex-direction: column;
   align-items: center;
-  gap: 8px;
+  gap: 4px;
   cursor: pointer;
   transition: transform 0.15s;
   &:active {
@@ -3301,6 +3434,7 @@ onUnmounted(() => {
   }
 }
 .app-icon {
+  position: relative;
   width: 60px;
   height: 60px;
   border-radius: 15px;
@@ -3309,6 +3443,18 @@ onUnmounted(() => {
   justify-content: center;
   box-shadow: 0 6px 20px rgba(0, 0, 0, 0.5);
   transition: box-shadow 0.2s;
+  /* 铭牌铆钉角 */
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 4px;
+    pointer-events: none;
+    background:
+      radial-gradient(circle 1.5px at 5px 5px, rgba(240, 208, 128, 0.5) 50%, transparent 51%),
+      radial-gradient(circle 1.5px at calc(100% - 5px) 5px, rgba(240, 208, 128, 0.5) 50%, transparent 51%),
+      radial-gradient(circle 1.5px at 5px calc(100% - 5px), rgba(240, 208, 128, 0.5) 50%, transparent 51%),
+      radial-gradient(circle 1.5px at calc(100% - 5px) calc(100% - 5px), rgba(240, 208, 128, 0.5) 50%, transparent 51%);
+  }
   .app-icon-wrapper:hover & {
     box-shadow:
       0 8px 30px rgba(0, 0, 0, 0.7),
@@ -3318,6 +3464,7 @@ onUnmounted(() => {
     width: 28px;
     height: 28px;
     color: var(--amber-d);
+    filter: drop-shadow(0 0 4px rgba(240, 208, 128, 0.35));
   }
 }
 .forum-icon {
@@ -3330,8 +3477,107 @@ onUnmounted(() => {
 }
 .app-label {
   font-size: 11px;
-  color: var(--chalk-d);
+  color: var(--chalk);
   letter-spacing: 2px;
+  font-family: 'Noto Serif SC', serif;
+  margin-top: 4px;
+}
+.app-sub {
+  font-size: 9px;
+  color: var(--chalk-d);
+  letter-spacing: 1px;
+  font-family: 'Courier New', monospace;
+}
+.idle-plate {
+  position: relative;
+  z-index: 2;
+  margin: 18px 20px 0;
+  padding: 14px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 4px;
+  cursor: pointer;
+  background:
+    radial-gradient(circle 2px at 8px 8px, rgba(240, 208, 128, 0.45) 50%, transparent 51%),
+    radial-gradient(circle 2px at calc(100% - 8px) 8px, rgba(240, 208, 128, 0.45) 50%, transparent 51%),
+    radial-gradient(circle 2px at 8px calc(100% - 8px), rgba(240, 208, 128, 0.45) 50%, transparent 51%),
+    radial-gradient(circle 2px at calc(100% - 8px) calc(100% - 8px), rgba(240, 208, 128, 0.45) 50%, transparent 51%),
+    linear-gradient(180deg, rgba(36, 24, 18, 0.92), rgba(21, 14, 10, 0.9));
+  border: 2px solid var(--iron);
+  box-shadow:
+    inset 0 0 24px rgba(0, 0, 0, 0.5),
+    0 6px 20px rgba(0, 0, 0, 0.4);
+  transition: all 0.3s;
+  &:hover {
+    border-color: var(--amber-d);
+    filter: brightness(1.15);
+  }
+}
+.ip-title {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 10px;
+  letter-spacing: 4px;
+  color: var(--amber-d);
+}
+.ip-name {
+  font-family: 'Noto Serif SC', serif;
+  font-size: 22px;
+  font-weight: 900;
+  letter-spacing: 3px;
+  color: var(--amber);
+  text-shadow: 0 0 12px rgba(240, 208, 128, 0.4);
+}
+.ip-line {
+  font-family: 'Courier New', monospace;
+  font-size: 11px;
+  color: var(--chalk);
+  letter-spacing: 1px;
+}
+.ip-bars {
+  display: flex;
+  gap: 10px;
+  margin-top: 6px;
+}
+.ip-bar {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.ip-bl {
+  font-size: 9px;
+  color: var(--amber-d);
+  font-family: 'Noto Serif SC', serif;
+  letter-spacing: 1px;
+}
+.ip-track {
+  position: relative;
+  width: 52px;
+  height: 5px;
+  background: rgba(20, 12, 8, 0.6);
+  border: 1px solid rgba(100, 50, 20, 0.3);
+  border-radius: 2px;
+  overflow: hidden;
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(90deg, transparent 0 7px, rgba(0, 0, 0, 0.55) 7px 8px);
+    pointer-events: none;
+  }
+}
+.ip-fill {
+  height: 100%;
+  transition: width 0.6s;
+  &.hp {
+    background: linear-gradient(90deg, #2a0808, #8a2020);
+  }
+  &.mp {
+    background: linear-gradient(90deg, #1a2a22, #4a7060);
+  }
+  &.sp {
+    background: linear-gradient(90deg, #2a1008, #5a2812);
+  }
 }
 .desktop-footer {
   position: absolute;

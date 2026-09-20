@@ -2,16 +2,25 @@
   <div class="scene">
     <!-- ============ 顶檐：吊灯 + 全局坐标 ============ -->
     <div class="scene-ceiling">
-      <div class="ceiling-bulb"><div class="bulb-wire"></div><div class="bulb-glass"></div></div>
+      <div class="ceiling-bulb">
+        <div class="bulb-wire"></div>
+        <div class="bulb-glass"></div>
+      </div>
       <div class="ceiling-items">
         <div class="ceiling-item">
           <span class="ceiling-label">现实</span>
           <span class="ceiling-value" id="ceil-real-date">---</span>
           <span class="ceiling-value" id="ceil-real-time">---</span>
         </div>
-        <div class="ceiling-item"><span class="ceiling-label">副本</span><span class="ceiling-value" id="ceil-dungeon-time">不在副本中</span></div>
-        <div class="ceiling-item"><span class="ceiling-label">地点</span><span class="ceiling-value" id="ceil-loc">未知</span></div>
-        <div class="ceiling-item"><span class="ceiling-label">进度</span><span class="ceiling-value" id="ceil-prog">0%</span></div>
+        <div class="ceiling-item">
+          <span class="ceiling-label">副本</span><span class="ceiling-value" id="ceil-dungeon-time">不在副本中</span>
+        </div>
+        <div class="ceiling-item">
+          <span class="ceiling-label">地点</span><span class="ceiling-value" id="ceil-loc">未知</span>
+        </div>
+        <div class="ceiling-item">
+          <span class="ceiling-label">进度</span><span class="ceiling-value" id="ceil-prog">0%</span>
+        </div>
       </div>
     </div>
 
@@ -23,18 +32,21 @@
           <div class="door-recess">
             <div class="door-plate">契 约 者 档 案</div>
             <div class="door-status" id="door-status-identity">---</div>
+            <div class="door-slit"></div>
           </div>
         </div>
         <div class="door door-mid" data-target="tab-entity">
           <div class="door-recess">
             <div class="door-plate">实 体 名 单</div>
             <div class="door-status" id="door-status-entity">---</div>
+            <div class="door-slit"></div>
           </div>
         </div>
         <div class="door door-far" data-target="tab-jobtree">
           <div class="door-recess">
             <div class="door-plate">职 业 树</div>
             <div class="door-status" id="door-status-jobtree">---</div>
+            <div class="door-slit"></div>
           </div>
         </div>
         <div class="wall-scratch">NO RETURN</div>
@@ -46,6 +58,7 @@
           <div class="door-recess">
             <div class="door-plate">副 本 情 报</div>
             <div class="door-status" id="door-status-dungeon">---</div>
+            <div class="door-slit"></div>
           </div>
           <div class="door-alert-light" id="alert-dungeon"></div>
         </div>
@@ -53,6 +66,7 @@
           <div class="door-recess">
             <div class="door-plate">回 廊 地 图</div>
             <div class="door-status" id="door-status-map">---</div>
+            <div class="door-slit"></div>
           </div>
         </div>
         <div class="wall-scratch right">契约即枷锁</div>
@@ -63,7 +77,9 @@
         <div class="plate-frame">
           <div class="plate-title">◆ 契 约 者 ◆</div>
           <div class="plate-name" id="plate-name">---</div>
-          <div class="plate-line"><span id="plate-lv">Lv.1</span> · <span id="plate-rank">一阶</span> · <span id="plate-army">列兵</span></div>
+          <div class="plate-line">
+            <span id="plate-lv">Lv.1</span> · <span id="plate-rank">一阶</span> · <span id="plate-army">列兵</span>
+          </div>
           <div class="plate-line dim">CR <span id="plate-cr">3.0</span> · <span id="plate-att">观察</span></div>
           <div class="plate-divider"></div>
           <div class="plate-line small">天赋 <span id="plate-talent">无</span></div>
@@ -110,61 +126,105 @@
           <!-- ===== 模块 1：契约者档案 ===== -->
           <div id="tab-status" class="tab-content">
             <div class="group-section">
-              <div class="group-header"><span class="group-title">【当前环境】</span><span class="group-toggle">▼</span></div>
+              <div class="group-header">
+                <span class="group-title">【当前环境】</span><span class="group-toggle">▼</span>
+              </div>
               <div class="group-body">
                 <div class="section">
-                  <div class="section-header"><span class="section-title">◆ 全局坐标</span><span class="section-toggle">▼</span></div>
+                  <div class="section-header">
+                    <span class="section-title">◆ 全局坐标</span><span class="section-toggle">▼</span>
+                  </div>
                   <div class="section-body">
-                    <div class="row"><span class="label">当前世界</span><span class="value" id="env-world">现实</span></div>
-                    <div class="row"><span class="label">现实日期</span><span class="value-dim" id="env-real-date">2025年5月10日</span></div>
-                    <div class="row"><span class="label">现实时间</span><span class="value-dim" id="env-real-time">凌晨00:00</span></div>
-                    <div class="row"><span class="label">副本日期</span><span class="value-dim" id="env-dungeon-date">不在副本中</span></div>
-                    <div class="row"><span class="label">副本时间</span><span class="value-dim" id="env-dungeon-time">不在副本中</span></div>
-                    <div class="row"><span class="label">客观时间</span><span class="value-dim" id="env-obj-time">不在副本中</span></div>
-                    <div class="row"><span class="label">地点</span><span class="value-dim" id="env-loc">未知</span></div>
-                    <div class="row"><span class="label">阶段进度</span><span class="value-dim" id="env-prog">0%</span></div>
+                    <div class="row">
+                      <span class="label">当前世界</span><span class="value" id="env-world">现实</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">现实日期</span><span class="value-dim" id="env-real-date">2025年5月10日</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">现实时间</span><span class="value-dim" id="env-real-time">凌晨00:00</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">副本日期</span><span class="value-dim" id="env-dungeon-date">不在副本中</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">副本时间</span><span class="value-dim" id="env-dungeon-time">不在副本中</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">客观时间</span><span class="value-dim" id="env-obj-time">不在副本中</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">地点</span><span class="value-dim" id="env-loc">未知</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">阶段进度</span><span class="value-dim" id="env-prog">0%</span>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
 
             <div class="group-section">
-              <div class="group-header"><span class="group-title">【核心状态总览】</span><span class="group-toggle">▼</span></div>
+              <div class="group-header">
+                <span class="group-title">【核心状态总览】</span><span class="group-toggle">▼</span>
+              </div>
               <div class="group-body">
                 <div class="section">
-                  <div class="section-header"><span class="section-title">◆ 契约者</span><span class="section-toggle">▼</span></div>
+                  <div class="section-header">
+                    <span class="section-title">◆ 契约者</span><span class="section-toggle">▼</span>
+                  </div>
                   <div class="section-body">
                     <div class="row"><span class="label">姓名</span><span class="value" id="h-name">---</span></div>
                     <div class="row"><span class="label">等级</span><span class="value" id="h-lv">Lv.1</span></div>
-                    <div class="row"><span class="label">EXP</span><span class="value-dim" id="h-exp">0 / 50</span></div>
+                    <div class="row">
+                      <span class="label">EXP</span><span class="value-dim" id="h-exp">0 / 50</span>
+                    </div>
                     <div class="bar-wrap"><div class="bar-fill bar-exp" id="bar-exp" style="width: 0%"></div></div>
                     <div class="row"><span class="label">阶位</span><span class="value" id="h-rank">一阶</span></div>
                     <div class="row"><span class="label">军衔</span><span class="value" id="h-army">列兵</span></div>
                     <div class="row"><span class="label">RP</span><span class="value-dim" id="h-rp">0 / 5</span></div>
                     <div class="row"><span class="label">CR</span><span class="value" id="h-cr">3.0</span></div>
-                    <div class="row"><span class="label">回廊态度</span><span class="value-dim" id="h-att">观察</span></div>
+                    <div class="row">
+                      <span class="label">回廊态度</span><span class="value-dim" id="h-att">观察</span>
+                    </div>
                     <div class="sub-section">
                       <div class="sub-title">天赋</div>
-                      <div class="row"><span class="label">名称</span><span class="value" id="h-talent-name">无</span></div>
-                      <div class="row"><span class="label">品质</span><span class="value-dim" id="h-talent-quality"></span></div>
-                      <div class="row"><span class="label">属性加成</span><span class="value-dim" id="h-talent-bonus"></span></div>
+                      <div class="row">
+                        <span class="label">名称</span><span class="value" id="h-talent-name">无</span>
+                      </div>
+                      <div class="row">
+                        <span class="label">品质</span><span class="value-dim" id="h-talent-quality"></span>
+                      </div>
+                      <div class="row">
+                        <span class="label">属性加成</span><span class="value-dim" id="h-talent-bonus"></span>
+                      </div>
                       <div id="h-talent-effects" style="margin-top: 4px"></div>
                     </div>
                     <div class="sub-section">
                       <div class="sub-title">血统</div>
-                      <div class="row"><span class="label">名称</span><span class="value" id="h-blood-name">无</span></div>
-                      <div class="row"><span class="label">品质</span><span class="value-dim" id="h-blood-quality"></span></div>
-                      <div class="row"><span class="label">属性加成</span><span class="value-dim" id="h-blood-bonus"></span></div>
+                      <div class="row">
+                        <span class="label">名称</span><span class="value" id="h-blood-name">无</span>
+                      </div>
+                      <div class="row">
+                        <span class="label">品质</span><span class="value-dim" id="h-blood-quality"></span>
+                      </div>
+                      <div class="row">
+                        <span class="label">属性加成</span><span class="value-dim" id="h-blood-bonus"></span>
+                      </div>
                       <div id="h-blood-effects" style="margin-top: 4px"></div>
                     </div>
                     <div class="sub-section">
                       <div class="sub-title">称号</div>
                       <div style="margin-bottom: 6px">
-                        <div class="row"><span class="label">当前称号</span><span class="value" id="h-cur-title-name">无</span></div>
+                        <div class="row">
+                          <span class="label">当前称号</span><span class="value" id="h-cur-title-name">无</span>
+                        </div>
                         <div id="h-cur-title-effects" style="margin-top: 2px"></div>
                       </div>
                       <div style="border-top: 1px dashed #33221a; padding-top: 4px">
-                        <div class="row"><span class="label">备用称号</span><span class="value-dim" id="h-bk-title-name">无</span></div>
+                        <div class="row">
+                          <span class="label">备用称号</span><span class="value-dim" id="h-bk-title-name">无</span>
+                        </div>
                         <div id="h-bk-title-effects" style="margin-top: 2px"></div>
                       </div>
                     </div>
@@ -172,17 +232,29 @@
                 </div>
 
                 <div class="section">
-                  <div class="section-header"><span class="section-title">◆ 属性</span><span class="section-toggle">▼</span></div>
+                  <div class="section-header">
+                    <span class="section-title">◆ 属性</span><span class="section-toggle">▼</span>
+                  </div>
                   <div class="section-body">
-                    <div class="row"><span class="label">STR 力量</span><span class="value" id="attr-str">5 (+0)</span></div>
+                    <div class="row">
+                      <span class="label">STR 力量</span><span class="value" id="attr-str">5 (+0)</span>
+                    </div>
                     <div class="attr-detail" id="attr-str-detail"></div>
-                    <div class="row"><span class="label">AGI 敏捷</span><span class="value" id="attr-agi">5 (+0)</span></div>
+                    <div class="row">
+                      <span class="label">AGI 敏捷</span><span class="value" id="attr-agi">5 (+0)</span>
+                    </div>
                     <div class="attr-detail" id="attr-agi-detail"></div>
-                    <div class="row"><span class="label">CON 体质</span><span class="value" id="attr-con">5 (+0)</span></div>
+                    <div class="row">
+                      <span class="label">CON 体质</span><span class="value" id="attr-con">5 (+0)</span>
+                    </div>
                     <div class="attr-detail" id="attr-con-detail"></div>
-                    <div class="row"><span class="label">PER 感知</span><span class="value" id="attr-per">5 (+0)</span></div>
+                    <div class="row">
+                      <span class="label">PER 感知</span><span class="value" id="attr-per">5 (+0)</span>
+                    </div>
                     <div class="attr-detail" id="attr-per-detail"></div>
-                    <div class="row"><span class="label">未分配属性点</span><span class="value-warn" id="attr-free">0</span></div>
+                    <div class="row">
+                      <span class="label">未分配属性点</span><span class="value-warn" id="attr-free">0</span>
+                    </div>
                     <div class="sub-section" style="margin-top: 8px">
                       <div class="sub-title">衍生属性</div>
                       <div class="row"><span class="label">HP</span><span class="value" id="der-hp">0 / 0</span></div>
@@ -192,87 +264,151 @@
                       <div class="row"><span class="label">耐力</span><span class="value" id="der-sp">0 / 0</span></div>
                       <div class="bar-wrap"><div class="bar-fill bar-sp" id="bar-sp" style="width: 100%"></div></div>
                       <div class="grid-2" style="margin-top: 6px">
-                        <div class="row"><span class="label">防御</span><span class="value-dim" id="der-def">0</span></div>
-                        <div class="row"><span class="label">闪避</span><span class="value-dim" id="der-dodge">0</span></div>
-                        <div class="row"><span class="label">移距</span><span class="value-dim" id="der-move">0m</span></div>
-                        <div class="row"><span class="label">负重</span><span class="value-dim" id="der-load">0 / 0kg</span></div>
+                        <div class="row">
+                          <span class="label">防御</span><span class="value-dim" id="der-def">0</span>
+                        </div>
+                        <div class="row">
+                          <span class="label">闪避</span><span class="value-dim" id="der-dodge">0</span>
+                        </div>
+                        <div class="row">
+                          <span class="label">移距</span><span class="value-dim" id="der-move">0m</span>
+                        </div>
+                        <div class="row">
+                          <span class="label">负重</span><span class="value-dim" id="der-load">0 / 0kg</span>
+                        </div>
                       </div>
                     </div>
                   </div>
                 </div>
 
                 <div class="section">
-                  <div class="section-header"><span class="section-title">◆ 状态 &amp; 经济</span><span class="section-toggle">▼</span></div>
+                  <div class="section-header">
+                    <span class="section-title">◆ 状态 &amp; 经济</span><span class="section-toggle">▼</span>
+                  </div>
                   <div class="section-body">
-                    <div class="row"><span class="label">生命状态</span><span id="state-life" class="tag tag-green">健康</span></div>
+                    <div class="row">
+                      <span class="label">生命状态</span><span id="state-life" class="tag tag-green">健康</span>
+                    </div>
                     <div class="sub-section">
                       <div class="sub-title">特殊状态</div>
                       <div id="state-special"><span class="empty-hint">无</span></div>
                     </div>
-                    <div class="row" style="margin-top: 8px"><span class="label">UP</span><span class="value" id="eco-up">0</span></div>
+                    <div class="row" style="margin-top: 8px">
+                      <span class="label">UP</span><span class="value" id="eco-up">0</span>
+                    </div>
                   </div>
                 </div>
 
                 <div class="section">
-                  <div class="section-header"><span class="section-title">◆ 个人产业</span><span class="section-toggle collapsed">▼</span></div>
+                  <div class="section-header">
+                    <span class="section-title">◆ 个人产业</span><span class="section-toggle collapsed">▼</span>
+                  </div>
                   <div class="section-body hidden"><div id="industry-info"></div></div>
                 </div>
 
                 <div class="section">
-                  <div class="section-header"><span class="section-title">◆ 赛季 &amp; 排行</span><span class="section-toggle collapsed">▼</span></div>
+                  <div class="section-header">
+                    <span class="section-title">◆ 赛季 &amp; 排行</span><span class="section-toggle collapsed">▼</span>
+                  </div>
                   <div class="section-body hidden">
-                    <div class="row"><span class="label">当前赛季</span><span class="value" id="season-num">21</span></div>
-                    <div class="row"><span class="label">副本周期</span><span class="value-dim" id="season-cycle">0 / 10</span></div>
+                    <div class="row">
+                      <span class="label">当前赛季</span><span class="value" id="season-num">21</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">副本周期</span><span class="value-dim" id="season-cycle">0 / 10</span>
+                    </div>
                     <div class="bar-wrap"><div class="bar-fill bar-exp" id="bar-cycle" style="width: 0%"></div></div>
-                    <div class="row"><span class="label">资格分</span><span class="value" id="qual-points">0</span></div>
-                    <div class="row"><span class="label">排行榜</span><span class="value-none" id="rank-pos">未上榜</span></div>
-                    <div class="row"><span class="label">排行被动</span><span class="value-none" id="rank-passive">无</span></div>
+                    <div class="row">
+                      <span class="label">资格分</span><span class="value" id="qual-points">0</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">排行榜</span><span class="value-none" id="rank-pos">未上榜</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">排行被动</span><span class="value-none" id="rank-passive">无</span>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
 
             <div class="group-section">
-              <div class="group-header"><span class="group-title">【战力与物资库】</span><span class="group-toggle">▼</span></div>
+              <div class="group-header">
+                <span class="group-title">【战力与物资库】</span><span class="group-toggle">▼</span>
+              </div>
               <div class="group-body">
                 <div class="section">
-                  <div class="section-header"><span class="section-title">◆ 职业</span><span class="section-toggle collapsed">▼</span></div>
+                  <div class="section-header">
+                    <span class="section-title">◆ 职业</span><span class="section-toggle collapsed">▼</span>
+                  </div>
                   <div class="section-body hidden">
                     <div class="row"><span class="label">名称</span><span class="value" id="job-name">无</span></div>
-                    <div class="row"><span class="label">稀有度/阶段</span><span class="value-dim"><span id="job-quality"></span> <span id="job-stage"></span></span></div>
-                    <div class="row"><span class="label">职业等级</span><span class="value" id="job-lv">Lv.0</span></div>
-                    <div class="row"><span class="label">PEXP</span><span class="value-dim" id="job-pexp">0 / 0</span></div>
-                    <div class="row"><span class="label">主属性加成</span><span class="value" id="job-main-bonus"></span></div>
-                    <div class="row"><span class="label">副属性加成</span><span class="value-dim" id="job-sub-bonus"></span></div>
-                    <div class="sub-section"><div class="sub-title">职业特性</div><div id="job-traits"></div></div>
-                    <div class="sub-section"><div class="sub-title">职业技能</div><div id="job-skills"></div></div>
-                    <div class="sub-section"><div class="sub-title">传承技能</div><div id="job-legacy"></div></div>
+                    <div class="row">
+                      <span class="label">稀有度/阶段</span
+                      ><span class="value-dim"><span id="job-quality"></span> <span id="job-stage"></span></span>
+                    </div>
+                    <div class="row">
+                      <span class="label">职业等级</span><span class="value" id="job-lv">Lv.0</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">PEXP</span><span class="value-dim" id="job-pexp">0 / 0</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">主属性加成</span><span class="value" id="job-main-bonus"></span>
+                    </div>
+                    <div class="row">
+                      <span class="label">副属性加成</span><span class="value-dim" id="job-sub-bonus"></span>
+                    </div>
+                    <div class="sub-section">
+                      <div class="sub-title">职业特性</div>
+                      <div id="job-traits"></div>
+                    </div>
+                    <div class="sub-section">
+                      <div class="sub-title">职业技能</div>
+                      <div id="job-skills"></div>
+                    </div>
+                    <div class="sub-section">
+                      <div class="sub-title">传承技能</div>
+                      <div id="job-legacy"></div>
+                    </div>
                   </div>
                 </div>
                 <div class="section">
-                  <div class="section-header"><span class="section-title">◆ 通用技能</span><span class="section-toggle collapsed">▼</span></div>
+                  <div class="section-header">
+                    <span class="section-title">◆ 通用技能</span><span class="section-toggle collapsed">▼</span>
+                  </div>
                   <div class="section-body hidden"><div id="gen-skills"></div></div>
                 </div>
                 <div class="section">
-                  <div class="section-header"><span class="section-title">◆ 装备</span><span class="section-toggle collapsed">▼</span></div>
+                  <div class="section-header">
+                    <span class="section-title">◆ 装备</span><span class="section-toggle collapsed">▼</span>
+                  </div>
                   <div class="section-body hidden"><div id="equip-list"></div></div>
                 </div>
                 <div class="section">
-                  <div class="section-header"><span class="section-title">◆ 背包</span><span class="section-toggle collapsed">▼</span></div>
+                  <div class="section-header">
+                    <span class="section-title">◆ 背包</span><span class="section-toggle collapsed">▼</span>
+                  </div>
                   <div class="section-body hidden"><div id="bag-list"></div></div>
                 </div>
               </div>
             </div>
 
             <div class="group-section">
-              <div class="group-header"><span class="group-title">【人际与过往记录】</span><span class="group-toggle collapsed">▼</span></div>
+              <div class="group-header">
+                <span class="group-title">【人际与过往记录】</span><span class="group-toggle collapsed">▼</span>
+              </div>
               <div class="group-body hidden">
                 <div class="section">
-                  <div class="section-header"><span class="section-title">◆ 副本经历</span><span class="section-toggle collapsed">▼</span></div>
+                  <div class="section-header">
+                    <span class="section-title">◆ 副本经历</span><span class="section-toggle collapsed">▼</span>
+                  </div>
                   <div class="section-body hidden"><div id="dungeon-history"></div></div>
                 </div>
                 <div class="section">
-                  <div class="section-header"><span class="section-title">◆ 人际关系</span><span class="section-toggle collapsed">▼</span></div>
+                  <div class="section-header">
+                    <span class="section-title">◆ 人际关系</span><span class="section-toggle collapsed">▼</span>
+                  </div>
                   <div class="section-body hidden"><div id="rel-list"></div></div>
                 </div>
               </div>
@@ -282,39 +418,76 @@
           <!-- ===== 模块 2：副本情报 ===== -->
           <div id="tab-dungeon" class="tab-content">
             <div class="group-section">
-              <div class="group-header group-dungeon"><span class="group-title">【副本全局与任务】</span><span class="group-toggle">▼</span></div>
+              <div class="group-header group-dungeon">
+                <span class="group-title">【副本全局与任务】</span><span class="group-toggle">▼</span>
+              </div>
               <div class="group-body">
                 <div class="section">
-                  <div class="section-header dungeon-header"><span class="section-title">◈ 副本元数据</span><span class="section-toggle">▼</span></div>
+                  <div class="section-header dungeon-header">
+                    <span class="section-title">◈ 副本元数据</span><span class="section-toggle">▼</span>
+                  </div>
                   <div class="section-body">
-                    <div class="row"><span class="label">副本名称</span><span class="value" id="meta-name">未生成</span></div>
-                    <div class="row"><span class="label">副本来源</span><span class="value-dim" id="meta-src">未生成</span></div>
-                    <div class="row"><span class="label">副本类型</span><span id="meta-type" class="tag tag-gray">未生成</span></div>
-                    <div class="row"><span class="label">基准等级</span><span class="value" id="meta-baselv">Lv.1</span></div>
-                    <div class="row"><span class="label">时间限制</span><span class="value-dim" id="meta-time">未生成</span></div>
+                    <div class="row">
+                      <span class="label">副本名称</span><span class="value" id="meta-name">未生成</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">副本来源</span><span class="value-dim" id="meta-src">未生成</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">副本类型</span><span id="meta-type" class="tag tag-gray">未生成</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">基准等级</span><span class="value" id="meta-baselv">Lv.1</span>
+                    </div>
+                    <div class="row">
+                      <span class="label">时间限制</span><span class="value-dim" id="meta-time">未生成</span>
+                    </div>
                   </div>
                 </div>
                 <div class="section">
-                  <div class="section-header dungeon-header"><span class="section-title">◈ 当前副本任务</span><span class="section-toggle">▼</span></div>
+                  <div class="section-header dungeon-header">
+                    <span class="section-title">◈ 当前副本任务</span><span class="section-toggle">▼</span>
+                  </div>
                   <div class="section-body">
-                    <div class="sub-section"><div class="sub-title">主线任务</div><div id="quest-main"></div></div>
-                    <div class="sub-section"><div class="sub-title">支线任务</div><div id="quest-side"></div></div>
-                    <div class="sub-section"><div class="sub-title">隐藏任务</div><div id="quest-hidden"></div></div>
-                    <div class="sub-section"><div class="sub-title">世界事件</div><div id="quest-world-events"></div></div>
-                    <div class="sub-section"><div class="sub-title">副本成就</div><div id="quest-achievements"></div></div>
+                    <div class="sub-section">
+                      <div class="sub-title">主线任务</div>
+                      <div id="quest-main"></div>
+                    </div>
+                    <div class="sub-section">
+                      <div class="sub-title">支线任务</div>
+                      <div id="quest-side"></div>
+                    </div>
+                    <div class="sub-section">
+                      <div class="sub-title">隐藏任务</div>
+                      <div id="quest-hidden"></div>
+                    </div>
+                    <div class="sub-section">
+                      <div class="sub-title">世界事件</div>
+                      <div id="quest-world-events"></div>
+                    </div>
+                    <div class="sub-section">
+                      <div class="sub-title">副本成就</div>
+                      <div id="quest-achievements"></div>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
             <div class="group-section">
-              <div class="group-header group-dungeon"><span class="group-title">【场内势力监控】</span><span class="group-toggle collapsed">▼</span></div>
+              <div class="group-header group-dungeon">
+                <span class="group-title">【场内势力监控】</span><span class="group-toggle collapsed">▼</span>
+              </div>
               <div class="group-body hidden">
                 <div class="section">
-                  <div class="section-header dungeon-header"><span class="section-title">◈ 其他契约者名单</span><span class="section-toggle collapsed">▼</span></div>
+                  <div class="section-header dungeon-header">
+                    <span class="section-title">◈ 其他契约者名单</span><span class="section-toggle collapsed">▼</span>
+                  </div>
                   <div class="section-body hidden"><div id="other-conts-list"></div></div>
                 </div>
                 <div class="section">
-                  <div class="section-header dungeon-header"><span class="section-title">◈ 固有角色名单</span><span class="section-toggle collapsed">▼</span></div>
+                  <div class="section-header dungeon-header">
+                    <span class="section-title">◈ 固有角色名单</span><span class="section-toggle collapsed">▼</span>
+                  </div>
                   <div class="section-body hidden"><div id="fixed-conts-list"></div></div>
                 </div>
               </div>
@@ -325,13 +498,17 @@
           <div id="tab-entity" class="tab-content">
             <div class="group-section">
               <div class="group-header group-squad">
-                <span class="group-title">【小队 · <span id="squad-name" class="value-none" style="font-size: 14px">无</span>】</span>
+                <span class="group-title"
+                  >【小队 · <span id="squad-name" class="value-none" style="font-size: 14px">无</span>】</span
+                >
                 <span class="group-toggle">▼</span>
               </div>
               <div class="group-body">
                 <div class="section">
                   <div class="section-header squad-header-sec">
-                    <span class="section-title">◈ 小队成员 · <span id="squad-count" class="value-none" style="font-size: 14px">0</span></span>
+                    <span class="section-title"
+                      >◈ 小队成员 · <span id="squad-count" class="value-none" style="font-size: 14px">0</span></span
+                    >
                     <span class="section-toggle">▼</span>
                   </div>
                   <div class="section-body" style="padding-top: 6px"><div id="squad-list"></div></div>
@@ -345,7 +522,9 @@
               <div class="group-body" style="background: #0d0906; padding: 8px">
                 <div class="section" style="border-color: #2a1416; margin: 0">
                   <div class="section-header enemy-header-sec" style="background: #1a0c0c">
-                    <span class="section-title">◈ 副本角色 · <span id="dungeon-count" class="value-none" style="font-size: 14px">0</span></span>
+                    <span class="section-title"
+                      >◈ 副本角色 · <span id="dungeon-count" class="value-none" style="font-size: 14px">0</span></span
+                    >
                     <span class="section-toggle">▼</span>
                   </div>
                   <div class="section-body" style="padding-top: 6px"><div id="dungeon-list"></div></div>
@@ -354,12 +533,15 @@
             </div>
             <div class="group-section" style="border-color: #2a2010">
               <div class="group-header group-contractor" style="background: #1c1408">
-                <span class="group-title" style="font-size: 16px">【其他契约者】</span><span class="group-toggle">▼</span>
+                <span class="group-title" style="font-size: 16px">【其他契约者】</span
+                ><span class="group-toggle">▼</span>
               </div>
               <div class="group-body" style="background: #0d0906; padding: 8px">
                 <div class="section" style="border-color: #2a2010; margin: 0">
                   <div class="section-header contractor-header-sec" style="background: #1c1408">
-                    <span class="section-title">◈ 契约者 · <span id="contractor-count" class="value-none" style="font-size: 14px">0</span></span>
+                    <span class="section-title"
+                      >◈ 契约者 · <span id="contractor-count" class="value-none" style="font-size: 14px">0</span></span
+                    >
                     <span class="section-toggle">▼</span>
                   </div>
                   <div class="section-body" style="padding-top: 6px"><div id="contractor-list"></div></div>
@@ -371,94 +553,164 @@
           <!-- ===== 模块 4：回廊地图 ===== -->
           <div id="tab-map" class="tab-content">
             <div class="group-section">
-              <div class="group-header group-map"><span class="group-title">【全区地图导航】</span><span class="group-toggle">▼</span></div>
+              <div class="group-header group-map">
+                <span class="group-title">【全区地图导航】</span><span class="group-toggle">▼</span>
+              </div>
               <div class="group-body">
                 <div class="section">
-                  <div class="section-header map-header"><span class="section-title">◈ 回廊广场枢纽</span><span class="section-toggle">▼</span></div>
+                  <div class="section-header map-header">
+                    <span class="section-title">◈ 回廊广场枢纽</span><span class="section-toggle">▼</span>
+                  </div>
                   <div class="section-body">
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">回廊广场 (主城中心)</span><span class="fac-req unlocked" data-req="0">已解锁</span></div>
-                      <div class="fac-desc">按阶位划分的安全区（一阶至五阶物理隔离）。绝对禁止武力冲突。休息周期结束前1小时在此集合等待副本传送。提供摆摊区(免费，交易扣除10%手续费)以及物品面交。</div>
+                      <div class="fac-header">
+                        <span class="fac-name">回廊广场 (主城中心)</span
+                        ><span class="fac-req unlocked" data-req="0">已解锁</span>
+                      </div>
+                      <div class="fac-desc">
+                        按阶位划分的安全区（一阶至五阶物理隔离）。绝对禁止武力冲突。休息周期结束前1小时在此集合等待副本传送。提供摆摊区(免费，交易扣除10%手续费)以及物品面交。
+                      </div>
                     </div>
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">契约者排行榜石碑</span><span class="fac-req unlocked" data-req="0">已解锁</span></div>
-                      <div class="fac-desc">位于广场中央，展示人、黄、玄、地、天五榜。仅展示淘汰赛前十名的称号、等级与小队。</div>
+                      <div class="fac-header">
+                        <span class="fac-name">契约者排行榜石碑</span
+                        ><span class="fac-req unlocked" data-req="0">已解锁</span>
+                      </div>
+                      <div class="fac-desc">
+                        位于广场中央，展示人、黄、玄、地、天五榜。仅展示淘汰赛前十名的称号、等级与小队。
+                      </div>
                     </div>
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">回廊悬赏板</span><span class="fac-req locked" data-req="1">权限不足</span></div>
-                      <div class="fac-desc">接取回廊发布的定向击杀/采集/侦查悬赏任务，在下一个常规副本中自动激活，奖励UP和少量EXP。</div>
+                      <div class="fac-header">
+                        <span class="fac-name">回廊悬赏板</span
+                        ><span class="fac-req locked" data-req="1">权限不足</span>
+                      </div>
+                      <div class="fac-desc">
+                        接取回廊发布的定向击杀/采集/侦查悬赏任务，在下一个常规副本中自动激活，奖励UP和少量EXP。
+                      </div>
                     </div>
                   </div>
                 </div>
                 <div class="section">
-                  <div class="section-header map-header"><span class="section-title">◈ 回廊商业区</span><span class="section-toggle">▼</span></div>
+                  <div class="section-header map-header">
+                    <span class="section-title">◈ 回廊商业区</span><span class="section-toggle">▼</span>
+                  </div>
                   <div class="section-body">
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">商铺租赁</span><span class="fac-req unlocked" data-req="0">已解锁</span></div>
-                      <div class="fac-desc">禁止地摊交易。提供Lv.1小铺(上士/1000UP)、Lv.2精品店(少尉/5000UP)、Lv.3商会据点(上校/20000UP+10RP)的正规注册与代工服务。所有实体店铺需指定单一核心行业。</div>
+                      <div class="fac-header">
+                        <span class="fac-name">商铺租赁</span><span class="fac-req unlocked" data-req="0">已解锁</span>
+                      </div>
+                      <div class="fac-desc">
+                        禁止地摊交易。提供Lv.1小铺(上士/1000UP)、Lv.2精品店(少尉/5000UP)、Lv.3商会据点(上校/20000UP+10RP)的正规注册与代工服务。所有实体店铺需指定单一核心行业。
+                      </div>
                     </div>
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">官方势力据点</span><span class="fac-req unlocked" data-req="0">已解锁</span></div>
-                      <div class="fac-desc">包含特管局后勤总署、OETA武备展厅、零号局军需库、EJSSA学者沙龙、APJC总会馆(均为Lv.3商会据点)，以及非盟狂野集市(Lv.2精品店)。提供高阶补给、战术推演、情报出售等跨区物资置换服务。</div>
+                      <div class="fac-header">
+                        <span class="fac-name">官方势力据点</span
+                        ><span class="fac-req unlocked" data-req="0">已解锁</span>
+                      </div>
+                      <div class="fac-desc">
+                        包含特管局后勤总署、OETA武备展厅、零号局军需库、EJSSA学者沙龙、APJC总会馆(均为Lv.3商会据点)，以及非盟狂野集市(Lv.2精品店)。提供高阶补给、战术推演、情报出售等跨区物资置换服务。
+                      </div>
                     </div>
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">民间与企业据点</span><span class="fac-req unlocked" data-req="0">已解锁</span></div>
-                      <div class="fac-desc">包含天师阁(东方修真)、方舟军工(重火力机甲)、瑞辰拍卖行(情报掮客与拍卖)、圣光圣物室、深渊酒馆(黑市与暗杀)、独狼互助所等。部分据点限制准入资格。</div>
+                      <div class="fac-header">
+                        <span class="fac-name">民间与企业据点</span
+                        ><span class="fac-req unlocked" data-req="0">已解锁</span>
+                      </div>
+                      <div class="fac-desc">
+                        包含天师阁(东方修真)、方舟军工(重火力机甲)、瑞辰拍卖行(情报掮客与拍卖)、圣光圣物室、深渊酒馆(黑市与暗杀)、独狼互助所等。部分据点限制准入资格。
+                      </div>
                     </div>
                   </div>
                 </div>
                 <div class="section">
-                  <div class="section-header map-header"><span class="section-title">◈ 商业与交易区</span><span class="section-toggle">▼</span></div>
+                  <div class="section-header map-header">
+                    <span class="section-title">◈ 商业与交易区</span><span class="section-toggle">▼</span>
+                  </div>
                   <div class="section-body">
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">基础商店</span><span class="fac-req unlocked" data-req="0">已解锁</span></div>
+                      <div class="fac-header">
+                        <span class="fac-name">基础商店</span><span class="fac-req unlocked" data-req="0">已解锁</span>
+                      </div>
                       <div class="fac-desc">出售一阶白/蓝装备和全部基础消耗品。</div>
                     </div>
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">高级市场</span><span class="fac-req locked" data-req="2">权限不足</span></div>
-                      <div class="fac-desc">出售蓝/绿/金装备、高级消耗品、各阶技能卷轴及职业书。支持回收非绑定装备（原价40%~60%）。</div>
+                      <div class="fac-header">
+                        <span class="fac-name">高级市场</span><span class="fac-req locked" data-req="2">权限不足</span>
+                      </div>
+                      <div class="fac-desc">
+                        出售蓝/绿/金装备、高级消耗品、各阶技能卷轴及职业书。支持回收非绑定装备（原价40%~60%）。
+                      </div>
                     </div>
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">军衔商店</span><span class="fac-req unlocked" data-req="0">已解锁</span></div>
+                      <div class="fac-header">
+                        <span class="fac-name">军衔商店</span><span class="fac-req unlocked" data-req="0">已解锁</span>
+                      </div>
                       <div class="fac-desc">根据军衔等级开放对应货架，消耗稀有货币(RP)兑换高级战略物资与特权。</div>
                     </div>
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">回廊密库</span><span class="fac-req locked" data-req="5">权限不足</span></div>
+                      <div class="fac-header">
+                        <span class="fac-name">回廊密库</span><span class="fac-req locked" data-req="5">权限不足</span>
+                      </div>
                       <div class="fac-desc">出售极稀有的紫传职业书、天赋试炼入场券、三转书及单属性突破药剂。</div>
                     </div>
                   </div>
                 </div>
                 <div class="section">
-                  <div class="section-header map-header"><span class="section-title">◈ 强化与职能区</span><span class="section-toggle">▼</span></div>
+                  <div class="section-header map-header">
+                    <span class="section-title">◈ 强化与职能区</span><span class="section-toggle">▼</span>
+                  </div>
                   <div class="section-body">
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">医疗中心</span><span class="fac-req unlocked" data-req="0">已解锁</span></div>
+                      <div class="fac-header">
+                        <span class="fac-name">医疗中心</span><span class="fac-req unlocked" data-req="0">已解锁</span>
+                      </div>
                       <div class="fac-desc">全HP治愈(30UP) / 解除负面(20UP) / 断肢及失明修复(100UP)。</div>
                     </div>
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">强化室</span><span class="fac-req unlocked" data-req="0">已解锁</span></div>
-                      <div class="fac-desc">进行装备强化。基础技能升级（Lv.1-&gt;5）。上士军衔额外解锁高级技能训练。</div>
+                      <div class="fac-header">
+                        <span class="fac-name">强化室</span><span class="fac-req unlocked" data-req="0">已解锁</span>
+                      </div>
+                      <div class="fac-desc">
+                        进行装备强化。基础技能升级（Lv.1-&gt;5）。上士军衔额外解锁高级技能训练。
+                      </div>
                     </div>
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">职业馆</span><span class="fac-req unlocked" data-req="0">已解锁</span></div>
+                      <div class="fac-header">
+                        <span class="fac-name">职业馆</span><span class="fac-req unlocked" data-req="0">已解锁</span>
+                      </div>
                       <div class="fac-desc">出售白色/蓝色基础职业书与一转职业书。</div>
                     </div>
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">回廊铸造室</span><span class="fac-req locked" data-req="4">权限不足</span></div>
+                      <div class="fac-header">
+                        <span class="fac-name">回廊铸造室</span
+                        ><span class="fac-req locked" data-req="4">权限不足</span>
+                      </div>
                       <div class="fac-desc">可对蓝色及以上品质装备进行词条重铸，每件装备每赛季限3次。</div>
                     </div>
                   </div>
                 </div>
                 <div class="section">
-                  <div class="section-header map-header"><span class="section-title">◈ 战略控制设施</span><span class="section-toggle">▼</span></div>
+                  <div class="section-header map-header">
+                    <span class="section-title">◈ 战略控制设施</span><span class="section-toggle">▼</span>
+                  </div>
                   <div class="section-body">
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">个人储藏室</span><span class="fac-req unlocked" data-req="0">已解锁</span></div>
+                      <div class="fac-header">
+                        <span class="fac-name">个人储藏室</span
+                        ><span class="fac-req unlocked" data-req="0">已解锁</span>
+                      </div>
                       <div class="fac-desc">存放当前不需携带入本的装备与物资的独立安全空间。</div>
                     </div>
                     <div class="facility-item">
-                      <div class="fac-header"><span class="fac-name">世界调度室</span><span class="fac-req locked" data-req="3">权限不足</span></div>
-                      <div class="fac-desc">花费100UP从三个随机副本中择一进入，或花费巨额UP指定回归曾经历的副本。并提供战前简报情报。</div>
+                      <div class="fac-header">
+                        <span class="fac-name">世界调度室</span
+                        ><span class="fac-req locked" data-req="3">权限不足</span>
+                      </div>
+                      <div class="fac-desc">
+                        花费100UP从三个随机副本中择一进入，或花费巨额UP指定回归曾经历的副本。并提供战前简报情报。
+                      </div>
                     </div>
                   </div>
                 </div>

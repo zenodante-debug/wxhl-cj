@@ -7,29 +7,41 @@
 
 @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700;900&family=Noto+Sans+SC:wght@300;400;700&family=JetBrains+Mono:wght@400;700&display=swap');
 
+/* 四角铆钉（铭牌组件共用） */
+@mixin sb-rivets($offset: 7px, $color: rgba(200, 160, 110, 0.5)) {
+  background:
+    radial-gradient(circle 2px at $offset $offset, $color 50%, transparent 51%),
+    radial-gradient(circle 2px at calc(100% - #{$offset}) $offset, $color 50%, transparent 51%),
+    radial-gradient(circle 2px at $offset calc(100% - #{$offset}), $color 50%, transparent 51%),
+    radial-gradient(circle 2px at calc(100% - #{$offset}) calc(100% - #{$offset}), $color 50%, transparent 51%);
+}
+
 .wxhl-sb {
-  /* ---------- 调色板（与 wxhl-repo 里世界同源） ---------- */
-  --sb-void: #060403;
-  --sb-bg: #0d0906;
-  --sb-panel: #171009;
-  --sb-panel-2: #1f1510;
-  --sb-sub: #120b07;
-  --sb-hover: #2a1a10;
-  --sb-border: #33221a;
-  --sb-border-soft: #241812;
-  --sb-amber: #e0c080;
-  --sb-amber-dim: #b8a070;
-  --sb-chalk: #ddd5c8;
-  --sb-chalk-dim: #a09080;
-  --sb-dim: #6a5a48;
-  --sb-blood-wet: #c8483c;
-  --sb-blood-bright: #7a1818;
+  /* ---------- 调色板（里世界 · 提亮版：背景不是纯黑，是带血色环境光的暗棕） ---------- */
+  --sb-void: #080504;
+  --sb-bg: #120b07;
+  --sb-panel: #241812;
+  --sb-panel-2: #2e1e14;
+  --sb-sub: #1a100a;
+  --sb-hover: #3a2418;
+  --sb-border: #4a3226;
+  --sb-border-soft: #33221a;
+  --sb-amber: #e8c078;
+  --sb-amber-dim: #c8a060;
+  --sb-chalk: #e8dfd2;
+  --sb-chalk-dim: #b3a390;
+  --sb-dim: #7d6c58;
+  --sb-blood-wet: #d05040;
+  --sb-blood-bright: #8a2020;
   --sb-blood: #4a1010;
-  --sb-ember: #d08a4a;
-  --sb-gold: #c9a24a;
+  --sb-ember: #d8914a;
+  --sb-gold: #d0a850;
   --sb-copper: #6a9070;
-  --sb-emerge: #f0e8d8;
-  --sb-iron: #3a3430;
+  --sb-emerge: #f5edda;
+  --sb-iron: #4a4440;
+
+  /* SVG 颗粒纹理（feTurbulence，无图片资源、自包含） */
+  --sb-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
 
   --sb-font-display: 'Noto Serif SC', 'SimSun', serif;
   --sb-font-body: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
@@ -67,8 +79,7 @@
     overflow: hidden;
     background:
       radial-gradient(ellipse at 50% 110%, rgba(60, 15, 10, 0.35) 0%, transparent 55%),
-      radial-gradient(ellipse at 50% -10%, rgba(40, 12, 8, 0.4) 0%, transparent 50%),
-      var(--sb-void);
+      radial-gradient(ellipse at 50% -10%, rgba(40, 12, 8, 0.4) 0%, transparent 50%), var(--sb-void);
   }
 
   /* ============ 顶檐 ============ */
@@ -105,8 +116,19 @@
     animation: sbBulbFlick 7s ease-in-out infinite;
   }
   @keyframes sbBulbFlick {
-    0%, 25%, 27%, 29%, 31%, 100% { opacity: 1; }
-    26%, 28%, 30% { opacity: 0.2; }
+    0%,
+    25%,
+    27%,
+    29%,
+    31%,
+    100% {
+      opacity: 1;
+    }
+    26%,
+    28%,
+    30% {
+      opacity: 0.2;
+    }
   }
   .ceiling-items {
     display: flex;
@@ -143,6 +165,39 @@
     justify-content: space-between;
     overflow: hidden;
   }
+  /* 吊灯光锥：从顶部中央投下的琥珀光 */
+  .scene-walls::before {
+    content: '';
+    position: absolute;
+    top: 0;
+    left: 50%;
+    transform: translateX(-50%);
+    width: 64%;
+    height: 78%;
+    background: radial-gradient(
+      ellipse at 50% 0%,
+      rgba(232, 192, 120, 0.13) 0%,
+      rgba(232, 192, 120, 0.04) 45%,
+      transparent 70%
+    );
+    pointer-events: none;
+    z-index: 2;
+  }
+  /* 地面向远处收敛的光带，强化纵深 */
+  .scene-walls::after {
+    content: '';
+    position: absolute;
+    bottom: 0;
+    left: 38%;
+    right: 38%;
+    height: 26%;
+    background:
+      linear-gradient(0deg, rgba(216, 145, 74, 0.1) 0%, transparent 100%),
+      repeating-linear-gradient(0deg, transparent 0 10px, rgba(60, 30, 20, 0.25) 10px 11px);
+    clip-path: polygon(18% 0, 82% 0, 100% 100%, 0 100%);
+    pointer-events: none;
+    z-index: 1;
+  }
 
   .wall {
     position: relative;
@@ -153,21 +208,32 @@
     padding: 2% 3%;
     overflow: hidden;
   }
+  /* 墙面颗粒 */
+  .wall::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background-image: var(--sb-grain);
+    opacity: 0.14;
+    mix-blend-mode: overlay;
+    pointer-events: none;
+    z-index: 1;
+  }
   .wall-left {
     background:
-      radial-gradient(ellipse at 100% 20%, rgba(42, 21, 16, 0.9) 0%, transparent 40%),
-      radial-gradient(ellipse at 90% 65%, rgba(80, 20, 8, 0.4) 0%, transparent 45%),
-      linear-gradient(90deg, #1a0a05 0%, #2a1008 55%, #3d1a0c 100%);
+      radial-gradient(ellipse at 100% 20%, rgba(70, 32, 22, 0.9) 0%, transparent 45%),
+      radial-gradient(ellipse at 90% 65%, rgba(110, 30, 14, 0.45) 0%, transparent 50%),
+      linear-gradient(90deg, #2a1410 0%, #3d1a0c 60%, #4a2010 100%);
     clip-path: polygon(0 0, 100% 4%, 100% 96%, 0 100%);
-    border-right: 1px solid rgba(120, 40, 20, 0.25);
+    border-right: 1px solid rgba(150, 60, 30, 0.3);
   }
   .wall-right {
     background:
-      radial-gradient(ellipse at 0% 30%, rgba(42, 21, 16, 0.9) 0%, transparent 40%),
-      radial-gradient(ellipse at 10% 60%, rgba(80, 20, 8, 0.4) 0%, transparent 45%),
-      linear-gradient(270deg, #1a0a05 0%, #2a1008 55%, #3d1a0c 100%);
+      radial-gradient(ellipse at 0% 30%, rgba(70, 32, 22, 0.9) 0%, transparent 45%),
+      radial-gradient(ellipse at 10% 60%, rgba(110, 30, 14, 0.45) 0%, transparent 50%),
+      linear-gradient(270deg, #2a1410 0%, #3d1a0c 60%, #4a2010 100%);
     clip-path: polygon(0 4%, 100% 0, 100% 100%, 0 96%);
-    border-left: 1px solid rgba(120, 40, 20, 0.25);
+    border-left: 1px solid rgba(150, 60, 30, 0.3);
   }
 
   .flesh-veins {
@@ -188,8 +254,13 @@
       radial-gradient(ellipse at 15% 80%, rgba(50, 12, 8, 0.5) 0%, transparent 22%);
   }
   @keyframes sbFleshPulse {
-    0%, 100% { opacity: 0.42; }
-    50% { opacity: 0.6; }
+    0%,
+    100% {
+      opacity: 0.42;
+    }
+    50% {
+      opacity: 0.6;
+    }
   }
 
   .wall-scratch {
@@ -230,9 +301,15 @@
     color: var(--sb-emerge);
   }
   /* 近大远小，模拟纵深 */
-  .door-near { width: 92%; }
-  .door-mid { width: 78%; }
-  .door-far { width: 64%; }
+  .door-near {
+    width: 92%;
+  }
+  .door-mid {
+    width: 78%;
+  }
+  .door-far {
+    width: 64%;
+  }
   .wall-right .door {
     margin-left: auto;
   }
@@ -244,19 +321,43 @@
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 14px 8px;
-    background: linear-gradient(180deg, rgba(16, 10, 7, 0.97), rgba(24, 15, 10, 0.94));
+    padding: 14px 8px 18px;
+    background: linear-gradient(180deg, rgba(30, 18, 12, 0.97), rgba(40, 24, 16, 0.94));
     border: 2px solid var(--sb-iron);
-    box-shadow: inset 0 0 30px rgba(0, 0, 0, 0.6);
+    box-shadow:
+      inset 0 0 24px rgba(0, 0, 0, 0.55),
+      0 4px 14px rgba(0, 0, 0, 0.45);
     overflow: hidden;
     transition: all 0.35s;
   }
+  /* 内框发丝线 + 四角铆钉 */
   .door-recess::after {
     content: '';
     position: absolute;
-    inset: 3px;
+    inset: 4px;
     pointer-events: none;
-    border: 1px solid rgba(100, 50, 20, 0.15);
+    border: 1px solid rgba(150, 80, 40, 0.25);
+    @include sb-rivets(7px);
+  }
+  /* 门缝：常态黑，hover 透出琥珀光 */
+  .door-slit {
+    position: absolute;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: #050302;
+    transition: all 0.35s;
+  }
+  .door:hover .door-slit {
+    background: linear-gradient(
+      90deg,
+      transparent,
+      rgba(232, 192, 120, 0.9) 30%,
+      rgba(232, 192, 120, 0.9) 70%,
+      transparent
+    );
+    box-shadow: 0 0 12px rgba(232, 192, 120, 0.5);
   }
   .door-plate {
     font-family: var(--sb-font-display);
@@ -265,13 +366,14 @@
     letter-spacing: 3px;
     color: var(--sb-amber-dim);
     text-align: center;
+    text-shadow: 0 0 10px rgba(200, 160, 96, 0.3);
     transition: color 0.35s;
   }
   .door-status {
     font-family: var(--sb-font-mono);
     font-size: clamp(10px, 1.1vw, 12px);
     letter-spacing: 1px;
-    color: var(--sb-chalk-dim);
+    color: var(--sb-chalk);
     text-align: center;
   }
   .door-status.danger {
@@ -305,6 +407,30 @@
     z-index: 4;
     transition: all 0.4s;
   }
+  /* 铭牌底部的向上打光 */
+  .center-plate::before {
+    content: '';
+    position: absolute;
+    left: 18%;
+    right: 18%;
+    bottom: -20px;
+    height: 36px;
+    background: radial-gradient(ellipse at 50% 100%, rgba(232, 192, 120, 0.2), transparent 70%);
+    pointer-events: none;
+  }
+  /* 铭牌台座 */
+  .center-plate::after {
+    content: '';
+    position: absolute;
+    left: 12%;
+    right: 12%;
+    bottom: -16px;
+    height: 16px;
+    background: linear-gradient(180deg, #4a3226, #1a100a);
+    border: 1px solid var(--sb-border);
+    border-top: none;
+    box-shadow: 0 6px 14px rgba(0, 0, 0, 0.5);
+  }
   .center-plate:hover {
     filter: brightness(1.2);
   }
@@ -321,7 +447,16 @@
     align-items: center;
     gap: 6px;
     padding: 22px 16px 18px;
-    background: linear-gradient(180deg, rgba(12, 7, 5, 0.98), rgba(18, 11, 8, 0.95));
+    background:
+      radial-gradient(circle 2.5px at 10px 10px, rgba(200, 160, 110, 0.55) 50%, transparent 51%),
+      radial-gradient(circle 2.5px at calc(100% - 10px) 10px, rgba(200, 160, 110, 0.55) 50%, transparent 51%),
+      radial-gradient(circle 2.5px at 10px calc(100% - 10px), rgba(200, 160, 110, 0.55) 50%, transparent 51%),
+      radial-gradient(
+        circle 2.5px at calc(100% - 10px) calc(100% - 10px),
+        rgba(200, 160, 110, 0.55) 50%,
+        transparent 51%
+      ),
+      linear-gradient(180deg, rgba(24, 14, 10, 0.98), rgba(34, 20, 14, 0.95));
     border: 3px solid var(--sb-iron);
     box-shadow:
       inset 0 0 60px rgba(0, 0, 0, 0.7),
@@ -410,12 +545,21 @@
     color: var(--sb-amber-dim);
   }
   .hud-track {
+    position: relative;
     width: 90px;
     height: 6px;
     background: rgba(20, 12, 8, 0.6);
     border: 1px solid rgba(100, 50, 20, 0.3);
     border-radius: 2px;
     overflow: hidden;
+  }
+  /* 刻度槽纹 */
+  .hud-track::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: repeating-linear-gradient(90deg, transparent 0 9px, rgba(0, 0, 0, 0.55) 9px 10px);
+    pointer-events: none;
   }
   .hud-fill {
     height: 100%;
@@ -440,6 +584,7 @@
     color: var(--sb-chalk);
     letter-spacing: 1px;
     white-space: nowrap;
+    text-shadow: 0 0 6px rgba(232, 223, 210, 0.3);
   }
   .hud-num.danger {
     color: var(--sb-blood-wet);
@@ -448,6 +593,19 @@
   .hud-num.amber {
     color: var(--sb-amber);
     font-weight: 700;
+  }
+  /* 重伤/濒死时整条 HUD 泛血光 */
+  .scene-hud.danger {
+    animation: sbHudBlood 1.6s ease-in-out infinite;
+  }
+  @keyframes sbHudBlood {
+    0%,
+    100% {
+      box-shadow: inset 0 0 0 rgba(160, 32, 32, 0);
+    }
+    50% {
+      box-shadow: inset 0 0 32px rgba(160, 32, 32, 0.35);
+    }
   }
 
   /* ============ 模块覆盖面板 ============ */
@@ -460,6 +618,7 @@
     padding: 2.5% 3%;
   }
   .module-panel {
+    position: relative;
     display: flex;
     flex-direction: column;
     width: 100%;
@@ -470,6 +629,14 @@
       0 0 80px rgba(0, 0, 0, 0.7),
       0 0 0 1px rgba(120, 50, 20, 0.15);
     overflow: hidden;
+  }
+  /* 面板四角铆钉 */
+  .module-panel::after {
+    content: '';
+    position: absolute;
+    inset: 6px;
+    pointer-events: none;
+    @include sb-rivets(8px, rgba(200, 160, 110, 0.4));
   }
   .module-panel-head {
     display: flex;
@@ -1525,40 +1692,102 @@
 
   /* ============ 动画 ============ */
   @keyframes sbDangerPulse {
-    0%, 100% { opacity: 0.7; }
-    50% { opacity: 1; }
+    0%,
+    100% {
+      opacity: 0.7;
+    }
+    50% {
+      opacity: 1;
+    }
   }
 
   /* ============ 响应式（手机小屏） ============ */
   @media (max-width: 600px) {
-    .wall { width: 27%; padding: 2% 2%; }
-    .center-plate { width: 42%; }
-    .plate-frame { padding: 14px 8px 12px; }
-    .plate-line { font-size: 11px; }
-    .plate-line.small { font-size: 10px; }
-    .scene-hud { gap: 10px; padding: 6px 10px; }
-    .hud-track { width: 48px; }
-    .hud-label { font-size: 10px; }
-    .hud-num { font-size: 10px; }
-    .ceiling-items { gap: 10px; }
-    .ceiling-item:nth-child(2) { display: none; }
-    .section-body { padding: 8px; }
-    .row { flex-wrap: wrap; }
-    .grid-2 { grid-template-columns: 1fr; gap: 4px; }
-    .equip-row { grid-template-columns: 40px 1fr; }
-    .modal-panel { padding: 12px 14px; width: 95%; max-height: 90%; }
+    .wall {
+      width: 27%;
+      padding: 2% 2%;
+    }
+    .center-plate {
+      width: 42%;
+    }
+    .plate-frame {
+      padding: 14px 8px 12px;
+    }
+    .plate-line {
+      font-size: 11px;
+    }
+    .plate-line.small {
+      font-size: 10px;
+    }
+    .scene-hud {
+      gap: 10px;
+      padding: 6px 10px;
+    }
+    .hud-track {
+      width: 48px;
+    }
+    .hud-label {
+      font-size: 10px;
+    }
+    .hud-num {
+      font-size: 10px;
+    }
+    .ceiling-items {
+      gap: 10px;
+    }
+    .ceiling-item:nth-child(2) {
+      display: none;
+    }
+    .section-body {
+      padding: 8px;
+    }
+    .row {
+      flex-wrap: wrap;
+    }
+    .grid-2 {
+      grid-template-columns: 1fr;
+      gap: 4px;
+    }
+    .equip-row {
+      grid-template-columns: 40px 1fr;
+    }
+    .modal-panel {
+      padding: 12px 14px;
+      width: 95%;
+      max-height: 90%;
+    }
   }
 
   /* ============ 响应式（矮屏/横屏：压缩顶檐与 HUD） ============ */
   @media (max-height: 560px) {
-    .scene-ceiling { padding: 4px 12px 5px; gap: 10px; }
+    .scene-ceiling {
+      padding: 4px 12px 5px;
+      gap: 10px;
+    }
     .ceiling-item:nth-child(2),
-    .ceiling-item:nth-child(3) { display: none; }
-    .door-recess { padding: 8px 6px; gap: 4px; }
-    .plate-frame { padding: 12px 8px 10px; gap: 4px; }
-    .scene-hud { padding: 4px 10px; gap: 10px; }
-    .hud-track { width: 44px; }
-    .hud-label { font-size: 10px; }
-    .hud-num { font-size: 10px; }
+    .ceiling-item:nth-child(3) {
+      display: none;
+    }
+    .door-recess {
+      padding: 8px 6px;
+      gap: 4px;
+    }
+    .plate-frame {
+      padding: 12px 8px 10px;
+      gap: 4px;
+    }
+    .scene-hud {
+      padding: 4px 10px;
+      gap: 10px;
+    }
+    .hud-track {
+      width: 44px;
+    }
+    .hud-label {
+      font-size: 10px;
+    }
+    .hud-num {
+      font-size: 10px;
+    }
   }
 }

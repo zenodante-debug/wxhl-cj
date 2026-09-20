@@ -300,7 +300,8 @@ export function mountStatusbar(root: HTMLElement): () => void {
       }
 
       const cr = Number(_.get(entity, '头部.CR', 3.0)) || 3.0;
-      const att = cr >= 10 ? '炼狱' : cr >= 9 ? '期待' : cr >= 7 ? '重视' : cr >= 5 ? '关注' : cr >= 3 ? '观察' : '漠视';
+      const att =
+        cr >= 10 ? '炼狱' : cr >= 9 ? '期待' : cr >= 7 ? '重视' : cr >= 5 ? '关注' : cr >= 3 ? '观察' : '漠视';
       _.set(entity, '头部.回廊态度', att);
     }
 
@@ -2392,10 +2393,9 @@ export function mountStatusbar(root: HTMLElement): () => void {
       $c.find('#hud-sp-num').text(spCur + '/' + spMax);
       $c.find('#hud-exp').css('width', Math.min(expPct, 100) + '%');
       $c.find('#hud-exp-num').text(d('契约者.头部.EXP_当前', 0) + '/' + d('契约者.头部.EXP_升级所需', 50));
-      $c
-        .find('#hud-life')
-        .text(lifeState)
-        .toggleClass('danger', lifeState === '重伤' || lifeState === '濒死');
+      const hudDanger = lifeState === '重伤' || lifeState === '濒死';
+      $c.find('#hud-life').text(lifeState).toggleClass('danger', hudDanger);
+      $c.find('.scene-hud').toggleClass('danger', hudDanger);
       $c.find('#hud-up').text(d('契约者.经济.UP', 0));
 
       bindEditable();
