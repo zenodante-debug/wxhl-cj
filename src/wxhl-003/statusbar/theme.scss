@@ -693,13 +693,12 @@
     overflow-x: hidden;
     padding: 10px 12px;
     -webkit-overflow-scrolling: touch;
+    /* 隐藏滚动条（滚动功能保留） */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
   }
   .module-panel-body::-webkit-scrollbar {
-    width: 4px;
-  }
-  .module-panel-body::-webkit-scrollbar-thumb {
-    background: rgba(120, 80, 40, 0.4);
-    border-radius: 3px;
+    display: none;
   }
 
   .tab-content {
@@ -707,6 +706,35 @@
   }
   .tab-content.active {
     display: block;
+  }
+
+  /* 职业树页：纵向铺满面板，树居中（放不下时顶对齐照常滚动） */
+  #tab-jobtree {
+    display: flex;
+    flex-direction: column;
+    min-height: 100%;
+  }
+  #tab-jobtree .group-section {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  #tab-jobtree .group-body {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  #job-tree-content {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+  }
+  /* margin:auto = 安全居中：内容矮则居中，超高则归零贴顶可滚 */
+  .tree-container {
+    margin: auto;
+  }
+  #job-tree-content > div:only-child {
+    margin: auto;
   }
 
   /* ============================================================
@@ -1359,6 +1387,12 @@
     overflow-x: auto;
     padding: 20px 0;
     -webkit-overflow-scrolling: touch;
+    /* 隐藏横向滚动条（滚动功能保留） */
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+  }
+  .tree-container::-webkit-scrollbar {
+    display: none;
   }
   .tree-wrapper {
     display: table;
@@ -1485,7 +1519,9 @@
   /* ============ 弹窗 ============ */
   #modal-overlay {
     display: none;
-    position: fixed;
+    /* absolute 而非 fixed：以 .module-panel 为包含块，弹窗被约束在状态栏面板内，
+       不会逃逸到宿主页视口（fixed 会让弹窗以整块浏览器屏幕居中，跑出手机框） */
+    position: absolute;
     top: 0;
     left: 0;
     width: 100%;
@@ -1877,6 +1913,27 @@
     }
     .plate-line.small {
       font-size: 10px;
+    }
+    /* 属性加点：小屏收紧图与方框，保证一屏内可见 */
+    .attr-grid {
+      gap: 10px;
+    }
+    .ad-img-wrap {
+      max-width: 200px;
+    }
+    .ad-boxes {
+      gap: 14px;
+    }
+    .ad-box {
+      width: 84px;
+      height: 84px;
+    }
+    .ad-box-num {
+      font-size: 26px;
+    }
+    .ad-plus {
+      margin-top: 12px;
+      padding: 7px 24px;
     }
     .scene-hud {
       gap: 10px;

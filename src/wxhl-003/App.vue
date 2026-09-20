@@ -40,114 +40,117 @@
             <div class="corridor-floor"></div>
             <div class="corridor-end"></div>
           </div>
-          <div class="idle-plate" @click="openStatusbar">
-            <div class="ip-title">◆ 契 约 者 ◆</div>
-            <div class="ip-name">{{ idle.name }}</div>
-            <div class="ip-line">Lv.{{ idle.lv }} · {{ idle.tier }} · {{ idle.army }}</div>
-            <div class="ip-bars">
-              <div class="ip-bar">
-                <span class="ip-bl">HP</span>
-                <div class="ip-track"><div class="ip-fill hp" :style="{ width: idleHpPct + '%' }"></div></div>
-              </div>
-              <div class="ip-bar">
-                <span class="ip-bl">MP</span>
-                <div class="ip-track"><div class="ip-fill mp" :style="{ width: idleMpPct + '%' }"></div></div>
-              </div>
-              <div class="ip-bar">
-                <span class="ip-bl">SP</span>
-                <div class="ip-track"><div class="ip-fill sp" :style="{ width: idleSpPct + '%' }"></div></div>
+          <!-- 滚动层：背景与页脚固定，图标区可滚（隐藏滚动条） -->
+          <div class="desktop-scroll">
+            <div class="idle-plate" @click="openStatusbar">
+              <div class="ip-title">◆ 契 约 者 ◆</div>
+              <div class="ip-name">{{ idle.name }}</div>
+              <div class="ip-line">Lv.{{ idle.lv }} · {{ idle.tier }} · {{ idle.army }}</div>
+              <div class="ip-bars">
+                <div class="ip-bar">
+                  <span class="ip-bl">HP</span>
+                  <div class="ip-track"><div class="ip-fill hp" :style="{ width: idleHpPct + '%' }"></div></div>
+                </div>
+                <div class="ip-bar">
+                  <span class="ip-bl">MP</span>
+                  <div class="ip-track"><div class="ip-fill mp" :style="{ width: idleMpPct + '%' }"></div></div>
+                </div>
+                <div class="ip-bar">
+                  <span class="ip-bl">SP</span>
+                  <div class="ip-track"><div class="ip-fill sp" :style="{ width: idleSpPct + '%' }"></div></div>
+                </div>
               </div>
             </div>
-          </div>
-          <div class="app-grid">
-            <div class="app-icon-wrapper" @click="openForum">
-              <div class="app-icon forum-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <rect x="3" y="3" width="18" height="14" rx="2" />
-                  <path d="M7 7h10M7 11h8M7 15h4" />
-                </svg>
+            <div class="app-grid">
+              <div class="app-icon-wrapper" @click="openForum">
+                <div class="app-icon forum-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="3" y="3" width="18" height="14" rx="2" />
+                    <path d="M7 7h10M7 11h8M7 15h4" />
+                  </svg>
+                </div>
+                <span class="app-label">回廊论坛</span>
+                <span class="app-sub">{{ appSubs.forum }}</span>
               </div>
-              <span class="app-label">回廊论坛</span>
-              <span class="app-sub">{{ appSubs.forum }}</span>
-            </div>
-            <div class="app-icon-wrapper" @click="openSettings">
-              <div class="app-icon settings-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <circle cx="12" cy="12" r="3" />
-                  <path
-                    d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
-                  />
-                </svg>
+              <div class="app-icon-wrapper" @click="openSettings">
+                <div class="app-icon settings-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="3" />
+                    <path
+                      d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+                    />
+                  </svg>
+                </div>
+                <span class="app-label">终端设置</span>
+                <span class="app-sub">{{ appSubs.settings }}</span>
               </div>
-              <span class="app-label">终端设置</span>
-              <span class="app-sub">{{ appSubs.settings }}</span>
-            </div>
-            <div class="app-icon-wrapper" @click="openCareer">
-              <div class="app-icon career-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M12 2L2 7l10 5 10-5-10-5z" />
-                  <path d="M2 17l10 5 10-5" />
-                  <path d="M2 12l10 5 10-5" />
-                </svg>
+              <div class="app-icon-wrapper" @click="openCareer">
+                <div class="app-icon career-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M12 2L2 7l10 5 10-5-10-5z" />
+                    <path d="M2 17l10 5 10-5" />
+                    <path d="M2 12l10 5 10-5" />
+                  </svg>
+                </div>
+                <span class="app-label">职业规划</span>
+                <span class="app-sub">{{ appSubs.career }}</span>
               </div>
-              <span class="app-label">职业规划</span>
-              <span class="app-sub">{{ appSubs.career }}</span>
-            </div>
-            <div class="app-icon-wrapper" @click="openDungeon">
-              <div class="app-icon dungeon-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M12 2L20 6v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z" />
-                  <path d="M9 12l2 2 4-4" />
-                </svg>
+              <div class="app-icon-wrapper" @click="openDungeon">
+                <div class="app-icon dungeon-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M12 2L20 6v6c0 5-3.5 8-8 10-4.5-2-8-5-8-10V6l8-4z" />
+                    <path d="M9 12l2 2 4-4" />
+                  </svg>
+                </div>
+                <span class="app-label">副本攻略</span>
+                <span class="app-sub">{{ appSubs.dungeon }}</span>
               </div>
-              <span class="app-label">副本攻略</span>
-              <span class="app-sub">{{ appSubs.dungeon }}</span>
-            </div>
-            <div class="app-icon-wrapper" @click="openArena">
-              <div class="app-icon arena-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M7 3L3 7v6l4 4h6l4-4V7l-4-4H7z" />
-                  <path d="M7 7l3 3m2-3l3 3" />
-                  <path d="M12 10l3 6M12 10l-3 6" />
-                </svg>
+              <div class="app-icon-wrapper" @click="openArena">
+                <div class="app-icon arena-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M7 3L3 7v6l4 4h6l4-4V7l-4-4H7z" />
+                    <path d="M7 7l3 3m2-3l3 3" />
+                    <path d="M12 10l3 6M12 10l-3 6" />
+                  </svg>
+                </div>
+                <span class="app-label">PvP竞技场</span>
+                <span class="app-sub">{{ appSubs.arena }}</span>
               </div>
-              <span class="app-label">PvP竞技场</span>
-              <span class="app-sub">{{ appSubs.arena }}</span>
-            </div>
-            <div class="app-icon-wrapper" @click="openDungeonRoll">
-              <div class="app-icon dungeonroll-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <rect x="3" y="3" width="18" height="18" rx="4" />
-                  <circle cx="8.5" cy="8.5" r="1.3" />
-                  <circle cx="15.5" cy="8.5" r="1.3" />
-                  <circle cx="8.5" cy="15.5" r="1.3" />
-                  <circle cx="15.5" cy="15.5" r="1.3" />
-                  <circle cx="12" cy="12" r="1.3" />
-                </svg>
+              <div class="app-icon-wrapper" @click="openDungeonRoll">
+                <div class="app-icon dungeonroll-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="3" y="3" width="18" height="18" rx="4" />
+                    <circle cx="8.5" cy="8.5" r="1.3" />
+                    <circle cx="15.5" cy="8.5" r="1.3" />
+                    <circle cx="8.5" cy="15.5" r="1.3" />
+                    <circle cx="15.5" cy="15.5" r="1.3" />
+                    <circle cx="12" cy="12" r="1.3" />
+                  </svg>
+                </div>
+                <span class="app-label">副本生成</span>
+                <span class="app-sub">{{ appSubs.roll }}</span>
               </div>
-              <span class="app-label">副本生成</span>
-              <span class="app-sub">{{ appSubs.roll }}</span>
-            </div>
-            <div class="app-icon-wrapper" @click="openSettlement">
-              <div class="app-icon settlement-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <path d="M6 3h12v18l-6-4-6 4V3z" />
-                  <path d="M9 8h6M9 12h4" />
-                </svg>
+              <div class="app-icon-wrapper" @click="openSettlement">
+                <div class="app-icon settlement-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M6 3h12v18l-6-4-6 4V3z" />
+                    <path d="M9 8h6M9 12h4" />
+                  </svg>
+                </div>
+                <span class="app-label">副本结算</span>
+                <span class="app-sub">{{ appSubs.settlement }}</span>
               </div>
-              <span class="app-label">副本结算</span>
-              <span class="app-sub">{{ appSubs.settlement }}</span>
-            </div>
-            <div class="app-icon-wrapper" @click="openStatusbar">
-              <div class="app-icon statusbar-icon">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                  <rect x="4" y="3" width="16" height="18" rx="2" />
-                  <circle cx="9" cy="8" r="1.6" />
-                  <path d="M13 7h5M13 10.5h5M7.5 14.5h9M7.5 17.5h6" />
-                </svg>
+              <div class="app-icon-wrapper" @click="openStatusbar">
+                <div class="app-icon statusbar-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="4" y="3" width="16" height="18" rx="2" />
+                    <circle cx="9" cy="8" r="1.6" />
+                    <path d="M13 7h5M13 10.5h5M7.5 14.5h9M7.5 17.5h6" />
+                  </svg>
+                </div>
+                <span class="app-label">状态栏</span>
+                <span class="app-sub">{{ appSubs.statusbar }}</span>
               </div>
-              <span class="app-label">状态栏</span>
-              <span class="app-sub">{{ appSubs.statusbar }}</span>
             </div>
           </div>
           <div class="desktop-footer"><span>◆ 无 限 回 廊 ◆</span></div>
@@ -3280,6 +3283,20 @@ onUnmounted(() => {
   flex-direction: column;
   position: relative;
 }
+/* 主页面滚动层：背景/页脚留在原地，内容超出时可滚（滚动条隐藏） */
+.desktop-scroll {
+  position: relative;
+  z-index: 2;
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+  -webkit-overflow-scrolling: touch;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
 .corridor-bg {
   position: absolute;
   inset: 0;
@@ -3649,6 +3666,7 @@ onUnmounted(() => {
 }
 
 // ============ SCROLL ============
+// 各处滚动容器统一隐藏滚动条（滚动功能保留）
 .scroll-area {
   flex: 1;
   overflow-y: auto;
@@ -3656,15 +3674,12 @@ onUnmounted(() => {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   min-height: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   &::-webkit-scrollbar {
-    width: 3px;
-  }
-  &::-webkit-scrollbar-thumb {
-    background: rgba(120, 80, 40, 0.4);
-    border-radius: 3px;
+    display: none;
   }
 }
-
 // ============ SECTION TABS ============
 .section-tabs {
   display: flex;
@@ -3673,11 +3688,10 @@ onUnmounted(() => {
   flex-shrink: 0;
   overflow-x: auto;
   flex-wrap: wrap;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   &::-webkit-scrollbar {
-    height: 2px;
-  }
-  &::-webkit-scrollbar-thumb {
-    background: rgba(120, 80, 40, 0.4);
+    display: none;
   }
 }
 .section-tab {
@@ -5478,6 +5492,11 @@ onUnmounted(() => {
   max-height: 320px;
   overflow: auto;
   font-family: 'Courier New', monospace;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
 }
 
 // ============ 副本结算 ============
@@ -5624,12 +5643,10 @@ onUnmounted(() => {
   -webkit-overflow-scrolling: touch;
   overscroll-behavior: contain;
   min-height: 0;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
   &::-webkit-scrollbar {
-    width: 4px;
-  }
-  &::-webkit-scrollbar-thumb {
-    background: rgba(120, 80, 40, 0.4);
-    border-radius: 3px;
+    display: none;
   }
 }
 .sb-enter-active {
