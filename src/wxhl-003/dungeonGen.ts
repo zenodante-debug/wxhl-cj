@@ -25,6 +25,9 @@ function formatLockedRolls(records: RollRecord[]): string {
  * @param 匹配池        按 CR 规则取出的榜单候选, 或「自由生成同阶契约者」指令
  * @param 阶位          契约者当前阶位, 作为物品阶位的硬性约束写进 prompt
  * @param 队伍最高等级   契约者小队的最高等级, 用于「固有角色动态升维机制」判定
+ * @param 生机评估      按 CR 档取出的凶险判定（crTable.生机评估）, 作为本次副本的难度氛围上下文。
+ *                      它**不参与任何数值**, 只是告诉 AI 这个世界该有多危险 ——
+ *                      数值那一半由「基准等级偏移」在敌人生成时落地。
  */
 export function buildDungeonPrompt(
   build: BuildRoll,
@@ -34,6 +37,7 @@ export function buildDungeonPrompt(
   匹配池: string,
   阶位: string,
   队伍最高等级: number,
+  生机评估: string,
 ): string {
   return `${DUNGEON_GENERATION_RULES}
 
@@ -96,6 +100,12 @@ ${INHERENT_CHARACTER_ANCHOR_RULES}
      请按**本次副本所处时间线**的那个状态来锚定, 不要用该角色的最终形态。
    - 判定强度时优先看「这个角色在**本副本对应的那段剧情里**做过什么、被谁压制过」,
      而不是看他在整部作品的巅峰表现。
+
+============ 回廊难度评估 ============
+回廊对本次副本的生机评估: 【${生机评估}】
+这是回廊系统按契约者当前 CR 给出的凶险判定。本次敌人生成的基准等级也已按**同一档**抬高。
+请让本次副本的世界危险度、敌对强度与剧情压迫感与这个评估相称 ——
+不要把「九死一生」的副本写成春游, 也不要把「正常运转」的副本写成绞肉机。
 
 ============ 契约者数据 ============
 ${playerText || '（未读取到玩家数据）'}

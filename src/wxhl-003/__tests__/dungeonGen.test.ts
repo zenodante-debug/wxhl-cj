@@ -25,7 +25,7 @@ const records: RollRecord[] = [
 ];
 
 describe('buildDungeonPrompt', () => {
-  const p = buildDungeonPrompt(build, records, '契约者: 刘林\n等级: Lv.11', '世界书内容', '人榜候选…', '二阶', 11);
+  const p = buildDungeonPrompt(build, records, '契约者: 刘林\n等级: Lv.11', '世界书内容', '人榜候选…', '二阶', 11, '危机四伏');
 
   it('包含规则原文的关键节', () => {
     expect(p).toContain('副本生成');
@@ -61,12 +61,23 @@ describe('buildDungeonPrompt', () => {
   });
 
   it('把契约者阶位作为物品的硬性约束写进 prompt', () => {
-    const p2 = buildDungeonPrompt(build, records, '契约者: 刘林', '世界书内容', '人榜候选…', '三阶', 47);
+    const p2 = buildDungeonPrompt(build, records, '契约者: 刘林', '世界书内容', '人榜候选…', '三阶', 47, '九死一生');
     expect(p2).toContain('阶位固定为【三阶】');
   });
 
+  it('把 CR 档的生机评估注入 prompt（氛围上下文, 不给数值）', () => {
+    const p4 = buildDungeonPrompt(build, records, '契约者: 刘林', '世界书内容', '人榜候选…', '三阶', 47, '九死一生');
+    expect(p4).toContain('回廊难度评估');
+    expect(p4).toContain('生机评估: 【九死一生】');
+    // 反退化: 换一档就必须跟着换 —— 断言钉在**带标签的那一行**上
+    // （prompt 正文里也举例提过「九死一生」, 只断「不包含九死一生」会被正文顶绿）
+    const p5 = buildDungeonPrompt(build, records, '契约者: 刘林', '世界书内容', '人榜候选…', '三阶', 47, '正常运转');
+    expect(p5).toContain('生机评估: 【正常运转】');
+    expect(p5).not.toContain('生机评估: 【九死一生】');
+  });
+
   it('把固有角色锚定规则与队伍最高等级写进 prompt', () => {
-    const p3 = buildDungeonPrompt(build, records, '契约者: 刘林', '世界书内容', '人榜候选…', '三阶', 47);
+    const p3 = buildDungeonPrompt(build, records, '契约者: 刘林', '世界书内容', '人榜候选…', '三阶', 47, '九死一生');
     expect(p3).toContain('固有角色锚定与战力表现');
     expect(p3).toContain('队伍最高等级】Lv.47');
     expect(p3).toContain('本次副本剧情实际牵涉到');

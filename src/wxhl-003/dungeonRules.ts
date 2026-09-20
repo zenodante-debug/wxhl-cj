@@ -1,5 +1,6 @@
 import type { BuildRoll, RewardSet } from './dice';
 import { composeRewardText } from './dice';
+import { 基准等级 } from './crTable';
 
 // ================================================================
 // 副本生成 · AI 输出校验与变量映射
@@ -95,8 +96,10 @@ export function mapToVariables(
     副本类型: build.副本类型,
     // 时间限制是已锁定的骰值 (1d12+2), 不从 AI 结果取, 否则 AI 的措辞会让它与骰值不一致
     时间限制: `${build.时间限制天}天`,
-    // 规则 §四: 以契约者进本时的当前等级为基准
-    基准等级: player.等级,
+    // 规则 §四: 以契约者进本时的当前等级为基准 —— 再叠上 CR 档的基准等级偏移（+0/+2/+4/+8/+16/+32）。
+    // 偏移只算一次: 经 `crTable.基准等级`, 与 `store.generateEnemies` 传给 `buildEnemyPrompt` 的
+    // 是**同一个函数**（写进存档的基准等级与敌人实际等级因此不可能漂移）。
+    基准等级: 基准等级(player.等级, player.CR),
   };
 
   const 支线任务: Record<string, unknown> = {};

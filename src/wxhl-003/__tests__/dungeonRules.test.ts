@@ -1,6 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import type { BuildRoll, RewardSet } from '../dice';
 import { DungeonGenResultSchema, assemblePanelText, mapToVariables, clamp固有角色等级 } from '../dungeonRules';
+import { buildEnemyPrompt } from '../dungeonGen';
+import { 基准等级 } from '../crTable';
 
 const build: BuildRoll = {
   副本类型: '血腥',
@@ -107,8 +109,23 @@ describe('clamp固有角色等级', () => {
 describe('mapToVariables', () => {
   const vars = mapToVariables(result, build, rewards, player);
 
-  it('写入基准等级 = 玩家当前等级', () => {
-    expect((vars.当前副本元数据 as any).基准等级).toBe(11);
+  it('写入基准等级 = 玩家当前等级 + CR 档偏移（不再是裸的玩家等级）', () => {
+    // player: 等级 11, CR 4.5 → 关注档（4.1~6.0）→ +4
+    expect((vars.当前副本元数据 as any).基准等级).toBe(15);
+  });
+
+  it('存档里的基准等级 === 敌人生成收到的基准等级（两处同源）', () => {
+    // store.generateEnemies 走的就是这句: buildEnemyPrompt(..., 基准等级(player.等级, player.CR))
+    // 分开写两遍偏移时, 这里会红 —— 那正是写进存档的基准等级与敌人实际等级对不上的情形
+    const 写给存档 = (vars.当前副本元数据 as any).基准等级;
+    const 给敌人 = 基准等级(player.等级, player.CR);
+    expect(写给存档).toBe(给敌人);
+    const p = buildEnemyPrompt(build, '契约者: 刘林', '', 给敌人);
+    expect(p).toContain('主线基准等级 = Lv.15');
+    expect(p).toContain('BOSS Lv.18');     // round(15 × 1.2)
+    expect(p).toContain('杂兵 Lv.9');      // round(15 × 0.6)
+    // 反退化: 若某处又退回裸的玩家等级, 敌人等级会变成 round(11×…) 那一套
+    expect(p).not.toContain('主线基准等级 = Lv.11');
   });
 
   it('副本类型取构建骰的有效值', () => {

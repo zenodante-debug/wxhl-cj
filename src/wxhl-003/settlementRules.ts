@@ -1,4 +1,5 @@
 import { rollDie, 归一位阶 } from './dice';
+import { CR区间 } from './crTable';
 
 /** 奖励文本里的三个数值 */
 export interface RewardNumbers { UP: number; EXP: number; RP: number }
@@ -125,17 +126,6 @@ export interface SettlementComputed {
 /** 评价倍率（规则第四步） */
 const 评价倍率表: Record<string, number> = { S: 2.0, A: 1.5, B: 1.2, C: 1.0, D: 0.7, F: 0 };
 
-/** CR 分档 → [态度, 奖励倍率]（规则第十步）。按 Math.floor(CR) 取档 */
-function CR分档(CR: number): [string, number] {
-  const n = Math.floor(CR);
-  if (n <= 2) return ['漠视', 1.0];
-  if (n <= 4) return ['观察', 1.2];
-  if (n <= 6) return ['关注', 1.5];
-  if (n <= 8) return ['重视', 3.0];
-  if (n <= 9) return ['期待', 6.0];
-  return ['炼狱', 15.0];
-}
-
 /**
  * 阶位 → 阶数（一阶1 … 五阶5, 即规则第四步的「位阶修正={{user}}阶数」）。
  *
@@ -198,11 +188,14 @@ export function computeSettlement(
 
   // ── 倍率（规则第三、四步）────────────────────────────────────────────
   const 评价倍率 = 评价倍率表[输入.评价等级] ?? 0;
-  const [CR态度, CR奖励倍率] = CR分档(输入.CR);       // 按「结算前」的 CR 查表
+  // 按「结算前」的 CR 查表。**区间判, 不是 Math.floor** —— 见 crTable:CR表 的注释
+  // （floor 在 4.1~4.9 / 6.1~6.9 / 8.1~8.9 三处会落到低一档）。
+  // 态度与倍率都从表里来, 这里不再另写一份字符串。
+  const 档 = CR区间(输入.CR);
   const 位阶修正 = 阶数(输入.阶位);
 
-  const 最终EXP = Math.round(输入.基础EXP汇总 * 评价倍率 * CR奖励倍率 * 位阶修正);
-  const 最终UP = Math.round(输入.基础UP汇总 * 评价倍率 * CR奖励倍率 * 位阶修正);
+  const 最终EXP = Math.round(输入.基础EXP汇总 * 评价倍率 * 档.结算倍率 * 位阶修正);
+  const 最终UP = Math.round(输入.基础UP汇总 * 评价倍率 * 档.结算倍率 * 位阶修正);
 
   // ── RP（规则第五步）──────────────────────────────────────────────────
   // 「掷 1~N」就是 掷(N)（rollDie(3) 返回 1~3）。成就的 RP 直接等于星数, 不掷。
@@ -215,7 +208,10 @@ export function computeSettlement(
   if (输入.评价等级 === 'S') RP += 3;
   RP += 输入.击杀.隐藏BOSS * (2 + 掷(3) - 1);
   RP += 输入.天赋试炼次数 * 掷(2);
-  if (Math.floor(输入.CR) >= 10) RP += 掷(3);         // 炼狱通关附加
+  // 炼狱通关附加。**不用 `CR区间(输入.CR).态度 === '炼狱'` 去比字符串**: CR 由卡 clamp 在
+  // 1~10, 而炼狱档恰好就是 `CR = 10`（表里上界 10.0 的那一档）, 所以这一条等价于炼狱判定,
+  // 同时避免在结算里再引入一处「炼狱」字面量。
+  if (输入.CR >= 10) RP += 掷(3);
 
   // ── PEXP（规则第六步）────────────────────────────────────────────────
   // 每条职业专属支线掷 50~100: 掷(51) 返回 1~51, 减 1 后加 50 = 50~100。
@@ -230,7 +226,7 @@ export function computeSettlement(
   let 更新后CR = 输入.CR + CR变动;
   if (更新后CR >= 10) 更新后CR = 3;                   // 上限 10: 达到即回调至 3
   更新后CR = Math.min(10, Math.max(1, 更新后CR));      // 再 clamp 到 1~10
-  const 更新后回廊态度 = CR分档(更新后CR)[0];
+  const 更新后回廊态度 = CR区间(更新后CR).态度;
 
   // ── 周期 / 时间 / 资格分累加（规则第十一步）──────────────────────────
   // 与 `阶数` 同一道口径: 缺失/越界一律抛错, 绝不 `|| 1` 静默按「周期 1」算 ——
@@ -247,8 +243,8 @@ export function computeSettlement(
   return {
     评价等级: 输入.评价等级,
     评价倍率,
-    CR态度,
-    CR奖励倍率,
+    CR态度: 档.态度,
+    CR奖励倍率: 档.结算倍率,
     位阶修正,
     基础EXP汇总: 输入.基础EXP汇总,
     基础UP汇总: 输入.基础UP汇总,

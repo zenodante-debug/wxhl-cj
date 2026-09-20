@@ -3,6 +3,7 @@ import { buildRefreshPrompt, buildRepliesPrompt, buildThreadDetailPrompt, type F
 import { WORKSHOP_WORLDBOOK_NAME, PvPSaveSchema, type WorkshopCard, type PvPSave } from './data'
 import { extractContractSave, buildIntroPrompt, tierOf, generateDefaultAppearance, buildBattleIntroMessage } from './workshop'
 import { rollBuild, rollRewards, rollDie, 归一位阶, type BuildRoll, type RewardSet, type RollRecord } from './dice'
+import { 基准等级, 生机评估 } from './crTable'
 import { DungeonGenResultSchema, assemblePanelText, mapToVariables, type DungeonGenResult, type PlayerBrief } from './dungeonRules'
 import { buildDungeonPrompt, buildEnterPrompt, buildEnemyPrompt } from './dungeonGen'
 import { EnemyGenResultSchema, mapEnemyToVariables, assembleEnemyPanelFromEntity, 前端已代算, type GeneratedEnemy } from './enemyRules'
@@ -1830,7 +1831,8 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
       const { player, text: playerText, 队伍最高等级 } = readPlayerBrief()
       const wb = await forumStore.getWorldbookContent()
       const 匹配池 = buildMatchPool(player.CR, player.阶位)
-      const prompt = buildDungeonPrompt(entry.build, [...entry.buildRecords, ...entry.rewardRecords], playerText, wb, 匹配池, player.阶位, 队伍最高等级)
+      // 生机评估: 按 CR 档取出的凶险判定, 只给 AI 定调（数值那一半在敌人生成时由基准等级偏移落地）
+      const prompt = buildDungeonPrompt(entry.build, [...entry.buildRecords, ...entry.rewardRecords], playerText, wb, 匹配池, player.阶位, 队伍最高等级, 生机评估(player.CR))
       const raw = await aiGenerate(cfg, prompt, {
         name: 'dungeon_generation',
         value: JSON.parse(JSON.stringify(z.toJSONSchema(DungeonGenResultSchema, { io: 'input' }))),
@@ -1867,7 +1869,10 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     try {
       const { player, text: playerText } = readPlayerBrief()
       const wb = await forumStore.getWorldbookContent()
-      const prompt = buildEnemyPrompt(entry.build, playerText, wb, player.等级)
+      // 基准等级 = 玩家等级 + CR 档偏移。**经 crTable.基准等级 算** ——
+      // 与 `mapToVariables` 写进 `当前副本元数据.基准等级` 的是同一个函数、同一组输入,
+      // 所以「存档里写的基准等级」与「敌人实际按哪个基准等级生成」不可能漂移。
+      const prompt = buildEnemyPrompt(entry.build, playerText, wb, 基准等级(player.等级, player.CR))
       const raw = await aiGenerate(cfg, prompt, {
         name: 'enemy_generation',
         value: JSON.parse(JSON.stringify(z.toJSONSchema(EnemyGenResultSchema, { io: 'input' }))),

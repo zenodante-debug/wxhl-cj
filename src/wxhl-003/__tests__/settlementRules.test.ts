@@ -78,11 +78,20 @@ describe('computeSettlement · 倍率', () => {
     expect(r.最终UP).toBe(50 * 2.0 * 1.5 * 3);     // 450
   });
 
-  it('CR 取 Math.floor 后分档（2.5 落到 2 → 漠视）', () => {
-    expect(computeSettlement({ ...基准输入, CR: 2.5 }, 满骰()).CR态度).toBe('漠视');
-    expect(computeSettlement({ ...基准输入, CR: 3.0 }, 满骰()).CR态度).toBe('观察');
-    expect(computeSettlement({ ...基准输入, CR: 9.9 }, 满骰()).CR态度).toBe('期待');
-    expect(computeSettlement({ ...基准输入, CR: 10 }, 满骰()).CR态度).toBe('炼狱');
+  it('CR 按区间分档, 不是 Math.floor（4.3 / 6.2 / 8.4 三处 floor 会落到低一档）', () => {
+    const 态度 = (CR: number) => computeSettlement({ ...基准输入, CR }, 满骰()).CR态度;
+    // 这三处 floor 分别得 4 / 6 / 8 → 观察 / 关注 / 重视, 全是错的（旧实现正是如此）。
+    // CR 变动是 ±0.5/±0.3, 这些值非常容易落到 —— 所以这三分界点是本次整改的正题。
+    expect(态度(4.3)).toBe('关注');
+    expect(态度(6.2)).toBe('重视');
+    expect(态度(8.4)).toBe('期待');
+    // 新旧表在别处仍一致的边界
+    expect(态度(2.5)).toBe('漠视');
+    expect(态度(3.0)).toBe('观察');
+    expect(态度(4.0)).toBe('观察');
+    expect(态度(4.1)).toBe('关注');
+    expect(态度(9.9)).toBe('期待');
+    expect(态度(10)).toBe('炼狱');
   });
 
   it('D 级 ×0.7, 一阶位阶修正 ×1', () => {
@@ -217,7 +226,7 @@ describe('computeSettlement · 第 2 轮补钉', () => {
   it('CR奖励倍率六档数值都钉住（把炼狱 15.0 改成 150 曾全绿）', () => {
     const 倍率 = (CR: number) => computeSettlement({ ...基准输入, CR }, 满骰()).CR奖励倍率;
     expect(倍率(1.0)).toBe(1.0);
-    expect(倍率(2.0)).toBe(1.0);    // 漠视（2.0 的 floor 边界, 2.5 之外此前没覆盖）
+    expect(倍率(2.0)).toBe(1.0);    // 漠视（2.0 与 2.5 都在 1.0~2.9 内）
     expect(倍率(3.0)).toBe(1.2);    // 观察
     expect(倍率(4.0)).toBe(1.2);
     expect(倍率(5.0)).toBe(1.5);    // 关注
