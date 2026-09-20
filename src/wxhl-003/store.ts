@@ -2230,6 +2230,9 @@ export interface SettlementPreview {
   已写入: boolean
   /**
    * 写入**成功且回读校验通过**。与 `已写入` 互斥: 后者专指「写了, 但没核对上」这一失败态。
+   * 互斥由代码强制（不是约定）: `writeSettlement` 成功路径上 `toastr.success` 抛错即会改走
+   * catch 打上 `已写入`, 所以本标记必须在 `toastr.success` **之后**才置位; 且 `writeSettlement`
+   * 与 `fillInput` 都先判 `已写入` 早退, 于是两个标记不会同时为真、任一为真都一律不放行。
    *
    * 写入成功后**预览不销毁**（与 `已写入` 一样保留), 理由有二:
    * 1. 保留 `结算空间提示词` 才能让玩家在写入后还点得到「填入输入框」（它正是写在预览里的）;
@@ -2257,7 +2260,13 @@ export const useSettlementStore = defineStore('settlement', () => {
   const generating = ref(false)
   const writing = ref(false)
   const lastError = ref('')
-  /** 当前预览; 为 null = 尚未结算。写入成功后清空（结算是一次性的） */
+  /**
+   * 当前预览; 为 null = 尚未结算。
+   *
+   * 写入成功后**不清空** —— 只标记 `写入完成` 并把写入入口锁死。保留它有两个用处:
+   * 「填入输入框」用的 `结算空间提示词` 与可复制的面板文本都在这份预览里。
+   * 唯一的清空点是 `reset()`（= 视图的「放弃本次结算」）。
+   */
   const settlement = ref<SettlementPreview | null>(null)
 
   function reset() {
@@ -2380,6 +2389,12 @@ export const useSettlementStore = defineStore('settlement', () => {
     if (!预览) { lastError.value = '请先结算'; return false }
     // 累加语义下, 同一份预览写第二次 = 整份结算应用两次（数值翻倍且不可撤销）。
     // 视图的 `:disabled` 是第一道; 这里是**不看视图也拦得住**的那一道（光改文案挡不住手快的人）。
+    // **先判 `已写入`**: 那个标记同样意味着「变量已经落进存档」, 所以它也必须挡住重复写入 ——
+    // 否则「已写入 与 写入完成 互斥」就只是注释里的约定, 而不是代码事实。
+    if (预览.已写入) {
+      lastError.value = '本次结算已提交（回读校验失败），不能重复写入，请先读存档确认'
+      return false
+    }
     if (预览.写入完成) { lastError.value = '本次结算已经写入存档，不能重复写入'; return false }
 
     writing.value = true
@@ -2425,8 +2440,14 @@ export const useSettlementStore = defineStore('settlement', () => {
       // 结算是一次性的: 副本资料已被清空, 同一份面板再写一次只会把刚清空的资料重新填回去。
       // 所以**保留预览但标记 写入完成**, 并把写入入口锁死（本函数开头的守卫 + 视图的 :disabled）——
       // 保留预览是为了让玩家还能拿到「填入输入框」的提示词, 那是写入之后才该做的事。
-      预览.写入完成 = true
       toastr.success('副本结算已写入')
+      // ⚠️ 顺序要紧: `写入完成` 必须落在 `toastr.success` **之后**。
+      // 两者在同一个 try 里 —— 若 toastr 抛错（全局缺失/异常）, 控制权会走 catch, 而那时
+      // `已提交` 已是 true, catch 会给预览打上 `已写入`（回读失败）标记。若这里先打了 `写入完成`,
+      // 一次回读**通过**的写入就会同时带上两个标记: 提示谎报「回读校验失败」、放弃被禁（预览清不掉）、
+      // 而填入口却仍可点（`!写入完成` 为 false）—— 「已写入态关闭填入口」的设计随之失效。
+      // 放在 toastr 之后, 该场景只会退化成一次保守的回读失败态（两个标记互斥, 一律不放行）。
+      预览.写入完成 = true
       return true
     } catch (e: any) {
       const 原因 = e?.message || String(e)
@@ -2460,14 +2481,16 @@ export const useSettlementStore = defineStore('settlement', () => {
   async function fillInput(): Promise<boolean> {
     const 预览 = settlement.value
     if (!预览) { lastError.value = '请先结算'; return false }
+    // 先判 `已写入`（回读失败）: 它同样意味着变量已经落进存档, 但画面上的数与存档里的数
+    // **可能不同源** —— 把「结算已完成、数字是这些」讲给 AI 听正是本模块最忌讳的事, 不放行。
+    if (预览.已写入) {
+      lastError.value = '本次结算已提交但回读校验失败，请先读存档确认，再填入输入框'
+      toastr.info('请先读存档确认（明细见上方红框），不要直接重试结算')
+      return false
+    }
     if (!预览.写入完成) {
-      if (预览.已写入) {
-        lastError.value = '本次结算已提交但回读校验失败，请先读存档确认，再填入输入框'
-        toastr.info('请先读存档确认（明细见上方红框），不要直接重试结算')
-      } else {
-        lastError.value = '请先写入存档，再填入输入框'
-        toastr.info('请先点「确认结算」')
-      }
+      lastError.value = '请先写入存档，再填入输入框'
+      toastr.info('请先点「确认结算」')
       return false
     }
     const text = 预览.结算空间提示词

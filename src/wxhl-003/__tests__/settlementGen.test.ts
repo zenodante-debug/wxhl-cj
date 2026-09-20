@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { buildSettlementPrompt, buildSettlementEnterPrompt } from '../settlementGen';
-import { computeSettlement, type SettlementGenResult, type SettlementSnapshot } from '../settlementRules';
+import { assembleSettlementPanel, computeSettlement, type SettlementGenResult, type SettlementSnapshot } from '../settlementRules';
+import { SETTLEMENT_RULES } from '../data';
 
 describe('buildSettlementPrompt', () => {
   const p = buildSettlementPrompt('契约者: 刘林', '[玩家]: 打完了', '世界书内容');
@@ -145,16 +146,26 @@ describe('buildSettlementEnterPrompt', () => {
     expect(快照.当前PEXP + c.PEXP).not.toBe(c.PEXP);
   });
 
-  it('第二组: 掉落 / 称号 / 成就 / 隐藏任务公示 / 史诗记录 / 现实时间 都在场', () => {
+  it('第二组: 掉落 / 称号 / 史诗记录 / 现实时间 都在场', () => {
     expect(p).toContain('- 掉落清单: 血刃（金色｜STR+5｜流血）×1');
     expect(p).toContain('- 称号获得: 血夜行者');
     expect(p).toContain('- 称号效果: 嗜血：击杀回血');
     expect(p).toContain(`- 史诗记录: ${快照.副本名称} · ${c.评价等级} · ${假AI.史诗记录}`);
     expect(p).toContain(`- 现实时间: ${c.新现实日期} ${快照.当前现实时间}`);
-    // 达成与否拿 AI 名单比对快照全量清单, 与面板同一口径
-    expect(p).toContain('- 副本成就已达成: 初见（奖励: 20 UP + 40 EXP + 2 RP）');
-    expect(p).toContain('- 副本成就未达成: 血雨行者（奖励: 500 UP + 900 EXP）');
-    expect(p).toContain('- 隐藏任务公示: 旧日回响（已完成 · 奖励: 80 UP + 150 EXP）、无人知晓（未触发 · 奖励: 999 UP + 999 EXP）');
+  });
+
+  it('第二组: 成就 / 隐藏任务公示与结算面板**逐字同口径**（列 / 分隔符 / 空值占位都一致）', () => {
+    // 「同面板口径」不是「看起来像」: 把两侧同一行的**值**取出来逐字比。
+    // 任一侧改了列（难度 / 完成描述 / 达成条件）、分隔符（；/ 、/ ｜）或空值占位文案 → 此条即红。
+    // 这也是「两份格式助手拷贝不许漂开」的钉子（本次审查明确不合并这两份拷贝, 只锁行为一致）。
+    const 面板 = assembleSettlementPanel(c, 假AI, 快照);
+    const 取值 = (文本: string, 前缀: string) => (文本.split('\n').find(l => l.startsWith(前缀)) ?? '').slice(前缀.length);
+    for (const 标签 of ['副本成就已达成', '副本成就未达成', '隐藏任务公示']) {
+      expect(取值(p, '- ' + 标签 + ': ')).toBe(取值(面板, '## ' + 标签 + ': '));
+    }
+    // 反退化: 这三行都不是空串（否则「两侧都是空」也会绿）
+    expect(取值(p, '- 副本成就已达成: ')).not.toBe('');
+    expect(取值(p, '- 隐藏任务公示: ')).not.toBe('');
   });
 
   it('第二组: 同名掉落先聚合再打印（与面板 / 写入清单同一口径）', () => {
@@ -171,10 +182,11 @@ describe('buildSettlementEnterPrompt', () => {
   });
 
   it('第三组: 硬约束逐字在场（整句, 不被 ** 断开）', () => {
-    // 这四句是本功能的核心 —— 规则原文里有整套结算流程, AI 看到「结算」极可能自己再跑一遍,
+    // 这几句是本功能的核心 —— 规则原文里有整套结算流程, AI 看到「结算」极可能自己再跑一遍,
     // 而本模块是累加语义: 重复应用会让玩家数值翻倍且不可撤销。逐字断言, 删一句即红。
     expect(p).toContain('本次副本的结算已经由系统全部执行完毕');
     expect(p).toContain('所有变量都已经写进存档了');
+    expect(p).toContain('所以下面五条是死命令, 必须逐条遵守');
     expect(p).toContain('1. 不要再执行 <副本结算> 的任何结算步骤。结算已经结束了 —— 没有第二次结算。');
     expect(p).toContain('2. 不要再修改任何变量。不要 insert、不要 replace、不要 delta、不要 set 任何字段, 一个都不要改。');
     expect(p).toContain('3. 不要再自己重算任何数值。');
@@ -182,11 +194,37 @@ describe('buildSettlementEnterPrompt', () => {
     expect(p).toContain('本次完全不适用, 请彻底忽略它。');
   });
 
+  it('第三组: 约束力最强的那两句逐字在场（此前零覆盖 —— 删掉它们其余全绿）', () => {
+    // 1) 违背后果句: 只有把「再加一倍 / 无法撤销 / 毁存档」讲明白, 模型才会当真。
+    expect(p).toContain('会让玩家的 EXP / UP / RP / PEXP / 资格分在已结算的基础上再加一倍');
+    expect(p).toContain('而这无法撤销, 会直接毁掉玩家的存档');
+    // 2) 「结算」二字的特别提醒 —— 本 prompt 所处的场景里最容易被模型踩的那个坑。
+    expect(p).toContain('不要因为你看到的剧情里有「结算」二字, 就再走一遍流程');
+  });
+
+  it('第三组: 显式禁止输出结算面板（规则原文末尾的 <Settlement Beautification> 格式）', () => {
+    expect(p).toContain('只输出叙事, 不要输出任何结算面板');
+    expect(p).toContain('不要输出 <Settlement Beautification> 格式的文本');
+    expect(p).toContain('也不要输出「## 名称: 值」式的结算行');
+  });
+
   it('第三组: 不内联规则原文（不给 AI 任何可以照着重跑的材料）', () => {
-    // '第一步_评价判定' 是 SETTLEMENT_RULES 里的一句话标记（见上方 buildSettlementPrompt 的测试）——
-    // 它不出现在这里, 证明本 prompt 有意**没有**把结算规则原文塞进去。
-    expect(p).not.toContain('第一步_评价判定');
-    expect(p).not.toContain('SETTLEMENT_RULES');
+    // 1) 整段: 若有人把 SETTLEMENT_RULES 原样塞进来, 这条即红。
+    //    （今天恒绿 —— 函数体根本不引用它; 它钉的是**将来**内部改动。）
+    expect(p).not.toContain(SETTLEMENT_RULES);
+    // 2) 分散标记: 只内联规则的**一部分**（例如只塞「第八步_掉落结算」或格式段）也必须红 ——
+    //    单钉一个标记时, 部分内联不会触发。这几个标记散布在规则的第一/三/六/八/十一步。
+    for (const 标记 of [
+      '第一步_评价判定',
+      '第三步_EXP与UP基础核算',
+      '第六步_PEXP结算',
+      '第八步_掉落结算',
+      '第十一步_副本经历与面板更新',
+    ]) {
+      expect(p).not.toContain(标记);
+    }
+    // 反退化: 证明上面这些标记确实是规则的一部分（否则「都不含」在规则改名后也会绿）
+    expect(SETTLEMENT_RULES).toContain('第八步_掉落结算');
   });
 
   it('第四组: 请求叙事结算空间, 并在末尾列出结算后流程的两个选项', () => {
