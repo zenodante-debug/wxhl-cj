@@ -186,11 +186,64 @@ function tavern_sync(compiler: webpack.Compiler) {
   });
 }
 
+/** 脚本项目目录下的 CDN 加载器/手机端兼容补丁外壳文件, 存在时自动注入构建产物首尾 */
+interface WxhlWrapper {
+  prelude?: string;
+  patch?: string;
+}
+function find_wxhl_wrapper(entry: Entry): WxhlWrapper {
+  const dir = path.dirname(path.join(import.meta.dirname, entry.script));
+  const prelude = path.join(dir, 'cdn-loader.js');
+  const patch = path.join(dir, 'mobile-compat.js');
+  return {
+    prelude: fs.existsSync(prelude) ? prelude : undefined,
+    patch: fs.existsSync(patch) ? patch : undefined,
+  };
+}
+
+function wxhl_wrapper(wrapper: WxhlWrapper) {
+  return (compiler: webpack.Compiler) => {
+    compiler.hooks.thisCompilation.tap('wxhl_wrapper', compilation => {
+      // 外壳文件不在模块依赖图里, 手动登记以便 --watch 时改动也能触发重新编译
+      [wrapper.prelude, wrapper.patch].forEach(file => {
+        if (file !== undefined) compilation.fileDependencies.add(file);
+      });
+      compilation.hooks.processAssets.tap(
+        { name: 'wxhl_wrapper', stage: webpack.Compilation.PROCESS_ASSETS_STAGE_REPORT },
+        () => {
+          const asset_name = 'index.js';
+          const asset = compilation.getAsset(asset_name);
+          if (!asset) return;
+          const source = asset.source.source();
+          if (typeof source !== 'string') return;
+          // sourcemap 注释始终保持在文件末尾
+          const marker = '//# sourceMappingURL=';
+          const cut = source.lastIndexOf(marker);
+          const body = (cut >= 0 ? source.slice(0, cut) : source).trimEnd();
+          const map_comment = cut >= 0 ? source.slice(cut).trimEnd() : '';
+          const parts: string[] = [];
+          if (wrapper.prelude !== undefined) parts.push(fs.readFileSync(wrapper.prelude, 'utf-8').trimEnd());
+          parts.push(body);
+          if (wrapper.patch !== undefined) parts.push(fs.readFileSync(wrapper.patch, 'utf-8').trimEnd());
+          if (map_comment !== '') parts.push(map_comment);
+          compilation.updateAsset(asset_name, new webpack.sources.RawSource(parts.join('\n\n') + '\n'));
+          console.info(
+            `\x1b[36m[wxhl_wrapper]\x1b[0m 已注入外壳: ${[wrapper.prelude && 'CDN加载器', wrapper.patch && '手机端补丁']
+              .filter(Boolean)
+              .join(' + ')}`,
+          );
+        },
+      );
+    });
+  };
+}
+
 function parse_configuration(entry: Entry): (_env: any, argv: any) => webpack.Configuration {
   const should_obfuscate = fs
     .readFileSync(path.join(import.meta.dirname, entry.script), 'utf-8')
     .includes('@obfuscate');
   const script_filepath = path.parse(entry.script);
+  const wrapper = find_wxhl_wrapper(entry);
 
   return (_env, argv) => ({
     experiments: {
@@ -485,7 +538,8 @@ function parse_configuration(entry: Entry): (_env: any, argv: any) => webpack.Co
               }),
             ]
           : [],
-      ),
+      )
+      .concat(wrapper.prelude !== undefined || wrapper.patch !== undefined ? [{ apply: wxhl_wrapper(wrapper) }] : []),
     optimization: {
       minimize: true,
       minimizer: [
@@ -541,6 +595,12 @@ function parse_configuration(entry: Entry): (_env: any, argv: any) => webpack.Co
         fs.existsSync(request)
       ) {
         return callback();
+      }
+
+      // CDN 加载器外壳存在时, pinia/klona 由外壳在运行时经多 CDN 回退加载后填充到全局变量,
+      // vue 仍复用酒馆页面已有的 Vue 全局对象 (外壳会在缺失时从 CDN 加载并补上)
+      if (wrapper.prelude !== undefined && (request === 'pinia' || request === 'klona')) {
+        return callback(null, 'var __wxhl' + (request === 'pinia' ? 'Pinia' : 'Klona'));
       }
 
       if (

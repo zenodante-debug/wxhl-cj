@@ -2,7 +2,7 @@ import { type ForumThread, type ForumPost, INITIAL_THREADS, RANK_BOARDS, type Ca
 import { buildRefreshPrompt, buildRepliesPrompt, buildThreadDetailPrompt, type ForumSectionKey } from './forumPrompts'
 import { WORKSHOP_WORLDBOOK_NAME, PvPSaveSchema, type WorkshopCard, type PvPSave } from './data'
 import { extractContractSave, buildIntroPrompt, tierOf, generateDefaultAppearance, buildBattleIntroMessage } from './workshop'
-import { rollBuild, rollRewards, rollDie, 归一位阶, type BuildRoll, type RewardSet, type RollRecord } from './dice'
+import { rollBuild, rollRewards, rollDie, 归一位阶, applyBuildOverrides, type BuildOverrides, type BuildRoll, type RewardSet, type RollRecord } from './dice'
 import { 基准等级, 生机评估 } from './crTable'
 import { DungeonGenResultSchema, assemblePanelText, mapToVariables, type DungeonGenResult, type PlayerBrief } from './dungeonRules'
 import { buildDungeonPrompt, buildEnterPrompt, buildEnemyPrompt } from './dungeonGen'
@@ -1692,6 +1692,8 @@ export interface RolledDungeon {
   written?: { at: string; messageId: number | 'latest' }
   /** 敌人生成的产物, 每个副本条目独立; 未生成时为 undefined */
   enemies?: EnemySlot[]
+  /** 自选模式: 契约者指定的世界观名; 随机掷骰条目为 undefined */
+  customWorld?: string
 }
 
 function loadRolledDungeons(): RolledDungeon[] {
@@ -1815,6 +1817,34 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     }
   }
 
+  /** 自选掷骰: 照掷全部骰子, 再用契约者自选覆盖指定项, 并锚定世界观 */
+  function doCustomRoll(overrides: BuildOverrides, worldview: string) {
+    rolling.value = true
+    lastError.value = ''
+    selectedId.value = null
+    try {
+      const { 副本周期, player } = readPlayerBrief()
+      const rolled = rollBuild(副本周期, player.阶位)
+      const { build, records: buildRecords } = applyBuildOverrides(rolled.build, rolled.records, overrides)
+      const { rewards, records: rewardRecords } = rollRewards()
+      const maxId = rolledDungeons.value.reduce((m, d) => Math.max(m, d.id), 0)
+      const entry: RolledDungeon = {
+        id: maxId + 1,
+        createdAt: nowStamp(),
+        buildRecords,
+        rewardRecords,
+        build,
+        rewards,
+        customWorld: worldview.trim() || undefined,
+      }
+      rolledDungeons.value.unshift(entry)
+    } catch (e: any) {
+      lastError.value = e.message || '自选掷骰失败'
+    } finally {
+      rolling.value = false
+    }
+  }
+
   /** 生成: 用当前展示条目的掷骰结果调 AI 产出副本内容 */
   async function generate() {
     if (generating.value) return
@@ -1832,7 +1862,7 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
       const wb = await forumStore.getWorldbookContent()
       const 匹配池 = buildMatchPool(player.CR, player.阶位)
       // 生机评估: 按 CR 档取出的凶险判定, 只给 AI 定调（数值那一半在敌人生成时由基准等级偏移落地）
-      const prompt = buildDungeonPrompt(entry.build, [...entry.buildRecords, ...entry.rewardRecords], playerText, wb, 匹配池, player.阶位, 队伍最高等级, 生机评估(player.CR))
+      const prompt = buildDungeonPrompt(entry.build, [...entry.buildRecords, ...entry.rewardRecords], playerText, wb, 匹配池, player.阶位, 队伍最高等级, 生机评估(player.CR), entry.customWorld)
       const raw = await aiGenerate(cfg, prompt, {
         name: 'dungeon_generation',
         value: JSON.parse(JSON.stringify(z.toJSONSchema(DungeonGenResultSchema, { io: 'input' }))),
@@ -1872,7 +1902,7 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
       // 基准等级 = 玩家等级 + CR 档偏移。**经 crTable.基准等级 算** ——
       // 与 `mapToVariables` 写进 `当前副本元数据.基准等级` 的是同一个函数、同一组输入,
       // 所以「存档里写的基准等级」与「敌人实际按哪个基准等级生成」不可能漂移。
-      const prompt = buildEnemyPrompt(entry.build, playerText, wb, 基准等级(player.等级, player.CR))
+      const prompt = buildEnemyPrompt(entry.build, playerText, wb, 基准等级(player.等级, player.CR), entry.customWorld)
       const raw = await aiGenerate(cfg, prompt, {
         name: 'enemy_generation',
         value: JSON.parse(JSON.stringify(z.toJSONSchema(EnemyGenResultSchema, { io: 'input' }))),
@@ -2082,7 +2112,7 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
   return {
     rolledDungeons, rolling, generating, writing, lastError, current, select,
     generatingEnemies, writingEnemies, generateEnemies, writeEnemies,
-    doRoll, generate, reroll, writeToSave, fillInput, remove,
+    doRoll, doCustomRoll, generate, reroll, writeToSave, fillInput, remove,
   }
 })
 

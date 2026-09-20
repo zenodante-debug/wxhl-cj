@@ -38,9 +38,20 @@ export function buildDungeonPrompt(
   阶位: string,
   队伍最高等级: number,
   生机评估: string,
+  自选世界观?: string,
 ): string {
+  const 世界观锚定 = 自选世界观
+    ? `
+============ 世界观锚定（契约者指定, 强制） ============
+本次副本的世界观已由契约者亲自指定为《${自选世界观}》。
+- 你必须把上述骰值（副本类型/题材大类/时代背景/核心特色标签/副模块）全部翻译进《${自选世界观}》的世界观里;
+  若骰值字面与该世界观冲突, 以该世界观为容器做等价转译, 而不是更换世界观。
+- 「IP热度」骰本次失效: 世界观已被指定, 不要据此更换或稀释它。
+- 「副本来源」字段填《${自选世界观}》（媒介来源）。
+`
+    : '';
   return `${DUNGEON_GENERATION_RULES}
-
+${世界观锚定}
 ============ 本次掷骰已锁定, 严禁改动 ============
 以下骰值由系统用密码学随机数掷定, 已经锁定。你**严禁**改动、重掷、忽略、四舍五入或自行编造任何数值。
 你唯一的职责是把这些骰值翻译成符合规则的内容。若某条骰值与你的构思冲突, 以骰值为准。
@@ -182,7 +193,13 @@ export function buildEnterPrompt(result: DungeonGenResult, build: BuildRoll): st
  * @param worldbookText 选中的世界书内容, 可为空
  * @param 基准等级      系统给定的主线基准等级, AI 不得改动
  */
-export function buildEnemyPrompt(build: BuildRoll, playerText: string, worldbookText: string, 基准等级: number): string {
+export function buildEnemyPrompt(
+  build: BuildRoll,
+  playerText: string,
+  worldbookText: string,
+  基准等级: number,
+  自选世界观?: string,
+): string {
   // 按规则原文步骤一算好三个角色的等级, 直接把结果也写进 prompt, 减少 AI 算错的空间
   const 杂兵等级 = Math.round(基准等级 * 0.6);
   const 精英等级 = Math.round(基准等级 * 0.9);
@@ -208,7 +225,7 @@ ${BUILD_DESIGN_RULES}
 （隐藏BOSS 由 GM 在隐藏任务成功触发后单独裁定, 固有角色严格按原著锚定）, 本次不属于你的职责。
 
 ============ 本次副本背景（三者必须体现其世界观与画风） ============
-- 副本类型: ${build.副本类型}
+${自选世界观 ? `- 契约者指定世界观: 《${自选世界观}》（强制 —— 三者的技能、装备、天赋、血统、称号必须全部出自该世界观）\n` : ''}- 副本类型: ${build.副本类型}
 - 媒介来源: ${build.媒介来源}
 - 题材大类: ${build.题材大类}
 - 时代背景: ${build.时代背景}

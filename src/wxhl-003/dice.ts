@@ -255,6 +255,99 @@ export function rollBuild(副本周期: number, 阶位: string): { build: BuildR
 }
 
 // ================================================================
+// 自选覆盖（副本生成 · 自选模式）
+// ================================================================
+
+/** 自选覆盖项: 未提供的字段保持掷骰结果 */
+export interface BuildOverrides {
+  题材大类?: string;
+  时代背景?: string;
+  核心特色标签?: string;
+  副模块?: string;
+}
+
+/** 从骰表反查序号（1 起）; 值不在表内说明调用方传了表外数据, 直接抛错 */
+function indexInTable(table: readonly string[], value: string, 字段名: string): number {
+  const idx = table.indexOf(value);
+  if (idx < 0) throw new Error(`自选${字段名}「${value}」不在骰表内`);
+  return idx + 1;
+}
+
+/** 把 records 里对应标签的条目替换为「自选」标记; 找不到则补一条 */
+function markRecordSelfPick(records: RollRecord[], 标签: string, 骰值: number, 映射: string): RollRecord[] {
+  const entry: RollRecord = { 标签, 表达式: '自选', 骰值, 映射 };
+  const idx = records.findIndex(r => r.标签 === 标签);
+  if (idx < 0) return [...records, entry];
+  return records.map((r, i) => (i === idx ? entry : r));
+}
+
+/**
+ * 把自选覆盖应用到掷骰结果上（纯函数, 不改传入对象）。
+ * 覆盖会同步修正骰值映射, 并按新标签重算日常调和规则:
+ * 选 41~50 日常标签 → 强制和平; 从日常换回非日常 → 按原始副本类型骰恢复。
+ */
+export function applyBuildOverrides(
+  input: BuildRoll,
+  inputRecords: RollRecord[],
+  overrides: BuildOverrides,
+): { build: BuildRoll; records: RollRecord[] } {
+  let build = { ...input };
+  let records = [...inputRecords];
+
+  if (overrides.题材大类 !== undefined) {
+    const 骰 = indexInTable(GENRES, overrides.题材大类, '题材大类');
+    build.题材大类 = overrides.题材大类;
+    records = markRecordSelfPick(records, '题材大类', 骰, overrides.题材大类);
+  }
+  if (overrides.时代背景 !== undefined) {
+    const 骰 = indexInTable(ERAS, overrides.时代背景, '时代背景');
+    build.时代背景 = overrides.时代背景;
+    records = markRecordSelfPick(records, '时代背景', 骰, overrides.时代背景);
+  }
+  if (overrides.副模块 !== undefined) {
+    const 骰 = indexInTable(SUB_MODULES, overrides.副模块, '副模块');
+    build.副模块 = overrides.副模块;
+    build.副模块骰 = 骰;
+    records = markRecordSelfPick(records, '副模块', 骰, overrides.副模块);
+  }
+  if (overrides.核心特色标签 !== undefined) {
+    const 骰 = indexInTable(FEATURE_TAGS, overrides.核心特色标签, '核心特色标签');
+    build.核心特色标签 = overrides.核心特色标签;
+    build.核心特色标签骰 = 骰;
+    records = markRecordSelfPick(records, '核心特色标签', 骰, overrides.核心特色标签);
+  }
+
+  // 按（可能被覆盖的）标签骰重算日常调和规则, 与 rollBuild 的判定口径一致
+  const 是日常副本 = build.核心特色标签骰 >= 41;
+  const 原骰副本类型: BuildRoll['副本类型'] =
+    build.副本类型骰 === 2 ? '阵营' : build.副本类型骰 === 3 || build.副本类型骰 === 4 ? '血腥' : '和平';
+  let 副本类型被日常规则覆盖 = false;
+  let 副本类型 = 原骰副本类型;
+  if (是日常副本 && 副本类型 !== '和平') {
+    副本类型被日常规则覆盖 = true;
+    副本类型 = '和平';
+  }
+  // 覆盖记录先清后补, 保证「日常换非日常」时记录被移除
+  records = records.filter(r => r.标签 !== '副本类型（日常规则覆盖）');
+  if (副本类型被日常规则覆盖) {
+    records.push({
+      标签: '副本类型（日常规则覆盖）',
+      表达式: '规则 §6',
+      骰值: build.核心特色标签骰,
+      映射: '日常副本强制视为和平',
+    });
+  }
+
+  build = {
+    ...build,
+    副本类型,
+    副本类型被日常规则覆盖: 副本类型被日常规则覆盖 || undefined,
+    是日常副本,
+  };
+  return { build, records };
+}
+
+// ================================================================
 // 奖励骰与奖励文本
 // ================================================================
 
