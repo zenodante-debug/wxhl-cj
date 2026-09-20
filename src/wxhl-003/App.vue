@@ -713,19 +713,24 @@
 
       <div class="dc-actions">
         <button class="confirm-btn modify" @click="onCopySettlementPanel">复制面板文本</button>
-        <button class="confirm-btn reroll" :disabled="settlementStore.generating || settlementStore.writing || settlementStore.settlement.已写入" @click="onGenerateSettlement">
+        <!-- 写入成功后才可用: 本模块是累加语义, 结算必须真正落进存档, 面板上的数才与存档同源 -->
+        <button class="confirm-btn modify" :disabled="settlementStore.generating || settlementStore.writing || !settlementStore.settlement.写入完成" @click="onFillSettlementInput">
+          填入输入框
+        </button>
+        <button class="confirm-btn reroll" :disabled="settlementStore.generating || settlementStore.writing || settlementStore.settlement.已写入 || settlementStore.settlement.写入完成" @click="onGenerateSettlement">
           {{ settlementStore.generating ? '结算中...' : '🔄 重算' }}
         </button>
-        <button class="confirm-btn" :disabled="settlementStore.generating || settlementStore.writing || settlementStore.settlement.已写入" @click="onConfirmSettlement">
-          {{ settlementStore.settlement.已写入 ? '已写入（回读失败）' : (settlementStore.writing ? '写入中...' : '确认结算') }}
+        <button class="confirm-btn" :disabled="settlementStore.generating || settlementStore.writing || settlementStore.settlement.已写入 || settlementStore.settlement.写入完成" @click="onConfirmSettlement">
+          {{ settlementStore.settlement.已写入 ? '已写入（回读失败）' : (settlementStore.settlement.写入完成 ? '已写入存档' : (settlementStore.writing ? '写入中...' : '确认结算')) }}
         </button>
         <button class="confirm-btn reroll" :disabled="settlementStore.generating || settlementStore.writing || settlementStore.settlement.已写入" @click="onDiscardSettlement">
           放弃本次结算
         </button>
       </div>
-      <!-- 已写入 = 变量已经落进存档（只是回读没核对上）: 累加语义下重试会让整份结算翻倍, 重算/确认/放弃三个入口都锁掉 -->
-      <div class="set-hint">「放弃本次结算」只丢弃这份预览（面板文本将无法再复制），不会撤销已经写入存档的数值。</div>
+      <!-- 已写入 = 变量已经落进存档（只是回读没核对上）: 累加语义下重试会让整份结算翻倍, 重算/确认入口都锁掉 -->
+      <div class="set-hint">「放弃本次结算」只丢弃这份预览（面板文本与「填入输入框」的提示词将无法再取得），不会撤销已经写入存档的数值。</div>
       <div v-if="settlementStore.settlement.已写入" class="set-hint settle-warn">⚠ 本次结算已经写进存档（回读校验失败, 明细见上方红框）。累加语义下再次结算会让数值翻倍，请先读存档确认。</div>
+      <div v-else-if="settlementStore.settlement.写入完成" class="set-hint">✓ 本次结算已写入存档。点「填入输入框」把玩家送进回廊的结算空间（只填入、不发送）。重复结算会让数值翻倍，重算/确认入口已锁住。</div>
       <div v-else class="set-hint settle-warn">⚠ 确认后会写入存档并清空副本资料，不可撤销</div>
     </template>
   </div>
@@ -974,6 +979,8 @@ function openSettlement() {
 }
 async function onGenerateSettlement() { await settlementStore.generateSettlement() }
 async function onConfirmSettlement() { await settlementStore.writeSettlement() }
+/** 把「进入回廊结算空间」的提示词填入输入框（只填入不发送）; 守卫与提示都在 store 的 fillInput 里 */
+async function onFillSettlementInput() { await settlementStore.fillInput() }
 /**
  * 放弃当前预览（`reset()` 的唯一调用点）。
  *
@@ -984,7 +991,7 @@ async function onConfirmSettlement() { await settlementStore.writeSettlement() }
 function onDiscardSettlement() {
   if (!settlementStore.settlement) return
   if (settlementStore.settlement.已写入) return
-  if (!window.confirm('放弃这份结算预览？\n\n· 面板文本将无法再复制（本次 AI 费用不退）\n· 已写入存档的数值不会因此撤销\n\n确定放弃？')) return
+  if (!window.confirm('放弃这份结算预览？\n\n· 面板文本与「填入输入框」的提示词将无法再取得（本次 AI 费用不退）\n· 已写入存档的数值不会因此撤销\n\n确定放弃？')) return
   settlementStore.reset()
 }
 /** 复制结算面板（复用副本生成的面板复制逻辑, 只是文本来源不同） */

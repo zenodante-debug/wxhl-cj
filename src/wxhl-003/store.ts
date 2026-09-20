@@ -12,7 +12,7 @@ import {
   成就星数, 存在条目数,
   type SettlementGenResult, type SettlementSnapshot, type SettlementComputed,
 } from './settlementRules'
-import { buildSettlementPrompt } from './settlementGen'
+import { buildSettlementPrompt, buildSettlementEnterPrompt } from './settlementGen'
 
 const SK = 'wxhl003_settings'
 
@@ -2216,12 +2216,28 @@ export interface SettlementPreview {
   /** `assembleSettlementPanel` 的产物, 逐行照规则模板 */
   面板: string
   /**
+   * 「进入回廊结算空间」的提示词, 由 `buildSettlementEnterPrompt` 产出 ——
+   * 供 `fillInput` 填进酒馆输入框（只填入不发送）。
+   * 在 `generateSettlement` 里一次算好存下（它只读 computed / ai / 快照, 与面板同源）。
+   */
+  结算空间提示词: string
+  /**
    * `replaceMvuData` 已返回、但回读校验没过 —— 变量**已经写进存档**了, 只是没能核对上。
    *
    * 本模块是**累加**语义（旧值 + 增量）, 与 `writeToSave`/`writeEnemies` 的覆盖语义不同:
    * 覆盖语义下失败重试基本幂等, 这里重试会让 EXP/UP/RP/PEXP/资格分**翻倍**。视图据此禁用写入入口。
    */
   已写入: boolean
+  /**
+   * 写入**成功且回读校验通过**。与 `已写入` 互斥: 后者专指「写了, 但没核对上」这一失败态。
+   *
+   * 写入成功后**预览不销毁**（与 `已写入` 一样保留), 理由有二:
+   * 1. 保留 `结算空间提示词` 才能让玩家在写入后还点得到「填入输入框」（它正是写在预览里的）;
+   * 2. 面板文本仍可复制。
+   * 代价是必须把写入入口彻底锁死（视图的 `:disabled` + `writeSettlement` 开头的守卫）——
+   * 累加语义下, 同一份预览再写一次会把刚清空的副本资料重新填回去、并让数值翻倍。
+   */
+  写入完成: boolean
 }
 
 /**
@@ -2346,7 +2362,9 @@ export const useSettlementStore = defineStore('settlement', () => {
         计算结果,
         ai: parsed,
         面板: assembleSettlementPanel(计算结果, parsed, 快照),
+        结算空间提示词: buildSettlementEnterPrompt(计算结果, parsed, 快照),
         已写入: false,
+        写入完成: false,
       }
     } catch (e: any) {
       lastError.value = e.message || '结算失败'
@@ -2360,6 +2378,9 @@ export const useSettlementStore = defineStore('settlement', () => {
   async function writeSettlement(): Promise<boolean> {
     const 预览 = settlement.value
     if (!预览) { lastError.value = '请先结算'; return false }
+    // 累加语义下, 同一份预览写第二次 = 整份结算应用两次（数值翻倍且不可撤销）。
+    // 视图的 `:disabled` 是第一道; 这里是**不看视图也拦得住**的那一道（光改文案挡不住手快的人）。
+    if (预览.写入完成) { lastError.value = '本次结算已经写入存档，不能重复写入'; return false }
 
     writing.value = true
     lastError.value = ''
@@ -2401,8 +2422,10 @@ export const useSettlementStore = defineStore('settlement', () => {
         }
       }
 
-      // 结算是一次性的: 副本资料已被清空, 同一份面板再写一次只会把刚清空的资料重新填回去
-      settlement.value = null
+      // 结算是一次性的: 副本资料已被清空, 同一份面板再写一次只会把刚清空的资料重新填回去。
+      // 所以**保留预览但标记 写入完成**, 并把写入入口锁死（本函数开头的守卫 + 视图的 :disabled）——
+      // 保留预览是为了让玩家还能拿到「填入输入框」的提示词, 那是写入之后才该做的事。
+      预览.写入完成 = true
       toastr.success('副本结算已写入')
       return true
     } catch (e: any) {
@@ -2424,5 +2447,50 @@ export const useSettlementStore = defineStore('settlement', () => {
     }
   }
 
-  return { settlement, generating, writing, lastError, generateSettlement, writeSettlement, reset }
+  /**
+   * 把「进入回廊结算空间」的提示词填入酒馆输入框, **只填入、不发送**。
+   *
+   * 照 `useDungeonGenStore.fillInput` 同款: 先直接操作输入框并派发 input 事件（行为可预测）,
+   * 失败再退回 STScript `/setinput`（换行会截断命令, 故压成单行）。
+   *
+   * 守卫与副本生成的那一支同款, 但更严一档: 只有**写入成功且回读校验通过**（`写入完成`）才放行。
+   * 理由: 本模块是累加语义, 回读失败（`已写入`）意味着画面上的数与存档里的数**可能不同源** ——
+   * 那种状态下把「结算已完成、数字是这些」讲给 AI 听, 正是本模块最忌讳的「两份不同源的数」。
+   */
+  async function fillInput(): Promise<boolean> {
+    const 预览 = settlement.value
+    if (!预览) { lastError.value = '请先结算'; return false }
+    if (!预览.写入完成) {
+      if (预览.已写入) {
+        lastError.value = '本次结算已提交但回读校验失败，请先读存档确认，再填入输入框'
+        toastr.info('请先读存档确认（明细见上方红框），不要直接重试结算')
+      } else {
+        lastError.value = '请先写入存档，再填入输入框'
+        toastr.info('请先点「确认结算」')
+      }
+      return false
+    }
+    const text = 预览.结算空间提示词
+    if (!text) { lastError.value = '该预览没有结算空间提示词'; return false }
+    lastError.value = ''
+    try {
+      const $ta = $('#send_textarea')
+      if ($ta.length === 0) throw new Error('未找到输入框 #send_textarea')
+      $ta.val(text).trigger('input')
+      toastr.success('已填入输入框')
+      return true
+    } catch (e: any) {
+      try {
+        await triggerSlash('/setinput ' + text.replace(/\r?\n/g, ' '))
+        toastr.success('已填入输入框')
+        return true
+      } catch (_) {
+        lastError.value = e?.message || '填入输入框失败'
+        toastr.error('填入输入框失败: ' + lastError.value)
+        return false
+      }
+    }
+  }
+
+  return { settlement, generating, writing, lastError, generateSettlement, writeSettlement, fillInput, reset }
 })
