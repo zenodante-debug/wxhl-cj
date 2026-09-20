@@ -2376,13 +2376,13 @@ export function mountStatusbar(root: HTMLElement): () => void {
       const dunCount = Object.keys(d('契约者.副本角色', {})).length;
       $c.find('#door-status-identity').text('◆ Lv.' + d('契约者.头部.等级', 1) + ' · ' + d('契约者.头部.阶位', '一阶'));
       $c.find('#door-status-entity').text(`小队 ${sqKeys.length} · 副本 ${dunCount} · 契约者 ${conKeys.length}`);
-      $c.find('.mod-card.c-entity').toggleClass('alert', dunCount > 0);
+      $c.find('#door-status-entity').toggleClass('danger', dunCount > 0);
       const doorJobName = _.get(job, '名称', '无');
       $c.find('#door-status-jobtree').text(doorJobName && doorJobName !== '无' ? doorJobName : '未就职');
       const doorDgName = _.get(meta, '副本名称', '未生成');
       const dgActive = !!doorDgName && doorDgName !== '未生成' && doorDgName !== '无';
       $c.find('#door-status-dungeon').text(dgActive ? doorDgName : '无活跃副本');
-      $c.find('.mod-card.c-dungeon').toggleClass('alert', dgActive);
+      $c.find('#alert-dungeon').toggleClass('on', dgActive);
       $c.find('#door-status-map').text(d('契约者.头部.军衔', '列兵') + ' · ' + d('契约者.当前世界', '现实'));
 
       $c.find('#hud-hp').css('width', Math.min(hpPct, 100) + '%');
@@ -2501,8 +2501,8 @@ export function mountStatusbar(root: HTMLElement): () => void {
     }, 1000);
 
     /* ==================== 事件绑定 ==================== */
-    /* 模块卡 / 角色卡 → 展开对应模块面板 */
-    $c.on('click', '.mod-card, .hero-card', function (this: HTMLElement, e: JQuery.Event) {
+    /* 门洞 / 中央铭牌 → 展开对应模块面板 */
+    $c.on('click', '.door, .center-plate', function (this: HTMLElement, e: JQuery.Event) {
       e.stopPropagation();
       openModule($(this).data('target'));
     });
