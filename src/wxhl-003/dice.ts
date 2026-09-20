@@ -101,16 +101,57 @@ export interface BuildRoll {
   是日常副本: boolean;
 }
 
-/** 阶位的两种写法: schema 用汉字, TIER_ORDER 用阿拉伯数字 */
-const TIER_NAMES = ['一阶', '二阶', '三阶', '四阶', '五阶'];
-const TIER_NAMES_ARABIC = ['1阶', '2阶', '3阶', '4阶', '5阶'];
+/** 汉字数字 → 阿拉伯数字。含中文大写（壹贰叁肆伍）与口语/繁体「两」「兩」 */
+const 汉字数字: Record<string, number> = {
+  一: 1, 二: 2, 两: 2, 兩: 2, 三: 3, 四: 4, 五: 5,
+  壹: 1, 贰: 2, 貳: 2, 叁: 3, 參: 3, 肆: 4, 伍: 5,
+};
+
+/** 全角数字 → 半角数字（中文输入法下极易打出 `１阶` / `１`） */
+function 全角转半角(s: string): string {
+  return s.replace(/[０-９]/g, c => String.fromCharCode(c.charCodeAt(0) - 0xFEE0));
+}
 
 /**
- * 阶位写法归一: schema 用「一阶」, TIER_ORDER 用「1阶」; 返回 0..4, 未知返回 -1
+ * 阶位写法归一 → `0..4`（一阶..五阶）; 仍认不出来返回 `undefined`。
+ *
+ * 实现是「**先规范化字符串、再解析**」, 而不是一张枚举表 —— 枚举表只会越写越长,
+ * 且每加一种写法就要在每个调用点各补一遍。流水线:
+ *   去空白 → 全角转半角 → 去前导「第」 → 去尾部「阶」/「階」/「阶位」/「階位」
+ *   → 汉字数字转阿拉伯 → 解析 → 校验落在 `1..5`
+ * 于是 `一阶` / `1阶` / `一` / `1` / `第一阶` / `第1阶` / `１阶` / `一階` / `壹阶` /
+ * ` 三阶 ` / `五` 全部归到同一位阶。
+ *
+ * **认不出来的一律 `undefined`, 绝不猜**: `六阶` / `6` / `0` / `''` / `无` / `超脱` /
+ * `不在副本中` 都返回 `undefined`。失败策略由**调用方各自决定**（`tierIndexOf` 取 `-1`、
+ * `tierOf` 归末尾、面板印 `—`、榜单当一阶、结算抛错）—— 归一函数本身不做任何兜底。
+ */
+export function 归一位阶(阶位: unknown): number | undefined {
+  // 变量里已是数字时也认（AI 偶尔会把 `3` 写成数字而不是字符串）
+  if (typeof 阶位 === 'number') {
+    return Number.isInteger(阶位) && 阶位 >= 1 && 阶位 <= 5 ? 阶位 - 1 : undefined;
+  }
+  if (typeof 阶位 !== 'string') return undefined;
+  const s = 全角转半角(阶位.replace(/\s+/g, ''))
+    .replace(/^第/, '')
+    .replace(/(阶位|階位|阶|階)$/, '');
+  if (/^[0-9]+$/.test(s)) {
+    const n = Number(s);
+    return n >= 1 && n <= 5 ? n - 1 : undefined;
+  }
+  const n = 汉字数字[s];
+  return n === undefined ? undefined : n - 1;
+}
+
+/**
+ * 阶位写法归一: schema 用「一阶」, TIER_ORDER 用「1阶」; 返回 0..4, **未知返回 -1**。
+ *
+ * `-1` 是**本调用点自己的失败策略**（`isNewbieDungeon` 用它做 `=== 0` 判定, 未知即「不是新手」）,
+ * 与 `workshop.ts:tierOf` 的「归末尾」、面板的「印 `—`」、结算的「抛错」刻意不同 ——
+ * 归一本身交给 `归一位阶`, 这里只负责把 `undefined` 翻成 -1。
  */
 export function tierIndexOf(阶位: string): number {
-  const i = TIER_NAMES.indexOf(阶位);
-  return i !== -1 ? i : TIER_NAMES_ARABIC.indexOf(阶位);
+  return 归一位阶(阶位) ?? -1;
 }
 
 /**

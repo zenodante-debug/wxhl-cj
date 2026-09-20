@@ -260,10 +260,14 @@ describe('computeSettlement · 第 2 轮补钉', () => {
     expect(() => computeSettlement({ ...基准输入, 阶位: '' }, 满骰())).toThrow();
   });
 
-  it('阶位先 trim（纯空白不该挡掉整次结算）; 「第三阶」不在词汇表里, 仍抛错', () => {
+  it('阶位先 trim（纯空白不该挡掉整次结算）; 归一已归到 dice.ts:归一位阶', () => {
     expect(computeSettlement({ ...基准输入, 阶位: ' 三阶 ' }, 满骰()).位阶修正).toBe(3);
     expect(computeSettlement({ ...基准输入, 阶位: '五阶\n' }, 满骰()).位阶修正).toBe(5);
-    expect(() => computeSettlement({ ...基准输入, 阶位: '第三阶' }, 满骰())).toThrow();
+    // 「第三阶」/ 全角 / 繁体 / 大写 现在都归得出来（此前只有 汉字 / N阶 / 裸数字 三种写法）
+    expect(computeSettlement({ ...基准输入, 阶位: '第三阶' }, 满骰()).位阶修正).toBe(3);
+    expect(computeSettlement({ ...基准输入, 阶位: '３阶' }, 满骰()).位阶修正).toBe(3);
+    expect(computeSettlement({ ...基准输入, 阶位: '三階' }, 满骰()).位阶修正).toBe(3);
+    expect(computeSettlement({ ...基准输入, 阶位: '伍阶' }, 满骰()).位阶修正).toBe(5);
   });
 
   it('评价等级 F 直接抛错（主线失败 = 抹杀, 不进入结算流程）', () => {

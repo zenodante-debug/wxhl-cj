@@ -2,7 +2,7 @@ import { type ForumThread, type ForumPost, INITIAL_THREADS, RANK_BOARDS, type Ca
 import { buildRefreshPrompt, buildRepliesPrompt, buildThreadDetailPrompt, type ForumSectionKey } from './forumPrompts'
 import { WORKSHOP_WORLDBOOK_NAME, PvPSaveSchema, type WorkshopCard, type PvPSave } from './data'
 import { extractContractSave, buildIntroPrompt, tierOf, generateDefaultAppearance, buildBattleIntroMessage } from './workshop'
-import { rollBuild, rollRewards, rollDie, type BuildRoll, type RewardSet, type RollRecord } from './dice'
+import { rollBuild, rollRewards, rollDie, 归一位阶, type BuildRoll, type RewardSet, type RollRecord } from './dice'
 import { DungeonGenResultSchema, assemblePanelText, mapToVariables, type DungeonGenResult, type PlayerBrief } from './dungeonRules'
 import { buildDungeonPrompt, buildEnterPrompt, buildEnemyPrompt } from './dungeonGen'
 import { EnemyGenResultSchema, mapEnemyToVariables, assembleEnemyPanelFromEntity, 前端已代算, type GeneratedEnemy } from './enemyRules'
@@ -1705,15 +1705,11 @@ function saveRolledDungeons(list: RolledDungeon[]) {
   try { localStorage.setItem(DGEN_SK, JSON.stringify(list)) } catch (_) {}
 }
 
-/** 阶位写法归一: schema 用「一阶」，TIER_ORDER 用「1阶」，榜单按下标 0~4 取 */
-const 阶位归一: Record<string, number> = {
-  '一阶': 0, '二阶': 1, '三阶': 2, '四阶': 3, '五阶': 4,
-  '1阶': 0, '2阶': 1, '3阶': 2, '4阶': 3, '5阶': 4,
-}
-
 /** 按 CR 决定队友匹配池（规则 §三 与用户口径: ≥6 升一阶, ≥7 升两阶, =10 天榜） */
 function buildMatchPool(cr: number, 阶位: string): string {
-  const idx = 阶位归一[阶位] ?? 0
+  // 归一交给 `dice.ts` 的 `归一位阶`（一阶/1阶/一/1/第一阶/全角…都认）;
+  // **失败策略刻意保持 `?? 0`**: 认不出就当一阶, 只影响队友匹配池的档位, 不写任何数值
+  const idx = 归一位阶(阶位) ?? 0
   if (cr <= 4) {
     return `玩家 CR=${cr}（≤4）：请自由生成同阶契约者作为队友，**不要**从排行榜抓人。等级与玩家同阶相近。`
   }

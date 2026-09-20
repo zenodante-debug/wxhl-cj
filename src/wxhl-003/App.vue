@@ -859,7 +859,7 @@ import { useForumStore, useCareerStore, useDungeonStore, useWorkshopStore, useDu
 import { SECTIONS, RANK_BOARDS, type ForumThread, type CareerPlan, type CareerRoadmap, type DungeonStrategy, type Faction, type DungeonMode, type WorkshopCard, DUNGEON_MODES, TIER_ORDER } from './data'
 import ApiFields from './ApiFields.vue'
 import EditableObject from './EditableObject.vue'
-import { isNewbieDungeon } from './dice'
+import { isNewbieDungeon, 归一位阶 } from './dice'
 import { clamp固有角色等级 } from './dungeonRules'
 
 const store = useForumStore()
@@ -1047,16 +1047,21 @@ const editModules = [
   { key: '通用技能', label: '通用技能' },
   { key: '装备', label: '装备' },
 ]
-// 存档 schema 的 阶位 prefault 为中文「一阶」，而 TIER_ORDER 用阿拉伯数字「1阶」；
-// 归一化后再分组，避免默认「一阶」卡被归到末尾（tierOf('一阶') 落在数组尾）
-const CN_TIER: Record<string, string> = { '一阶': '1阶', '二阶': '2阶', '三阶': '3阶', '四阶': '4阶', '五阶': '5阶' }
-const normTier = (t: string) => CN_TIER[t] || t
+// 存档 schema 的 阶位 prefault 为中文「一阶」，而分组键与 TIER_ORDER 都取阿拉伯数字「1阶」；
+// 用共享的 归一位阶 把写法归一后再分组（一阶/1阶/一/1/第一阶/１阶/一階… 都归到同一组），
+// 否则同一阶位会因写法不同被拆成两组、或被扔进末尾的「其他」组。
+// 归一后仍认不出的（六阶/试炼阶 等）保留原写法当组名，追加为末尾「其他」组，避免契约者被静默丢弃；
+// 「超脱」虽然归不出来，但它是 TIER_ORDER 的合法成员，仍落在它自己的那一组。
+const normTier = (t: string): string => {
+  const i = 归一位阶(t)
+  return i === undefined || i >= TIER_ORDER.length ? t : TIER_ORDER[i]
+}
 const tieredContracts = computed(() => {
   const map: Record<string, WorkshopCard[]> = {}
   for (const c of workshopStore.contracts) { (map[normTier(c.阶位)] ||= []).push(c) }
-  // 组内按等级降序（store 的 tierOf('一阶')=6 会把默认中文阶位卡排到末尾，重新分组后需组内重排）
+  // 组内按等级降序。store 已按「阶位→等级」排过一遍，这里是分组后的兜底重排（幂等，非双重排序）
   for (const k of Object.keys(map)) map[k].sort((a, b) => b.等级 - a.等级)
-  // 已知阶位按 TIER_ORDER 顺序排列；未知阶位（如未来新增的六阶/试炼阶等）追加为末尾「其他」组，避免契约者被静默丢弃
+  // 已知阶位按 TIER_ORDER 顺序排列；未知阶位追加为末尾「其他」组，避免契约者被静默丢弃
   const tiered = TIER_ORDER.map((label, i) => ({ label, tier: i, cards: map[label] || [] })).filter(g => g.cards.length > 0)
   const rest = Object.keys(map).filter(k => !TIER_ORDER.includes(k))
   return tiered.concat(rest.map(k => ({ label: k, tier: TIER_ORDER.length, cards: map[k] })))

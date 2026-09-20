@@ -1,4 +1,5 @@
 import { CONTRACT_SAVE_KEYS, TIER_ORDER, type WorkshopCard } from './data.ts'
+import { 归一位阶 } from './dice'
 
 /** 从完整 stat_data.契约者 摘出 PvP 六字段，并重算属性.实际 */
 export function extractContractSave(契约者: any): any {
@@ -26,8 +27,23 @@ export function generateDefaultAppearance(装备: any): string {
   return '身着【' + names.slice(0, 4).join('】、【') + '】的契约者'
 }
 
-/** 阶位 → TIER_ORDER 索引；未知归末尾 */
+/**
+ * 阶位 → `TIER_ORDER` 索引；**未知归末尾**（返回 `TIER_ORDER.length`）。
+ *
+ * 归一交给 `dice.ts` 的 `归一位阶`（汉字 / `N阶` / 裸数字 / `第N阶` / 全角 / 繁体…都认）。
+ * 这条「未知归末尾」的失败策略是刻意的: 调用方 `store.ts:loadContracts` 用它给契约者排序,
+ * 认不出的阶位排在末尾比抛错/丢弃温和。**此前只认 `TIER_ORDER` 里的 `1阶` 形**,
+ * 而存档 schema 给的是汉字 `一阶` —— 于是 `'一阶'`/`'三阶'`/`'五阶'` 一律落到末尾,
+ * `store.ts` 注释承诺的「按阶位排序」从未生效。现在汉字能认出来了, 真实数据不再落到末尾。
+ *
+ * 第二支回退到 `TIER_ORDER.indexOf`: `'超脱'` 是 `TIER_ORDER` 的**合法成员**（下标 5）,
+ * 但它不属于 `归一位阶` 管的「一阶~五阶」, 归一只会返回 `undefined` —— 若就此归末尾,
+ * 「超脱」会与真正的垃圾值（`'六阶'`/`'无'`）并列, 那是**相对旧行为的退化**。
+ * 于是本函数对**每一个**输入都返回旧行为的超集: 旧的映射一个不少, 只是新增了更多能认的写法。
+ */
 export function tierOf(阶位: string): number {
+  const 归一 = 归一位阶(阶位)
+  if (归一 !== undefined) return 归一
   const i = TIER_ORDER.indexOf(阶位)
   return i === -1 ? TIER_ORDER.length : i
 }
