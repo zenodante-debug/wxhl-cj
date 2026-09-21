@@ -145,6 +145,17 @@
                 <span class="app-label">自由市场</span>
                 <span class="app-sub">{{ appSubs.market }}</span>
               </div>
+              <div class="app-icon-wrapper" @click="openCrafting">
+                <div class="app-icon crafting-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M14 4l6 6-1.8 1.8-6-6L14 4z" />
+                    <path d="M12.2 7.8L4 16l2 2 8.2-8.2" />
+                    <path d="M15 11l-3 3" />
+                  </svg>
+                </div>
+                <span class="app-label">工坊</span>
+                <span class="app-sub">{{ appSubs.crafting }}</span>
+              </div>
               <div class="app-icon-wrapper" @click="openSettlement">
                 <div class="app-icon settlement-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -2031,6 +2042,11 @@
           <MarketView @close="goDesktop" />
         </div>
 
+        <!-- ============ CRAFTING ============ -->
+        <div v-if="currentView === 'crafting'" class="app-page">
+          <CraftingView @close="goDesktop" />
+        </div>
+
         <!-- ============ STATUSBAR ============ -->
         <div v-if="currentView === 'statusbar'" class="app-page sb-page">
           <div class="app-header">
@@ -2071,6 +2087,7 @@ import {
 import ApiFields from './ApiFields.vue';
 import EditableObject from './EditableObject.vue';
 import MarketView from './market/MarketView.vue';
+import CraftingView from './crafting/CraftingView.vue';
 import {
   isNewbieDungeon,
   归一位阶,
@@ -2134,7 +2151,7 @@ function getVH(): number {
 // ============ 状态 ============
 const expanded = ref(false);
 const currentView = ref<
-  'desktop' | 'forum' | 'settings' | 'career' | 'dungeon' | 'arena' | 'dungeonRoll' | 'settlement' | 'statusbar' | 'market'
+  'desktop' | 'forum' | 'settings' | 'career' | 'dungeon' | 'arena' | 'dungeonRoll' | 'settlement' | 'statusbar' | 'market' | 'crafting'
 >('desktop');
 const settingsPage = ref('');
 const activeThread = ref<ForumThread | null>(null);
@@ -2249,6 +2266,7 @@ const appSubs = computed(() => ({
   arena: workshopStore.contracts.length ? `${workshopStore.contracts.length} 契约` : '无契约',
   roll: dungeonGenStore.rolledDungeons.length ? `${dungeonGenStore.rolledDungeons.length} 次掷骰` : '未掷骰',
   market: '以物易物，童叟无欺',
+  crafting: '千锤百炼，巧夺天工',
   settlement: '结算空间',
   statusbar: idle.name,
 }));
@@ -2308,6 +2326,10 @@ function openDungeonRoll() {
 
 function openMarket() {
   currentView.value = 'market';
+}
+
+function openCrafting() {
+  currentView.value = 'crafting';
 }
 
 function onRollDungeon() {
@@ -3560,6 +3582,10 @@ onUnmounted(() => {
 .settings-icon {
   background: linear-gradient(135deg, #2a2825, #181410);
   border: 1.5px solid rgba(200, 140, 100, 0.25);
+}
+.crafting-icon {
+  background: linear-gradient(135deg, #3a2410, #20140a);
+  border: 1.5px solid rgba(200, 150, 80, 0.3);
 }
 .app-label {
   font-size: 11px;
