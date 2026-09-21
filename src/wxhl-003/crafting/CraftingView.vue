@@ -92,6 +92,7 @@
           <div v-for="p in store.lastOutcome.新增" :key="p.名称" class="crf-card">
             <div class="cc-head"><span class="cc-name">{{ p.名称 }}</span><span class="cc-tag">×{{ p.数量 }}</span></div>
             <div class="cc-line">{{ p.描述 }}</div>
+            <button v-if="['成功', '精制', '杰作'].includes(store.lastOutcome.结果)" class="crf-sell" @click="emit('goto-market', p.名称)">上架市场</button>
           </div>
           <div v-if="store.lastOutcome.HP伤害 > 0" class="crf-error">炸炉伤害：-{{ store.lastOutcome.HP伤害 }} HP</div>
         </div>
@@ -129,7 +130,7 @@ import { WEAPON_TABLE, type ArmorSpectrum, type Attr } from './equipTables';
 import { 材料类别, type 配方 } from './recipes';
 import { useCraftingStore } from './store';
 
-const emit = defineEmits<{ close: [] }>();
+const emit = defineEmits<{ close: []; 'goto-market': [name: string] }>();
 const store = useCraftingStore();
 
 const TABS = [
@@ -220,6 +221,7 @@ onMounted(() => store.syncFromMvu());
 .crf-check { justify-content: flex-start !important; }
 .crf-dc { font-size: 12px; opacity: .8; }
 .crf-go { padding: 10px; border-radius: 8px; border: none; background: #b8860b; color: #fff; font-weight: 700; cursor: pointer; }
+.crf-sell { margin-top: 6px; padding: 5px 12px; border-radius: 6px; border: 1px solid #b8860b; background: none; color: #b8860b; font-size: 12px; cursor: pointer; }
 .crf-go:disabled { opacity: .4; cursor: not-allowed; }
 .crf-result .cr-title { font-weight: 700; margin-bottom: 4px; }
 .r-杰作 .cr-title { color: #d4a017; }

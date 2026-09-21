@@ -53,6 +53,8 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
   const listings = ref<Listing[]>([]);
   const myListings = ref<Listing[]>([]);
   const pending = ref(0);
+  /** 跨 app 联动：其他 app（如工坊）要求市场打开并预选上架物品时写入物品名 */
+  const pendingSell = ref('');
   const loading = ref(false);
   const lastError = ref('');
 
@@ -218,6 +220,7 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     listings,
     myListings,
     pending,
+    pendingSell,
     loading,
     lastError,
     playerName,

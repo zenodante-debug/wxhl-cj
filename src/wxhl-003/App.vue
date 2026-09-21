@@ -154,6 +154,17 @@
                 <span class="app-label">副本结算</span>
                 <span class="app-sub">{{ appSubs.settlement }}</span>
               </div>
+              <div class="app-icon-wrapper" @click="openStatusbar">
+                <div class="app-icon statusbar-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <rect x="4" y="3" width="16" height="18" rx="2" />
+                    <circle cx="9" cy="8" r="1.6" />
+                    <path d="M13 7h5M13 10.5h5M7.5 14.5h9M7.5 17.5h6" />
+                  </svg>
+                </div>
+                <span class="app-label">状态栏</span>
+                <span class="app-sub">{{ appSubs.statusbar }}</span>
+              </div>
             </div>
             <div class="app-grid" v-show="desktopPage === 1">
               <div class="app-icon-wrapper" @click="openSettings">
@@ -167,17 +178,6 @@
                 </div>
                 <span class="app-label">终端设置</span>
                 <span class="app-sub">{{ appSubs.settings }}</span>
-              </div>
-              <div class="app-icon-wrapper" @click="openStatusbar">
-                <div class="app-icon statusbar-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <rect x="4" y="3" width="16" height="18" rx="2" />
-                    <circle cx="9" cy="8" r="1.6" />
-                    <path d="M13 7h5M13 10.5h5M7.5 14.5h9M7.5 17.5h6" />
-                  </svg>
-                </div>
-                <span class="app-label">状态栏</span>
-                <span class="app-sub">{{ appSubs.statusbar }}</span>
               </div>
             </div>
           </div>
@@ -2052,7 +2052,7 @@
 
         <!-- ============ CRAFTING ============ -->
         <div v-if="currentView === 'crafting'" class="app-page">
-          <CraftingView @close="goDesktop" />
+          <CraftingView @close="goDesktop" @goto-market="onGotoMarket" />
         </div>
 
         <!-- ============ STATUSBAR ============ -->
@@ -2095,6 +2095,7 @@ import {
 import ApiFields from './ApiFields.vue';
 import EditableObject from './EditableObject.vue';
 import MarketView from './market/MarketView.vue';
+import { useMarketStore } from './market/store';
 import CraftingView from './crafting/CraftingView.vue';
 import {
   isNewbieDungeon,
@@ -2116,6 +2117,7 @@ const dungeonStore = useDungeonStore();
 const workshopStore = useWorkshopStore();
 const dungeonGenStore = useDungeonGenStore();
 const settlementStore = useSettlementStore();
+const marketStore = useMarketStore();
 const SK = 'wxhl003_btn_pos';
 
 // ============ 视口尺寸（visualViewport → 自身 → 父窗口回退）============
@@ -2334,6 +2336,12 @@ function openDungeonRoll() {
 }
 
 function openMarket() {
+  currentView.value = 'market';
+}
+
+/** 工坊→市场联动：记录待上架物品名，切到市场后由 MarketView 预选 */
+function onGotoMarket(name: string) {
+  marketStore.pendingSell = name;
   currentView.value = 'market';
 }
 
@@ -3532,12 +3540,11 @@ onUnmounted(() => {
 .app-grid {
   position: relative;
   z-index: 2;
-  display: flex;
-  flex-wrap: wrap;
-  justify-content: center;
-  align-content: flex-start;
-  gap: 16px 24px;
-  padding: 20px 20px 0;
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 18px 8px;
+  padding: 20px 14px 0;
+  justify-items: center;
 }
 .app-icon-wrapper {
   display: flex;

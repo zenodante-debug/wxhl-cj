@@ -152,7 +152,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { getClientId, type Listing } from './api';
 import { checkPrice, isEquip, type MarketItemSnapshot, type PriceCheck } from './priceTable';
 import type { Bag } from './settle';
@@ -257,6 +257,21 @@ function timeAgo(created: number): string {
 }
 
 onMounted(() => store.refresh());
+
+// 跨 app 联动：工坊「上架市场」跳转时预选物品（背包未同步好则等下次变化再试）
+watch(
+  () => [store.pendingSell, store.playerBag] as const,
+  () => {
+    const name = store.pendingSell;
+    if (!name) return;
+    const item = (store.playerBag as Bag)[name];
+    if (!item || Number(item.数量) <= 0) return;
+    tab.value = 'sell';
+    pickItem(name, item);
+    store.pendingSell = '';
+  },
+  { immediate: true },
+);
 </script>
 
 <style lang="scss" scoped>
