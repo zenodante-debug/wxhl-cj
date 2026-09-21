@@ -135,6 +135,16 @@
                 <span class="app-label">副本生成</span>
                 <span class="app-sub">{{ appSubs.roll }}</span>
               </div>
+              <div class="app-icon-wrapper" @click="openMarket">
+                <div class="app-icon market-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M12 3v3M8 21h8M12 6l-7 4h14l-7-4z" />
+                    <path d="M5 10l-2 5a3.5 3.5 0 0 0 7 0l-2-5M19 10l-2 5a3.5 3.5 0 0 0 7 0l-2-5" />
+                  </svg>
+                </div>
+                <span class="app-label">自由市场</span>
+                <span class="app-sub">{{ appSubs.market }}</span>
+              </div>
               <div class="app-icon-wrapper" @click="openSettlement">
                 <div class="app-icon settlement-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -2016,6 +2026,12 @@
         </div>
 
         <!-- ============ STATUSBAR PAGE（状态栏：收进手机框内的 app 页面） ============ -->
+        <!-- ============ MARKET ============ -->
+        <div v-if="currentView === 'market'" class="app-page">
+          <MarketView @close="goDesktop" />
+        </div>
+
+        <!-- ============ STATUSBAR ============ -->
         <div v-if="currentView === 'statusbar'" class="app-page sb-page">
           <div class="app-header">
             <button class="hdr-btn" @click="closeStatusbar">
@@ -2054,6 +2070,7 @@ import {
 } from './data';
 import ApiFields from './ApiFields.vue';
 import EditableObject from './EditableObject.vue';
+import MarketView from './market/MarketView.vue';
 import {
   isNewbieDungeon,
   归一位阶,
@@ -2117,7 +2134,7 @@ function getVH(): number {
 // ============ 状态 ============
 const expanded = ref(false);
 const currentView = ref<
-  'desktop' | 'forum' | 'settings' | 'career' | 'dungeon' | 'arena' | 'dungeonRoll' | 'settlement' | 'statusbar'
+  'desktop' | 'forum' | 'settings' | 'career' | 'dungeon' | 'arena' | 'dungeonRoll' | 'settlement' | 'statusbar' | 'market'
 >('desktop');
 const settingsPage = ref('');
 const activeThread = ref<ForumThread | null>(null);
@@ -2231,6 +2248,7 @@ const appSubs = computed(() => ({
   dungeon: dungeonStore.dungeons.length ? `${dungeonStore.dungeons.length} 攻略` : '未开荒',
   arena: workshopStore.contracts.length ? `${workshopStore.contracts.length} 契约` : '无契约',
   roll: dungeonGenStore.rolledDungeons.length ? `${dungeonGenStore.rolledDungeons.length} 次掷骰` : '未掷骰',
+  market: '以物易物，童叟无欺',
   settlement: '结算空间',
   statusbar: idle.name,
 }));
@@ -2286,6 +2304,10 @@ function openDungeonRoll() {
   currentView.value = 'dungeonRoll';
   dungeonGenStore.lastError = '';
   refreshPlayerCycle();
+}
+
+function openMarket() {
+  currentView.value = 'market';
 }
 
 function onRollDungeon() {
