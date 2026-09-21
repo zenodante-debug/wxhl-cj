@@ -25,7 +25,7 @@ export default defineConfig({
   ],
   test: {
     environment: 'node',
-    include: ['src/**/__tests__/**/*.test.ts'],
+    include: ['src/**/__tests__/**/*.test.ts', 'cloudflare/**/*.test.js'],
     setupFiles: ['src/wxhl-003/__tests__/setup.ts'],
   },
 });
