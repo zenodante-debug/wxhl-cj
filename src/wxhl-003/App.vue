@@ -24,7 +24,12 @@
   <!-- PANEL -->
   <Transition name="panel">
     <div v-if="expanded" class="panel-overlay" @click.self="collapse">
-      <div ref="panelRef" class="phone-frame" :style="panelAnimStyle">
+      <div
+        ref="panelRef"
+        class="phone-frame"
+        :class="{ 'sb-open': currentView === 'statusbar' }"
+        :style="panelAnimStyle"
+      >
         <div class="status-bar">
           <span class="status-time">{{ clockTime }}</span
           ><span class="status-label">◆ 回廊终端 · v2</span>
@@ -1991,25 +1996,20 @@
             </div>
           </div>
         </div>
-      </div>
-    </div></Transition
-  >
 
-  <!-- ============ STATUSBAR OVERLAY（状态栏大页面） ============ -->
-  <Transition name="sb">
-    <div v-if="statusbarOpen" class="sb-overlay" @click.self="closeStatusbar">
-      <div class="sb-frame">
-        <div class="sb-frame-top">
-          <div class="sb-frame-lamps">
-            <span class="sb-lamp"></span><span class="sb-lamp"></span><span class="sb-lamp"></span>
+        <!-- ============ STATUSBAR PAGE（状态栏：收进手机框内的 app 页面） ============ -->
+        <div v-if="currentView === 'statusbar'" class="app-page sb-page">
+          <div class="app-header">
+            <button class="hdr-btn" @click="closeStatusbar">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6" />
+              </svg></button
+            ><span class="hdr-title">契约者状态档案</span><span class="hdr-spacer"></span>
           </div>
-          <span class="sb-frame-title">契 约 者 状 态 档 案</span>
-          <button class="sb-close" @click="closeStatusbar">╳</button>
+          <div ref="sbBodyRef" class="sb-body"></div>
         </div>
-        <div ref="sbBodyRef" class="sb-body"></div>
-      </div>
-    </div>
-  </Transition>
+      </div></div
+  ></Transition>
 </template>
 
 <script setup lang="ts">
@@ -2090,7 +2090,7 @@ function getVH(): number {
 // ============ 状态 ============
 const expanded = ref(false);
 const currentView = ref<
-  'desktop' | 'forum' | 'settings' | 'career' | 'dungeon' | 'arena' | 'dungeonRoll' | 'settlement'
+  'desktop' | 'forum' | 'settings' | 'career' | 'dungeon' | 'arena' | 'dungeonRoll' | 'settlement' | 'statusbar'
 >('desktop');
 const settingsPage = ref('');
 const activeThread = ref<ForumThread | null>(null);
@@ -2124,25 +2124,36 @@ const arenaView = ref<'list' | 'detail' | 'edit'>('list');
 const viewingCard = ref<WorkshopCard | null>(null);
 const showBattleConfirm = ref(false);
 
-// ============ 状态栏大页面 ============
-const statusbarOpen = ref(false);
+// ============ 状态栏页面（收进手机框内的 app 页，框体随之展开） ============
 const sbBodyRef = ref<HTMLElement | null>(null);
 let sbUnmount: (() => void) | null = null;
-async function openStatusbar() {
-  statusbarOpen.value = true;
+async function mountStatusbarPage() {
   await nextTick();
-  if (sbBodyRef.value) {
+  if (sbBodyRef.value && !sbUnmount) {
     sbUnmount = mountStatusbar(sbBodyRef.value);
   }
 }
-function closeStatusbar() {
+function teardownStatusbar() {
   sbUnmount?.();
   sbUnmount = null;
-  statusbarOpen.value = false;
 }
-onUnmounted(() => {
-  sbUnmount?.();
+function openStatusbar() {
+  currentView.value = 'statusbar';
+  mountStatusbarPage();
+}
+function closeStatusbar() {
+  teardownStatusbar();
+  currentView.value = 'desktop';
+}
+// 状态栏核心是命令式挂载（非 Vue 渲染），离开页面或最小化手机时要卸载，回来时在原位重挂载
+watch(currentView, v => {
+  if (v !== 'statusbar') teardownStatusbar();
 });
+watch(expanded, v => {
+  if (!v) teardownStatusbar();
+  else if (currentView.value === 'statusbar') mountStatusbarPage();
+});
+onUnmounted(teardownStatusbar);
 
 // ============ 桌面待机铭牌 ============
 const idle = reactive({
@@ -5541,100 +5552,26 @@ onUnmounted(() => {
   font-size: 12px;
 }
 
-// ============ 状态栏大页面 ============
+// ============ 状态栏页面 ============
 .statusbar-icon {
   background: linear-gradient(135deg, #3a2a10, #201508);
   border: 1.5px solid rgba(240, 208, 128, 0.3);
 }
-.sb-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 2147483645;
-  pointer-events: auto;
-  background: rgba(4, 3, 2, 0.88);
-  backdrop-filter: blur(6px);
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  padding: 16px;
+/* 状态栏打开时手机框展开为宽屏面板（桌面端）；手机端由 mobile-compat 贴满可见视口 */
+.phone-frame {
+  transition:
+    width 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+    height 0.35s cubic-bezier(0.16, 1, 0.3, 1),
+    border-radius 0.35s;
 }
-.sb-frame {
-  width: min(960px, 94vw);
-  height: min(88vh, 920px);
-  height: min(88dvh, 920px);
-  display: flex;
-  flex-direction: column;
-  background: linear-gradient(180deg, #1f1510, #120b07);
-  border: 2px solid #3a3430;
-  border-radius: 6px;
-  box-shadow:
-    0 0 80px rgba(0, 0, 0, 0.8),
-    0 0 0 1px rgba(120, 50, 20, 0.2);
-  overflow: hidden;
+.phone-frame.sb-open {
+  width: min(980px, 94vw);
+  height: min(92vh, 920px);
+  height: min(92dvh, 920px);
+  border-radius: 18px;
 }
-.sb-frame-top {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 10px 16px;
-  background: rgba(16, 10, 7, 0.9);
-  border-bottom: 1px solid rgba(100, 50, 20, 0.3);
-  flex-shrink: 0;
-}
-.sb-frame-lamps {
-  display: flex;
-  gap: 6px;
-  flex-shrink: 0;
-}
-.sb-lamp {
-  width: 6px;
-  height: 6px;
-  border-radius: 50%;
-  background: #7a1818;
-  box-shadow: 0 0 6px #4a1010;
-  animation: sbLampPulse 2.4s ease-in-out infinite;
-  &:nth-child(2) {
-    animation-delay: 0.8s;
-  }
-  &:nth-child(3) {
-    animation-delay: 1.6s;
-  }
-}
-@keyframes sbLampPulse {
-  0%,
-  100% {
-    opacity: 0.45;
-  }
-  50% {
-    opacity: 1;
-  }
-}
-.sb-frame-title {
-  flex: 1;
-  text-align: center;
-  font-family: 'Noto Serif SC', serif;
-  font-size: 15px;
-  font-weight: 700;
-  letter-spacing: 4px;
-  color: #f0d080;
-  text-shadow: 0 0 10px rgba(200, 150, 80, 0.35);
-}
-.sb-close {
-  width: 30px;
-  height: 30px;
-  border: none;
-  background: transparent;
-  color: #c8483c;
-  font-size: 16px;
-  cursor: pointer;
-  border-radius: 50%;
-  flex-shrink: 0;
-  font-family: serif;
-  transition: all 0.2s;
-  &:hover {
-    background: rgba(180, 40, 40, 0.2);
-    color: #f0d080;
-  }
+.sb-page {
+  background: var(--sb-void, #080504);
 }
 .sb-body {
   flex: 1;
@@ -5647,30 +5584,6 @@ onUnmounted(() => {
   -ms-overflow-style: none;
   &::-webkit-scrollbar {
     display: none;
-  }
-}
-.sb-enter-active {
-  transition: opacity 0.3s;
-  .sb-frame {
-    transition:
-      transform 0.35s cubic-bezier(0.16, 1, 0.3, 1),
-      opacity 0.3s;
-  }
-}
-.sb-leave-active {
-  transition: opacity 0.2s;
-  .sb-frame {
-    transition:
-      transform 0.25s ease-in,
-      opacity 0.2s;
-  }
-}
-.sb-enter-from,
-.sb-leave-to {
-  opacity: 0;
-  .sb-frame {
-    transform: translateY(24px);
-    opacity: 0;
   }
 }
 
