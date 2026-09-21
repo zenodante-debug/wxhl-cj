@@ -154,6 +154,7 @@ function pickRecipe(r: 配方) {
   form.子类型 = r.装备子类 === '武器' ? weaponTypes[2] : r.装备子类 === '防具' ? '轻装' : '';
   form.数量 = 1;
   form.核心材料名 = '';
+  store.lastOutcome = null; // 换配方清掉上一次结果，避免误显
   store.syncFromMvu();
   tab.value = 'craft';
 }

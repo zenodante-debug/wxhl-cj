@@ -58,6 +58,31 @@ function loadCodex(): Record<string, 材料档案条目> {
   }
 }
 
+/**
+ * 制作者组装（纯函数导出，便于回归测试）。
+ * 注意：归一位阶 返回 0 基下标（一阶→0），仓库惯例是 `n + 1` 转回 1 基
+ * （见 settlementRules.ts 阶数）；认不出来时兜底为一阶（与「未知当一阶」一致）。
+ */
+export function assembleMaker(c: any, 行业: string): CraftInput['制作者'] {
+  const sk = c.通用技能?.[行业];
+  return {
+    姓名: String(c.头部?.姓名 ?? '无名契约者'),
+    阶位上限: (归一位阶(c.头部?.阶位 ?? '一阶') ?? 0) + 1,
+    基础属性: {
+      STR: Number(c.属性?.基础?.STR ?? 5), AGI: Number(c.属性?.基础?.AGI ?? 5),
+      CON: Number(c.属性?.基础?.CON ?? 5), PER: Number(c.属性?.基础?.PER ?? 5),
+    },
+    属性修正值: {
+      STR: Number(c.属性?.属性修正值?.STR ?? 0), AGI: Number(c.属性?.属性修正值?.AGI ?? 0),
+      CON: Number(c.属性?.属性修正值?.CON ?? 0), PER: Number(c.属性?.属性修正值?.PER ?? 0),
+    },
+    技能: sk
+      ? { 分类: String(sk.分类 ?? '基础'), 阶位: (归一位阶(sk.阶位) ?? 0) + 1, 等级: Number(sk.等级 ?? 1) }
+      : undefined,
+    职业名: String(c.职业?.名称 ?? '无'),
+  };
+}
+
 export const useCraftingStore = defineStore('wxhl003-crafting', () => {
   const codex = ref<Record<string, 材料档案条目>>(loadCodex());
   const playerName = ref('无名契约者');
@@ -135,23 +160,7 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     if (!r) return null;
     const c = r.c;
 
-    const sk = c.通用技能?.[args.配方.行业];
-    const 制作者: CraftInput['制作者'] = {
-      姓名: playerName.value,
-      阶位上限: 归一位阶(playerTier.value) ?? 1,
-      基础属性: {
-        STR: Number(c.属性?.基础?.STR ?? 5), AGI: Number(c.属性?.基础?.AGI ?? 5),
-        CON: Number(c.属性?.基础?.CON ?? 5), PER: Number(c.属性?.基础?.PER ?? 5),
-      },
-      属性修正值: {
-        STR: Number(c.属性?.属性修正值?.STR ?? 0), AGI: Number(c.属性?.属性修正值?.AGI ?? 0),
-        CON: Number(c.属性?.属性修正值?.CON ?? 0), PER: Number(c.属性?.属性修正值?.PER ?? 0),
-      },
-      技能: sk
-        ? { 分类: String(sk.分类 ?? '基础'), 阶位: 归一位阶(sk.阶位) ?? 1, 等级: Number(sk.等级 ?? 1) }
-        : undefined,
-      职业名: String(c.职业?.名称 ?? '无'),
-    };
+    const 制作者 = assembleMaker(c, args.配方.行业);
 
     // 核心材料 = 玩家选定；辅料 = autoPick 自动拣选（排除核心物品）
     const 核心需求 = args.配方.材料.find(m => m.核心);
@@ -160,7 +169,9 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     for (const req of args.配方.材料.filter(m => !m.核心)) {
       const picks = autoPick(bag.value, codex.value, req.类别, req.数量 * args.数量, [args.核心材料名]);
       if (!picks) {
-        toastr.error(`辅料不足：需要 ${req.类别}×${req.数量 * args.数量}`);
+        const msg = `辅料不足：需要 ${req.类别}×${req.数量 * args.数量}`;
+        toastr.error(msg);
+        lastError.value = msg;
         return null;
       }
       辅料.push(...picks);
@@ -193,11 +204,14 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
       return null;
     }
     _.set(r.mvu, ['stat_data', '契约者', '背包'], newBag);
+    const checks: [string[], unknown][] = [[['stat_data', '契约者', '背包'], newBag]];
     if (outcome.HP伤害 > 0) {
       const hp = Number(_.get(r.mvu, ['stat_data', '契约者', '衍生属性', 'HP_当前']) ?? 0);
-      _.set(r.mvu, ['stat_data', '契约者', '衍生属性', 'HP_当前'], Math.max(0, hp - outcome.HP伤害));
+      const newHp = Math.max(0, hp - outcome.HP伤害);
+      _.set(r.mvu, ['stat_data', '契约者', '衍生属性', 'HP_当前'], newHp);
+      checks.push([['stat_data', '契约者', '衍生属性', 'HP_当前'], newHp]);
     }
-    await commit(r.mvu, r.mid, [[['stat_data', '契约者', '背包'], newBag]]);
+    await commit(r.mvu, r.mid, checks);
 
     lastOutcome.value = outcome;
     syncFromMvu();

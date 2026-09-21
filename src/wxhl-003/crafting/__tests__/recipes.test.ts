@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { 启发式归类, 配方Schema, STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES } from '../recipes';
+import { GOODS_BASE, 启发式归类, 配方Schema, STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES } from '../recipes';
 
 describe('启发式归类 · 材料分类词典', () => {
   it('怪物素材/草药/金属/火药', () => {
@@ -34,6 +34,11 @@ describe('内置配方合法性', () => {
     for (const r of [...TEMPLATE_RECIPES, ...STANDARD_GOODS_RECIPES]) {
       expect(r.技能要求.分类).toBe('基础');
       expect(r.技能要求.等级).toBe(r.品质 === '白色' ? 1 : 3);
+    }
+  });
+  it('标准道具配方名称与 GOODS_BASE 键一一对应', () => {
+    for (const r of STANDARD_GOODS_RECIPES) {
+      expect(GOODS_BASE[r.名称], r.名称).toBeDefined();
     }
   });
 });

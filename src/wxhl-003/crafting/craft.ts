@@ -120,7 +120,8 @@ export function validateCraft(input: CraftInput, bag: Bag): string[] {
 
 /** 装备成品生成 */
 function buildEquip(input: CraftInput, 结果: CraftResult, rand: () => number): MarketItemSnapshot & { 数量: number } {
-  const q = 结果 === '杰作' ? nextQuality(input.配方.品质) : input.配方.品质;
+  // 杰作升档；但野外简陋环境（仅白色）升档也守住白色——validateCraft 只拦非白配方，拦不住掷出的升档
+  const q = 结果 === '杰作' && !input.设施.仅白色 ? nextQuality(input.配方.品质) : input.配方.品质;
   const full = 结果 === '精制' || 结果 === '杰作';
   const roll = (b: number) => (full ? b : fluctuate(b, rand));
   const tier = input.阶位;

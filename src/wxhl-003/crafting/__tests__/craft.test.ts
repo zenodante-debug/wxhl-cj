@@ -153,6 +153,15 @@ describe('executeCraft · 制作执行', () => {
     expect(p.伤害骰).toBe('2d8');
     expect(p.描述).toContain('老狼');
   });
+  it('野外设施下杰作不升档：保持白色，仍取满值+署名刻印', () => {
+    const out = executeCraft(makeInput({ 设施: { 修正: 3, 仅白色: true, 标签: '野外简陋环境' } }), 20, () => 0.5);
+    expect(out.结果).toBe('杰作');
+    const p = out.新增[0] as any;
+    expect(p.品质).toBe('白色');
+    expect(p.伤害骰).toBe('2d6');
+    expect(p.描述).toContain('署名');
+    expect(p.描述).toContain('老狼');
+  });
   it('失败：核心损毁50%（向上取整），辅料保留，产出灰色废料', () => {
     const out = executeCraft(makeInput({ 配方: 锻造武器蓝 }), 2, () => 0.5); // 2+8+3=13 < DC15
     expect(out.结果).toBe('失败');
