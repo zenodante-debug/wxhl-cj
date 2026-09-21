@@ -143,6 +143,24 @@ describe('applyBuildOverrides', () => {
     expect(JSON.stringify({ build, records })).toBe(snapshot);
   });
 
+  it('覆盖媒介来源：build 字段更新，记录标记「自选」', () => {
+    const { build, records } = applyBuildOverrides(makeBuild(), makeRecords(), {
+      媒介来源: '电子游戏',
+    });
+    expect(build.媒介来源).toBe('电子游戏');
+    const rec = records.find(r => r.标签 === '媒介来源');
+    expect(rec).toBeDefined();
+    expect(rec!.表达式).toBe('自选');
+    expect(rec!.骰值).toBe(3); // MEDIA_SOURCES 中「电子游戏」为第 3 项
+    expect(rec!.映射).toBe('电子游戏');
+    // 其余字段不受影响
+    expect(build.题材大类).toBe('奇幻/神话');
+  });
+
+  it('媒介来源非法值抛错', () => {
+    expect(() => applyBuildOverrides(makeBuild(), makeRecords(), { 媒介来源: '口耳相传' })).toThrow();
+  });
+
   it('与 rollBuild 集成：覆盖后日常标记与标签骰值一致', () => {
     for (let i = 0; i < 50; i++) {
       const rolled = rollBuild(5, '二阶');

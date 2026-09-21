@@ -1453,6 +1453,24 @@
                   maxlength="30"
                 />
               </div>
+              <div class="cp-field">
+                <span class="cp-label">队友世界观</span>
+                <input
+                  v-model="customMateWorld"
+                  class="cp-input"
+                  placeholder="队友来自的世界观（留空则自动匹配）"
+                  maxlength="30"
+                />
+              </div>
+              <div class="cp-field">
+                <span class="cp-label">队友人物</span>
+                <input
+                  v-model="customMateNames"
+                  class="cp-input"
+                  placeholder="具体人物，如：刻晴、甘雨（留空则自动匹配）"
+                  maxlength="60"
+                />
+              </div>
               <div v-for="opt in CUSTOM_OPTIONS" :key="opt.key" class="cp-field">
                 <span class="cp-label">{{ opt.label }}</span>
                 <select v-model="customPicks[opt.key]" class="cp-select">
@@ -2036,7 +2054,16 @@ import {
 } from './data';
 import ApiFields from './ApiFields.vue';
 import EditableObject from './EditableObject.vue';
-import { isNewbieDungeon, 归一位阶, GENRES, ERAS, FEATURE_TAGS, SUB_MODULES, type BuildOverrides } from './dice';
+import {
+  isNewbieDungeon,
+  归一位阶,
+  GENRES,
+  ERAS,
+  FEATURE_TAGS,
+  SUB_MODULES,
+  MEDIA_SOURCES,
+  type BuildOverrides,
+} from './dice';
 import { clamp固有角色等级 } from './dungeonRules';
 import { mountStatusbar } from './statusbar/core';
 import './statusbar/theme.scss';
@@ -2268,8 +2295,17 @@ function onRollDungeon() {
 // ============ 副本生成 · 自选模式 ============
 const rollMode = ref<'random' | 'custom'>('random');
 const customWorld = ref('');
-const customPicks = ref<Record<string, string>>({ 题材大类: '', 时代背景: '', 核心特色标签: '', 副模块: '' });
+const customMateWorld = ref('');
+const customMateNames = ref('');
+const customPicks = ref<Record<string, string>>({
+  媒介来源: '',
+  题材大类: '',
+  时代背景: '',
+  核心特色标签: '',
+  副模块: '',
+});
 const CUSTOM_OPTIONS = [
+  { key: '媒介来源', label: '媒介来源', values: MEDIA_SOURCES },
   { key: '题材大类', label: '题材大类', values: GENRES },
   { key: '时代背景', label: '时代背景', values: ERAS },
   { key: '核心特色标签', label: '特色标签', values: FEATURE_TAGS },
@@ -2285,7 +2321,7 @@ function onRollClick() {
     const v = customPicks.value[o.key];
     if (v) overrides[o.key] = v;
   }
-  dungeonGenStore.doCustomRoll(overrides, customWorld.value);
+  dungeonGenStore.doCustomRoll(overrides, customWorld.value, customMateWorld.value, customMateNames.value);
 }
 async function onGenerateDungeon() {
   await dungeonGenStore.generate();
