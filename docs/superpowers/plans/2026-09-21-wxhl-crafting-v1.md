@@ -647,9 +647,9 @@ describe('validateCraft · 前置校验', () => {
 
 describe('executeCraft · 制作执行', () => {
   it('成功：扣全部材料，产出精铁短剑（波动数值）', () => {
-    const out = executeCraft(makeInput(), 10, () => 0.5);
+    const out = executeCraft(makeInput(), 3, () => 0.5); // 3+8+3=14，DC10 ≤ 14 < 15
     expect(out.结果).toBe('成功');
-    expect(out.检定值).toBe(10 + 8 + 3);
+    expect(out.检定值).toBe(3 + 8 + 3);
     expect(out.扣减).toEqual([
       { 物品名: '精铁', 数量: 2 },
       { 物品名: '兽骨', 数量: 3 },
@@ -725,13 +725,10 @@ Expected: FAIL（模块不存在）
 import type { Bag } from '../market/settle';
 import type { MarketItemSnapshot } from '../market/priceTable';
 import {
-  ARMOR_NAME, INDUSTRY_ATTR, TIER_COEF, TIER_NAMES, armorStats, attrBonus, nextQuality,
+  ARMOR_NAME, TIER_COEF, TIER_NAMES, armorStats, attrBonus, nextQuality,
   weaponStats, wearThreshold, type ArmorSpectrum, type Attr, type Quality,
 } from './equipTables';
-import { GOODS_BASE, type MaterialCategory, type 材料档案条目, type 配方 } from './recipes';
-
-// 注意：INDUSTRY_ATTR 在 recipes.ts；此处 re-export 供 store 使用
-export { INDUSTRY_ATTR } from './recipes';
+import { GOODS_BASE, INDUSTRY_ATTR, type MaterialCategory, type 材料档案条目, type 配方 } from './recipes';
 
 export type CraftResult = '大失败' | '失败' | '成功' | '精制' | '杰作';
 
@@ -942,8 +939,6 @@ export function executeCraft(input: CraftInput, d20: number, rand: () => number)
   };
 }
 ```
-
-**注意**：`craft.ts` 顶部从 `./equipTables` import 了 `INDUSTRY_ATTR`，但按 Task 2 它定义在 `./recipes`——实现时改为从 `./recipes` import（与 GOODS_BASE 同一行），删除多余的 re-export 行。
 
 - [ ] **Step 4: Run test to verify it passes**
 
