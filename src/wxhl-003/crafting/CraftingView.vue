@@ -67,6 +67,18 @@
               <option v-for="n in coreCandidates" :key="n" :value="n">{{ n }}（×{{ store.bag[n]?.数量 }}）</option>
             </select>
           </label>
+          <div v-if="form.核心材料名" class="cc-line crf-codex">
+            归类不对？直接改：
+            <select :value="store.codex[form.核心材料名]?.类别 ?? '未分类'" @change="store.setCodex(form.核心材料名, { 类别: ($event.target as HTMLSelectElement).value as any })">
+              <option v-for="c in CATS" :key="c" :value="c">{{ c }}</option>
+            </select>
+            <select :value="store.codex[form.核心材料名]?.品质 ?? '白色'" @change="store.setCodex(form.核心材料名, { 品质: ($event.target as HTMLSelectElement).value as any })">
+              <option v-for="q in QUALS" :key="q" :value="q">{{ q }}</option>
+            </select>
+            <select :value="store.codex[form.核心材料名]?.阶位 ?? 1" @change="store.setCodex(form.核心材料名, { 阶位: Number(($event.target as HTMLSelectElement).value) })">
+              <option v-for="t in 5" :key="t" :value="t">{{ t }}阶</option>
+            </select>
+          </div>
           <label class="crf-check"><input v-model="form.越阶材料" type="checkbox" /> 越阶高级材料代替（DC-2）</label>
           <label class="crf-check"><input v-model="form.劣质材料" type="checkbox" /> 劣质材料替代（DC+3）</label>
         </div>
@@ -96,6 +108,14 @@
           <select :value="store.codex[name]?.类别 ?? '未分类'" @change="store.setCodex(String(name), { 类别: ($event.target as HTMLSelectElement).value as any })">
             <option v-for="c in CATS" :key="c" :value="c">{{ c }}</option>
           </select>
+          品质：
+          <select :value="store.codex[name]?.品质 ?? '白色'" @change="store.setCodex(String(name), { 品质: ($event.target as HTMLSelectElement).value as any })">
+            <option v-for="q in QUALS" :key="q" :value="q">{{ q }}</option>
+          </select>
+          阶位：
+          <select :value="store.codex[name]?.阶位 ?? 1" @change="store.setCodex(String(name), { 阶位: Number(($event.target as HTMLSelectElement).value) })">
+            <option v-for="t in 5" :key="t" :value="t">{{ t }}阶</option>
+          </select>
         </div>
       </div>
     </div>
@@ -121,6 +141,7 @@ const tab = ref<(typeof TABS)[number]['key']>('recipes');
 
 const ATTRS: Attr[] = ['STR', 'AGI', 'CON', 'PER'];
 const CATS = [...材料类别.filter(c => c !== '任意'), '未分类'];
+const QUALS = ['白色', '蓝色', '金色', '紫色'] as const;
 const weaponTypes = Object.keys(WEAPON_TABLE);
 const armorTypes: ArmorSpectrum[] = ['极轻', '轻装', '中装', '重装', '极重'];
 
@@ -205,4 +226,6 @@ onMounted(() => store.syncFromMvu());
 .r-大失败 .cr-title, .crf-error { color: #c0392b; }
 .r-失败 .cr-title { color: #e67e22; }
 .crf-empty, .crf-hint { opacity: .6; text-align: center; padding: 8px; font-size: 12px; }
+.crf-codex { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.crf-codex select { max-width: 30%; }
 </style>

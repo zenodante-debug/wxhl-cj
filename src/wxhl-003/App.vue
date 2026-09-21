@@ -66,7 +66,7 @@
                 </div>
               </div>
             </div>
-            <div class="app-grid">
+            <div class="app-grid" v-show="desktopPage === 0">
               <div class="app-icon-wrapper" @click="openForum">
                 <div class="app-icon forum-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -76,18 +76,6 @@
                 </div>
                 <span class="app-label">回廊论坛</span>
                 <span class="app-sub">{{ appSubs.forum }}</span>
-              </div>
-              <div class="app-icon-wrapper" @click="openSettings">
-                <div class="app-icon settings-icon">
-                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
-                    <circle cx="12" cy="12" r="3" />
-                    <path
-                      d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
-                    />
-                  </svg>
-                </div>
-                <span class="app-label">终端设置</span>
-                <span class="app-sub">{{ appSubs.settings }}</span>
               </div>
               <div class="app-icon-wrapper" @click="openCareer">
                 <div class="app-icon career-icon">
@@ -166,6 +154,20 @@
                 <span class="app-label">副本结算</span>
                 <span class="app-sub">{{ appSubs.settlement }}</span>
               </div>
+            </div>
+            <div class="app-grid" v-show="desktopPage === 1">
+              <div class="app-icon-wrapper" @click="openSettings">
+                <div class="app-icon settings-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <circle cx="12" cy="12" r="3" />
+                    <path
+                      d="M12 1v2M12 21v2M4.22 4.22l1.42 1.42M18.36 18.36l1.42 1.42M1 12h2M21 12h2M4.22 19.78l1.42-1.42M18.36 5.64l1.42-1.42"
+                    />
+                  </svg>
+                </div>
+                <span class="app-label">终端设置</span>
+                <span class="app-sub">{{ appSubs.settings }}</span>
+              </div>
               <div class="app-icon-wrapper" @click="openStatusbar">
                 <div class="app-icon statusbar-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -178,6 +180,12 @@
                 <span class="app-sub">{{ appSubs.statusbar }}</span>
               </div>
             </div>
+          </div>
+          <div class="desktop-pager">
+            <button class="pager-arrow" :disabled="desktopPage === 0" @click="desktopPage = 0">‹</button>
+            <span class="pager-dot" :class="{ on: desktopPage === 0 }" @click="desktopPage = 0"></span>
+            <span class="pager-dot" :class="{ on: desktopPage === 1 }" @click="desktopPage = 1"></span>
+            <button class="pager-arrow" :disabled="desktopPage === 1" @click="desktopPage = 1">›</button>
           </div>
           <div class="desktop-footer"><span>◆ 无 限 回 廊 ◆</span></div>
         </div>
@@ -2155,6 +2163,7 @@ const currentView = ref<
 >('desktop');
 const settingsPage = ref('');
 const activeThread = ref<ForumThread | null>(null);
+const desktopPage = ref(0);
 const replyDraft = ref('');
 const showPostDialog = ref(false);
 const postTitle = ref('');
@@ -3690,6 +3699,45 @@ onUnmounted(() => {
   &.sp {
     background: linear-gradient(90deg, #2a1008, #5a2812);
   }
+}
+.desktop-pager {
+  position: absolute;
+  bottom: 50px;
+  left: 0;
+  right: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
+  z-index: 2;
+}
+.pager-arrow {
+  background: none;
+  border: 1px solid var(--amber-d, rgba(180, 140, 60, 0.6));
+  color: var(--amber-d, rgba(180, 140, 60, 0.6));
+  border-radius: 50%;
+  width: 26px;
+  height: 26px;
+  font-size: 15px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+.pager-arrow:disabled {
+  opacity: 0.3;
+  cursor: default;
+}
+.pager-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: rgba(127, 127, 127, 0.4);
+  cursor: pointer;
+}
+.pager-dot.on {
+  background: var(--amber-d, #b48c3c);
 }
 .desktop-footer {
   position: absolute;
