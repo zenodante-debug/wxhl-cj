@@ -708,8 +708,10 @@
     display: block;
   }
 
-  /* 职业树页：纵向铺满面板，树居中（放不下时顶对齐照常滚动） */
-  #tab-jobtree {
+  /* 职业树页：纵向铺满面板，树居中（放不下时顶对齐照常滚动）。
+     注意必须带 .active —— 裸 #id 的优先级会压过 .tab-content{display:none}，
+     导致职业树在每个模块里都显示并把别的内容挤掉 */
+  #tab-jobtree.active {
     display: flex;
     flex-direction: column;
     min-height: 100%;
