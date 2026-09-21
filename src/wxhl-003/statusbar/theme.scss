@@ -1397,7 +1397,12 @@
     display: none;
   }
   .tree-wrapper {
-    display: table;
+    /* width:max-content 量出树的真实宽度（display:table 会被可用宽度截断，
+       导致滚动容器以为没东西可滚；且 ul 居中 overflow 会把左半树推进不可达的负空间）。
+       树窄时 min-width:100% + 内部 flex 居中保持居中；树宽时左对齐、全树可滑。 */
+    display: block;
+    width: max-content;
+    min-width: 100%;
     margin: 0 auto;
     padding: 0 10px;
   }
