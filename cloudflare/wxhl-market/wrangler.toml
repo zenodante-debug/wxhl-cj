@@ -1,0 +1,10 @@
+name = "wxhl-market"
+main = "worker.js"
+compatibility_date = "2026-09-21"
+
+[[kv_namespaces]]
+binding = "MARKET"
+id = "7278882c9ad949439c8fe6cd6159b237"
+
+# 自定义域名（域名 657868.xyz 在 Cloudflare 账号内激活后，deploy 时自动绑定）
+routes = [{ pattern = "market.657868.xyz", custom_domain = true }]
