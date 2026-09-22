@@ -127,9 +127,9 @@
             <select
               :value="bp.数据.配方.装备基础"
               :disabled="写回中 !== '' || store.completing"
-              @change="写回装备基础(bp.物品名, ($event.target as HTMLSelectElement).value)"
+              @change="改装备基础(bp.物品名, bp.数据.配方.装备基础, $event.target as HTMLSelectElement)"
             >
-              <option value="">未指定</option>
+              <option value="" disabled>未指定（请选择）</option>
               <option v-for="o in 基础选项(bp.数据.配方.装备子类)" :key="o" :value="o">{{ o }}</option>
             </select>
           </label>
@@ -246,8 +246,6 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { computeDC } from './craft';
 import { WEAPON_TABLE, type ArmorSpectrum, type Attr, type Quality } from './equipTables';
 import { 材料类别, 行业列表, isBlueprintName, type 配方, type 行业 } from './recipes';
-import { readBlueprint, writeBlueprint } from './blueprint';
-import type { Bag } from '../market/settle';
 import { useCraftingStore } from './store';
 
 const emit = defineEmits<{ close: []; 'goto-market': [name: string] }>();
@@ -401,36 +399,22 @@ async function 补全(物品名: string): Promise<void> {
   }
 }
 
-/** 写回图纸的「装备基础」（武器类型 / 防具光谱）。
- *  补全（completeBlueprint）把 现有.配方.装备基础 当 DesignTarget.子类，为空或非法一律拒绝，
- *  而 AI 无权提供该字段、completeBp 也没有它的参数位——故必须先由玩家选定并落档。
- *  store 未暴露图纸字段的写入口，这里就地沿用 store 的「楼层探测 → _.set → replaceMvuData → 回读」模式，
- *  只写 背包.<物品名>.图纸数据.配方.装备基础；写入基底取当下新读的存档背包（不用 store.bag 快照，
- *  与 store 在 await 后重读的约定一致，避免覆盖这期间的背包变动）。 */
-async function 写回装备基础(物品名: string, 基础: string): Promise<void> {
+/** 装备基础下拉：换值即写回。落档（入参校验 / 新读背包为基底 / commit / 回读）全在
+ *  store.setBpBase 里，视图只管 UI 状态与禁用——UI 不自备 MVU 管道。
+ *  来由：补全（completeBlueprint）把 现有.配方.装备基础 当 DesignTarget.子类，为空或非法一律拒绝，
+ *  而 AI 无权提供该字段、completeBp 也没有它的参数位，故必须先由玩家选定并落档。 */
+async function 改装备基础(物品名: string, 原值: string, el: HTMLSelectElement): Promise<void> {
   if (写回中.value !== '') return;
+  const 选中 = el.value; // 先取：await 期间控件可能被别处重渲染
   写回中.value = 物品名;
   try {
-    const mid = typeof getCurrentMessageId === 'function' ? getCurrentMessageId() : -1;
-    const message_id: number | 'latest' = mid && mid !== -1 ? mid : 'latest';
-    const mvu = Mvu.getMvuData({ type: 'message', message_id });
-    const 当前背包 = (_.get(mvu, ['stat_data', '契约者', '背包']) ?? {}) as Bag;
-    const 现有 = readBlueprint(当前背包, 物品名);
-    if (!现有) {
-      toastr.error(`「${物品名}」不是有效图纸或已不在背包`);
-      return;
-    }
-    const newBag = writeBlueprint(当前背包, 物品名, { ...现有, 配方: { ...现有.配方, 装备基础: 基础 } });
-    _.set(mvu, ['stat_data', '契约者', '背包'], newBag);
-    await Mvu.replaceMvuData(mvu, { type: 'message', message_id });
-    store.syncFromMvu(); // 刷新背包 → 背包图纸 重算，下拉选中项与下方提示同步
-    // 回读核对：路径里不能带 物品名（AI 起的名可能含 `.`，会被 _.get 当成分隔符），故分层取
-    const 回读背包 = (_.get(Mvu.getMvuData({ type: 'message', message_id }), ['stat_data', '契约者', '背包']) ?? {}) as Bag;
-    const 回读 = (回读背包[物品名] as any)?.图纸数据?.配方?.装备基础;
-    if (回读 !== 基础) toastr.warning('装备基础已写入但回读核对不上：' + 物品名);
-    else toastr.success(基础 ? `已指定「${物品名}」的装备基础：${基础}` : `已清空「${物品名}」的装备基础`);
-  } catch (e: any) {
-    toastr.error('装备基础写回失败：' + (e?.message ?? e));
+    // 失败时 store 已 toastr + 写 lastError（顶部错误条会显示），视图不重复播报
+    const ok = await store.setBpBase(物品名, 选中);
+    if (ok) return;
+    // 失败要把控件退回存档里的真值：`:value` 绑定的值没变时 Vue 不会重刷 DOM，
+    // 不退回就会显示成一个其实没落档的选择（提示行说「未指定」而下拉显示「巨剑」）
+    const 真值 = store.背包图纸.find(b => b.物品名 === 物品名)?.数据.配方.装备基础 ?? 原值;
+    if (el.value !== 真值) el.value = 真值;
   } finally {
     写回中.value = '';
   }
