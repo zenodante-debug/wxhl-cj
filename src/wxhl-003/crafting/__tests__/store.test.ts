@@ -57,8 +57,9 @@ describe('assembleMaker · 制作者组装（归一位阶 0基→1基 回归）'
 // 故钉成永久测试。断言一律同时看「返回值 + 存档逐位不变 + 玩家看得到理由」三面。
 // ================================================================
 
-/** 假 toastr：只收错误与警告文案，供断言「玩家看得到理由」。 */
+/** 假 toastr：错误与警告收进 提示、成功收进 成功 —— 「不许假报成功」这类断言要看得到 success。 */
 const 提示: string[] = [];
+const 成功: string[] = [];
 /** 假聊天变量（getVariables 读、replaceVariables 写，用来喂 配方库）。 */
 let chatVars: any = {};
 /** 假存档（Mvu.getMvuData 读它、replaceMvuData 写回它 —— commit 之后还要回读，故必须是同一个对象）。 */
@@ -115,6 +116,7 @@ const 图纸物品 = (名称: string, 数量 = 1) => ({
 
 beforeEach(() => {
   提示.length = 0;
+  成功.length = 0;
   chatVars = {};
   genMock.mockReset();
   mvu = {
@@ -143,7 +145,7 @@ beforeEach(() => {
   (globalThis as any).toastr = {
     error: (m: string) => 提示.push(m),
     warning: (m: string) => 提示.push(m),
-    success: () => {},
+    success: (m: string) => 成功.push(m),
   };
   (globalThis as any).window = { confirm: () => true };
   setActivePinia(createPinia());
@@ -229,6 +231,23 @@ describe('Fix 2 · 同名图纸禁止重复购买，背包图纸可丢弃', () =
     expect(当前背包()[名]).toBeUndefined();
     expect(当前背包()['止血草'].数量).toBe(5);
     expect(当前UP()).toBe(20000);
+    expect(成功[0]).toContain('已丢弃');
+  });
+
+  it('discardBp：数量异常（缺字段/0/非数）→ 拒绝、不写档、不假报成功', async () => {
+    // 这张卡只认 图纸数据、不要求 数量，故数量缺失从 UI 可达；而 bagRemove 对 NaN 既不抛错也不删除，
+    // 若不自己收口就会「条目原地留存 + 弹成功提示」演成假成功（这正是本用例钉住的回归）。
+    for (const 数量 of [undefined, 0, NaN, -1]) {
+      const 名 = blueprintItemName('基础治疗药剂');
+      mvu.stat_data.契约者.背包 = { [名]: { ...图纸物品('基础治疗药剂'), 数量 } };
+      const s = useCraftingStore();
+      expect(await s.discardBp(名)).toBe(false);
+      expect(当前背包()[名]).toBeDefined(); // 条目原地留存，但没有假报成功
+      expect(当前UP()).toBe(20000);
+      expect(提示[0]).toContain('数量异常');
+      expect(成功).toEqual([]);
+      提示.length = 0;
+    }
   });
 
   it('discardBp：非图纸物品 / 不在背包 → 拒绝且零变量变动（不是通用删物品后门）', async () => {

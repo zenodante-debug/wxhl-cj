@@ -548,9 +548,19 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
       toastr.error(msg);
       return false;
     }
+    // 「背包图纸」卡片只认 图纸数据、不要求 数量，故数量异常（缺字段/0/负数/非数）从 UI 可达
+    // （数据只能来自 AI/GM 直接写背包）。必须在这里自己收口：bagRemove 对 NaN 既不抛错也不删除，
+    // 会把「条目原地留存（数量: NaN）+ 弹出成功提示」演成假成功；数量 ≤ 0 也会被 bagRemove 静默删掉。
+    const 数量 = Number((当前背包[物品名] as any)?.数量);
+    if (!Number.isFinite(数量) || 数量 <= 0) {
+      const msg = `图纸「${物品名}」的数量异常（变量里是 ${String((当前背包[物品名] as any)?.数量)}），无法丢弃——请先把「数量」改成正整数`;
+      lastError.value = msg;
+      toastr.error(msg);
+      return false;
+    }
     let newBag: Bag;
     try {
-      newBag = bagRemove(当前背包, 物品名, Number(当前背包[物品名].数量));
+      newBag = bagRemove(当前背包, 物品名, 数量);
     } catch (e: any) {
       const msg = e?.message ?? '图纸数量不足';
       lastError.value = msg;
