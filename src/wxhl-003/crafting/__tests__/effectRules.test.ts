@@ -53,17 +53,27 @@ describe('checkEffects · 违禁与条数', () => {
     const e: EffectEntry = { 类型: '消耗', 描述: '斩杀：目标生命低于15%时即死', 触发条件: '目标生命低于15%', 消耗: '每场1次' };
     expect(checkEffects([e], 4).ok).toBe(true);
   });
-  it('违禁判定不被条件/消耗字样解除（硬子句）', () => {
+  it('违禁判定不被消耗字样解除（硬子句 + 消耗不豁免）', () => {
     // 消耗类描述里几乎必带「每场」，不得因此洗白即死
     expect(checkEffects([{ 类型: '消耗', 描述: '即死', 消耗: '每场1次' }], 3).ok).toBe(false);
     expect(checkEffects([{ 类型: '常驻', 描述: '无条件即死，消耗1点体力' }], 3).ok).toBe(false);
     expect(checkEffects([{ 类型: '常驻', 描述: '永久无敌；每回合开始时发动' }], 3).ok).toBe(false);
   });
+  it('条件写在「触发条件」字段同样豁免即死禁令（AI 输出契约）', () => {
+    // 描述只写效果本身、条件与消耗写在独立字段——这是 Task 4 的 AI 输出契约
+    const e: EffectEntry = { 类型: '消耗', 描述: '即死', 触发条件: '目标生命低于15%', 消耗: '每场1次' };
+    expect(checkEffects([e], 3).ok).toBe(true);
+    // 同上但条件缺失 → 仍拒（消耗字段不豁免）
+    expect(checkEffects([{ 类型: '消耗', 描述: '即死', 消耗: '每场1次' }], 3).ok).toBe(false);
+  });
   it('必中核心/弱点/要害双向都算违禁，写明条件才放行', () => {
     expect(checkEffects([{ 类型: '常驻', 描述: '核心弱点必中' }], 3).ok).toBe(false);
     expect(checkEffects([{ 类型: '常驻', 描述: '必中核心弱点' }], 3).ok).toBe(false);
     expect(checkEffects([{ 类型: '常驻', 描述: '攻击要害，必中' }], 3).ok).toBe(false);
-    const 合法: EffectEntry = { 类型: '消耗', 描述: '攻击要害，必中（每场1次）', 触发条件: '目标暴露', 消耗: '每场1次' };
+    // 只有消耗、没有条件 → 不豁免
+    expect(checkEffects([{ 类型: '消耗', 描述: '攻击要害，必中（每场1次）', 消耗: '每场1次' }], 3).ok).toBe(false);
+    // 条件写在「触发条件」字段 → 放行
+    const 合法: EffectEntry = { 类型: '消耗', 描述: '攻击要害，必中', 触发条件: '目标暴露时', 消耗: '每场1次' };
     expect(checkEffects([合法], 3).ok).toBe(true);
   });
   it('合法效果返回钳制后的列表', () => {
