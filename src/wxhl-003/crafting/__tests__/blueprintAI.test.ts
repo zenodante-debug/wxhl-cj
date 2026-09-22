@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { sanitizeDesign, type DesignTarget } from '../blueprintAI';
+import { sanitizeCompletion, sanitizeDesign, type DesignTarget } from '../blueprintAI';
+import type { 图纸数据, 配方 } from '../recipes';
 
 const 目标: DesignTarget = {
   名称: '狼王牙刃', 成品类型: '装备', 子类: '短剑', 品质: '金色', 阶位: 3,
@@ -82,6 +83,20 @@ describe('sanitizeDesign · AI 结果硬校验', () => {
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.数据.配方.技能要求).toEqual({ 分类: '高级', 等级: 5 });
+  });
+  // 白/蓝不在图纸体系内（只有金/紫能生成图纸），但补全路径会走到，映射必须写对：
+  // 一律给「高级 Lv.5」会让一张白图纸比金图纸还难做
+  const 技能要求用例: [DesignTarget['品质'], '基础' | '高级', number][] = [
+    ['白色', '基础', 1],
+    ['蓝色', '基础', 3],
+    ['金色', '高级', 1],
+    ['紫色', '高级', 5],
+  ];
+  it.each(技能要求用例)('技能要求映射：%s → %s Lv.%i', (品质, 分类, 等级) => {
+    const r = sanitizeDesign(rawAI({ 品质 }), { ...目标, 品质 });
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.数据.配方.技能要求).toEqual({ 分类, 等级 });
   });
 });
 
@@ -174,6 +189,76 @@ describe('sanitizeDesign · no-throw 契约', () => {
   });
   it('阶位越界（6）→ 拒绝', () => {
     const r = 不抛(() => sanitizeDesign(rawAI(), { ...目标, 阶位: 6 }));
+    expect(r.ok).toBe(false);
+  });
+});
+
+// 补全路径：AI 结果必须与「现有」做 base 优先合并（Task 3 裁决），
+// 整份替换配方会让一次补全抹掉玩家已有的合法内容
+describe('sanitizeCompletion · 补全（base 优先合流，绝不覆盖既有合法值）', () => {
+  /** 现有图纸夹具：以合法图纸为底，再覆写想测的字段 */
+  function 现有图纸(patch: Partial<配方> = {}): 图纸数据 {
+    const r = sanitizeDesign(rawAI(), 目标);
+    if (!r.ok) throw new Error('测试夹具构造失败');
+    return {
+      ...r.数据,
+      制作者: '玩家',
+      补全: false,
+      配方: { ...r.数据.配方, 描述: '玩家写的风味', ...patch },
+    };
+  }
+
+  it('AI 描述为空 → 保留玩家已有描述，不清空', () => {
+    const r = sanitizeCompletion(rawAI({ 描述: undefined }), 现有图纸(), 3);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.数据.配方.描述).toBe('玩家写的风味');
+  });
+  it('现有描述为空时 → 采用 AI 的描述', () => {
+    const r = sanitizeCompletion(rawAI(), 现有图纸({ 描述: '' }), 3);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.数据.配方.描述).toBe('以魔狼之牙锻造的利刃');
+  });
+  it('现有合法品质=金色 不被 AI 的紫色 改写', () => {
+    const r = sanitizeCompletion(rawAI({ 品质: '紫色' }), 现有图纸({ 品质: '金色' }), 3);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.数据.配方.品质).toBe('金色');
+  });
+  it('白色图纸补全后仍是白色（不被 AI 或映射升格）', () => {
+    const r = sanitizeCompletion(rawAI({ 品质: '金色' }), 现有图纸({ 品质: '白色' }), 3);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.数据.配方.品质).toBe('白色');
+  });
+  it('现有材料为空 → 用 AI 的材料补齐', () => {
+    const r = sanitizeCompletion(rawAI(), 现有图纸({ 材料: [] }), 3);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.数据.配方.材料.length).toBe(2);
+  });
+  it('名称不可被 AI 改写（配方库去重键）', () => {
+    const r = sanitizeCompletion(rawAI({ 名称: 'AI乱改' }), 现有图纸(), 3);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.数据.配方.名称).toBe('狼王牙刃');
+  });
+  it('补全恒为 true', () => {
+    const r = sanitizeCompletion(rawAI(), 现有图纸(), 3);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.数据.补全).toBe(true);
+    expect(现有图纸().补全).toBe(false);
+  });
+  it('硬校验不过 → 原样拒绝，不产出合并结果', () => {
+    const r = sanitizeCompletion(rawAI({ 效果: [{ 类型: '常驻', 描述: '获得永久无敌' }] }), 现有图纸(), 3);
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reasons.join()).toContain('违禁');
+  });
+  it('阶位非法 → 原样拒绝（守卫在补全路径同样生效）', () => {
+    const r = sanitizeCompletion(rawAI(), 现有图纸(), 0);
     expect(r.ok).toBe(false);
   });
 });

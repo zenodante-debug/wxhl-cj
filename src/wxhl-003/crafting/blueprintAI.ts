@@ -7,6 +7,7 @@
 // no-throw 契约：sanitizeDesign 对任何输入都只返回 ok:false + 理由（safeParse + 阶位守卫），
 //   不用异常当拒绝信号——两个异步入口的 try/catch 只兜 AI 调用本身
 // ================================================================
+import { mergeBlueprintData } from './blueprint';
 import { checkEffects, type EffectEntry } from './effectRules';
 import { ARMOR_NAME, Q_ORDER, WEAPON_TABLE, type Quality } from './equipTables';
 import { BlueprintDataSchema, 配方Schema, type 图纸数据 } from './recipes';
@@ -131,6 +132,16 @@ function 解析理由(root: unknown, issues: readonly 解析问题[]): string[] 
   });
 }
 
+/** 技能要求映射：白/蓝沿用 recipes.ts 的模板/标准货约定（基础 1/3），金/紫走图纸约定（高级 1/5）
+ *  白/蓝不在图纸体系内（只有金/紫能生成图纸），但补全路径存在就该写对——
+ *  一律给「高级 Lv.5」会让一张白图纸比金图纸还难做 */
+const 技能要求表: Record<Quality, { 分类: '基础' | '高级'; 等级: number }> = {
+  白色: { 分类: '基础', 等级: 1 },
+  蓝色: { 分类: '基础', 等级: 3 },
+  金色: { 分类: '高级', 等级: 1 },
+  紫色: { 分类: '高级', 等级: 5 },
+};
+
 /** 纯函数硬校验：AI 返回的原始对象 → 合法图纸数据（或拒绝理由）
  *  契约：任何输入都不抛错（含 AI 编造的材料类别/效果类型、非法阶位），只返回 ok:false + 理由 */
 export function sanitizeDesign(
@@ -198,7 +209,7 @@ export function sanitizeDesign(
       数量: Math.max(1, Math.round(Number(m.数量 ?? 1))),
       核心: Boolean(m.核心),
     })),
-    技能要求: { 分类: '高级', 等级: 目标.品质 === '金色' ? 1 : 5 },
+    技能要求: 技能要求表[目标.品质],
     效果: 效果检查.效果,
     成品名: 名称,
     描述: typeof o.描述 === 'string' ? o.描述 : '',
@@ -213,6 +224,30 @@ export function sanitizeDesign(
   if (!数据解析.success) return { ok: false, reasons: [...reasons, ...解析理由(数据输入, 数据解析.error.issues)] };
 
   return { ok: true, 数据: 数据解析.data, clamped: [...clamped, ...效果检查.clamped] };
+}
+
+/** 补全的纯函数主体：AI 原始返回 → 硬校验 → 与「现有」做 base 优先合并
+ *  合流必须走 blueprint.mergeBlueprintData（Task 3 裁决：只填缺失/非法字段，绝不覆盖既有合法内容；
+ *  名称是配方库去重键，尤不可被 AI 改写）——整份替换配方会让一次补全抹掉玩家已有的风味描述。
+ *  抽成纯函数是为了可单测；completeBlueprint 只剩「取配置 + 调 AI」。 */
+export function sanitizeCompletion(
+  raw: unknown,
+  现有: 图纸数据,
+  阶位: number,
+): { ok: true; 数据: 图纸数据; clamped: string[] } | { ok: false; reasons: string[] } {
+  const 目标: DesignTarget = {
+    名称: 现有.配方.名称,
+    成品类型: 现有.配方.成品类型,
+    子类: 现有.配方.装备基础,
+    // 沿用图纸原品质：白/蓝映射成金色会静默升格（技能要求、定价全跟着变），只有不在允许集合内才回落金色
+    品质: Q_ORDER.includes(现有.配方.品质) ? 现有.配方.品质 : '金色',
+    阶位,
+    核心材料: 现有.配方.材料.find(m => m.核心)?.类别 ?? '任意',
+    行业: 现有.配方.行业,
+  };
+  const r = sanitizeDesign(raw, 目标);
+  if (!r.ok) return r;
+  return { ok: true, 数据: mergeBlueprintData(现有, r.数据), clamped: r.clamped };
 }
 
 function activeCfg() {
@@ -242,21 +277,9 @@ export async function completeBlueprint(
 ): Promise<{ ok: true; 数据: 图纸数据; clamped: string[] } | { ok: false; reasons: string[] }> {
   const cfg = activeCfg();
   if (!cfg.url || !cfg.apiKey) return { ok: false, reasons: ['未配置 API——请到「终端设置」配置后再补全图纸'] };
-  const 目标: DesignTarget = {
-    名称: 现有.配方.名称,
-    成品类型: 现有.配方.成品类型,
-    子类: 现有.配方.装备基础,
-    // 沿用图纸原品质：白/蓝映射成金色会静默升格（技能要求、定价全跟着变），只有不在允许集合内才回落金色
-    品质: Q_ORDER.includes(现有.配方.品质) ? 现有.配方.品质 : '金色',
-    阶位,
-    核心材料: 现有.配方.材料.find(m => m.核心)?.类别 ?? '任意',
-    行业: 现有.配方.行业,
-  };
   try {
     const raw = await aiGenerate(cfg, buildCompletePrompt(现有, 阶位), COMPLETE_SCHEMA as any);
-    const r = sanitizeDesign(extractJSON(raw), 目标);
-    if (!r.ok) return r;
-    return { ok: true, 数据: { ...r.数据, 补全: true }, clamped: r.clamped };
+    return sanitizeCompletion(extractJSON(raw), 现有, 阶位);
   } catch (e: any) {
     return { ok: false, reasons: [e?.message ?? 'AI 调用失败'] };
   }
