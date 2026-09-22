@@ -432,9 +432,14 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     // 重入守卫：两次上传都在 await 之前读同一份 配方库.value，后完成的那次会用陈旧库覆盖，
     // 丢掉前一条配方——故与 designing/completing 同套守卫，在 await 前同步占位
     if (uploading.value) return false;
-    const r = readContractor();
-    if (!r) return false;
-    const res = uploadBlueprint(bag.value, 物品名, 配方库.value);
+    // 与 designBlueprint/completeBp/doCraft 一致：入口先按存档刷新本地背包。
+    // 本动作没有 AI 延迟，但「工坊↔市场」切换 app 是个更长的窗口——组件不卸载则 bag.value 永不刷新，
+    // 用卖出前的旧背包当写入基底会把物品写回来而货款留着（凭空复制），且不会自愈。
+    if (!syncFromMvu()) return false;
+    const rr = readContractor();
+    if (!rr) return false;
+    const 当前背包 = (rr.c.背包 ?? {}) as Bag;
+    const res = uploadBlueprint(当前背包, 物品名, 配方库.value);
     if ('error' in res) {
       lastError.value = res.error;
       toastr.error(res.error);
@@ -442,8 +447,9 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     }
     uploading.value = true;
     try {
-      _.set(r.mvu, ['stat_data', '契约者', '背包'], res.bag as any);
-      await commit(r.mvu, r.mid, [[['stat_data', '契约者', '背包'], res.bag]]);
+      // 只写 背包；配方库走 ref + watchEffect 落聊天变量，不碰 MVU
+      _.set(rr.mvu, ['stat_data', '契约者', '背包'], res.bag as any);
+      await commit(rr.mvu, rr.mid, [[['stat_data', '契约者', '背包'], res.bag]]);
       配方库.value = res.配方库;
       syncFromMvu();
       toastr.success(`已掌握配方「${Object.keys(res.配方库).slice(-1)[0]}」`);
