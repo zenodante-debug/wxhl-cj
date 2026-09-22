@@ -110,10 +110,13 @@ function parseCategory(item) {
 }
 
 // ———— 价格校验: → { ok, min, max, reason } ————
-export function checkPrice(kind, item, sellerTier, price) {
+// opsKey 是「运营通道」：与 Worker 的 WELFARE_KEY 环境变量一致时，允许 0 UP 赠品挂单
+// （发福利用）。玩家端拿不到这个密钥，价格下限对他们依旧严格。
+export function checkPrice(kind, item, sellerTier, price, opsKey, welfareKey) {
   const fail = (reason, min = 0, max = 0) => ({ ok: false, min, max, reason });
   if (!Number.isFinite(Number(price)) || Number(price) < 0 || Number(price) > 9999999)
     return fail('价格超出允许范围');
+  const 运营 = Number(price) === 0 && !!welfareKey && opsKey === welfareKey;
   const tier = String(item?.阶位 ?? '') || String(sellerTier ?? '一阶');
 
   if (kind === 'goods') {
@@ -123,9 +126,9 @@ export function checkPrice(kind, item, sellerTier, price) {
     if (!f) return fail('阶位无法识别');
     const min = GOODS_BASE[0] * f;
     const max = GOODS_BASE[1] * f;
-    if (Number(price) < min) return fail(`价格过低，道具单价不得低于 ${min} UP`, min, max);
+    if (!运营 && Number(price) < min) return fail(`价格过低，道具单价不得低于 ${min} UP`, min, max);
     if (Number(price) > max) return fail(`价格过高，道具单价不得超过 ${max} UP`, min, max);
-    return { ok: true, min, max, reason: '' };
+    return { ok: true, min: 运营 ? 0 : min, max, reason: '' };
   }
 
   const q = parseQuality(item?.品质);
@@ -138,9 +141,9 @@ export function checkPrice(kind, item, sellerTier, price) {
   const ref = BASE[category][q.quality];
   const min = Math.floor(ref[0] * f);
   const max = Math.floor(ref[1] * f * (PREMIUM[q.quality] ?? 1));
-  if (Number(price) < min) return fail(`价格过低，不得低于基准下限 ${min} UP`, min, max);
+  if (!运营 && Number(price) < min) return fail(`价格过低，不得低于基准下限 ${min} UP`, min, max);
   if (Number(price) > max) return fail(`价格过高，${q.quality}装备不得超过 ${max} UP`, min, max);
-  return { ok: true, min, max, reason: '' };
+  return { ok: true, min: 运营 ? 0 : min, max, reason: '' };
 }
 
 // ———— 装备规则硬校验（世界书<装备效果强度限制>），返回拒绝原因或 null ————
@@ -187,7 +190,8 @@ function validateHard(item, quality, category, tierIdx) {
 
 // ———— 挂单整包校验: 结构防刷 + 服务器自行分类定价 + 装备规则硬校验 ————
 // 返回拒绝原因字符串, null = 通过。同时把服务器认定的分类与筛选列写进 out。
-function validateListing(b, out) {
+// opsKey / welfareKey：运营通道密钥（见 checkPrice 注释）
+function validateListing(b, out, opsKey, welfareKey) {
   if (!b) return 'bad request';
   if (typeof b.client !== 'string' || b.client.length === 0 || b.client.length > 64) return 'client 缺失或过长';
   if (typeof (b.seller ?? '') !== 'string' || String(b.seller).length > 24) return 'seller 过长';
@@ -205,7 +209,7 @@ function validateListing(b, out) {
 
   if (q && category) {
     b.kind = 'equip';
-    const chk = checkPrice('equip', b.item, String(b.tier ?? '一阶'), Number(b.price));
+    const chk = checkPrice('equip', b.item, String(b.tier ?? '一阶'), Number(b.price), opsKey, welfareKey);
     if (!chk.ok) return chk.reason;
     const idx = tierIdxOf(tier);
     if (idx === null) return '阶位无法识别';
@@ -218,7 +222,7 @@ function validateListing(b, out) {
   if (hasMarkers) return '物品带装备字段但品质或类型无法识别，无法定价——请补全「品质」与「类型」';
 
   b.kind = 'goods';
-  const chk = checkPrice('goods', b.item, String(b.tier ?? '一阶'), Number(b.price));
+  const chk = checkPrice('goods', b.item, String(b.tier ?? '一阶'), Number(b.price), opsKey, welfareKey);
   if (!chk.ok) return chk.reason;
   out.category = '道具';
   out.tier_idx = tierIdxOf(tier);
@@ -321,7 +325,7 @@ export default {
       try {
         const b = await request.json();
         const cols = {};
-        const reason = validateListing(b, cols);
+        const reason = validateListing(b, cols, b.opsKey, env.WELFARE_KEY);
         if (reason) return new Response(reason, { status: 400, headers: cors });
         const id = String(Date.now()).padStart(15, '0') + '-' + Math.random().toString(36).slice(2, 8);
         await withRetry(() =>

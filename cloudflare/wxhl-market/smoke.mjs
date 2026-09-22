@@ -167,5 +167,39 @@ check('蓝武器二阶 400~800', checkPrice('equip', { 品质: '蓝色', 类型:
 check('白装拒绝', !checkPrice('equip', { 品质: '白色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok);
 check('道具 5~3000×阶位²', checkPrice('goods', { 数量: 5, 阶位: '一阶' }, '一阶', 3000).ok && !checkPrice('goods', { 数量: 5, 阶位: '一阶' }, '一阶', 3001).ok);
 
+console.log('=== 10. 运营通道（0 UP 福利）===');
+check('无密钥时 0 UP 被拒', !checkPrice('goods', { 数量: 1, 阶位: '一阶' }, '一阶', 0).ok);
+check('密钥不匹配时 0 UP 被拒', !checkPrice('goods', { 数量: 1, 阶位: '一阶' }, '一阶', 0, 'wrong', 'secret').ok);
+check('未配置 WELFARE_KEY 时 0 UP 被拒', !checkPrice('goods', { 数量: 1, 阶位: '一阶' }, '一阶', 0, 'secret', undefined).ok);
+check('密钥匹配时 0 UP 放行', checkPrice('goods', { 数量: 1, 阶位: '一阶' }, '一阶', 0, 'secret', 'secret').ok);
+check('密钥匹配时装备也可 0 UP', checkPrice('equip', { 品质: '蓝色', 类型: '武器', 阶位: '二阶' }, '一阶', 0, 'secret', 'secret').ok);
+check('密钥匹配也拦不住非 0 低价（4 < 5）', !checkPrice('goods', { 数量: 1, 阶位: '一阶' }, '一阶', 4, 'secret', 'secret').ok);
+
+// 真实走一遍：无密钥挂 0 元应被拒；带密钥应成功
+const 福利券 = {
+  client: 'welfare', seller: '无由回廊', tier: '一阶', kind: 'goods',
+  item: {
+    名称: '十倍界王拳体验卡', 类型: '特殊道具', 品质: '特殊', 阶位: '一阶', 数量: 1,
+    描述: '超规格体验卡：使用后全基础属性翻10倍；代价是每回合流失 30% 最大HP/最大MP/最大耐力（按最大值计算，非上限），可自行解除。',
+  },
+  qty: 1, price: 0,
+};
+const envKey = { MARKET_DB: env.MARKET_DB, WELFARE_KEY: 'secret' };
+r = await worker.fetch(post('/market/list', 福利券), env);
+check('无密钥挂 0 元 → 400', r.status === 400, await r.clone().text());
+r = await worker.fetch(post('/market/list', { ...福利券, opsKey: 'wrong' }), envKey);
+check('密钥错误挂 0 元 → 400', r.status === 400);
+r = await worker.fetch(post('/market/list', { ...福利券, opsKey: 'secret' }), envKey);
+const coupon = await r.json();
+check('带正确密钥挂 0 元 → 200', r.status === 200, JSON.stringify(coupon));
+r = await worker.fetch(get('/market/listings'), env);
+check('市集能看到且 kind=goods', (await r.json()).listings.some(l => l.id === coupon.id && l.kind === 'goods'));
+r = await worker.fetch(post('/market/buy', { id: coupon.id, buyer: '测试乙', client: 'c2' }), env);
+check('0 UP 可被购买', r.status === 200);
+r = await worker.fetch(get('/market/mine?client=welfare'), env);
+check('0 元单不产生货款', (await r.json()).pending === 0);
+r = await worker.fetch(post('/market/list', { ...福利券, price: 3000 }), env);
+check('密钥通道不影响正常定价（3000 可挂）', r.status === 200);
+
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
 process.exit(fail === 0 ? 0 : 1);

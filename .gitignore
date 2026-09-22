@@ -11,3 +11,6 @@ pnpm-debug.log*
 
 auto-imports.d.ts
 components.d.ts
+
+# 自由市场运营密钥（本地存放，勿提交）
+cloudflare/wxhl-market/.welfare-key.txt
