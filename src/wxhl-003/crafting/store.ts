@@ -15,7 +15,7 @@ import {
   STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES, blueprintItemName, 道具基准价,
   type MaterialCategory, type 材料档案条目, type 配方, type 配方库, type 图纸数据,
 } from './recipes';
-import { ARMOR_NAME, WEAPON_TABLE, type Attr } from './equipTables';
+import { ARMOR_NAME, WEAPON_TABLE, armorStats, attrBonus, weaponStats, type ArmorSpectrum, type Attr } from './equipTables';
 import { 启发式归类 } from './recipes';
 import {
   blueprintPrice, collectBlueprints, readBlueprint, uploadBlueprint, writeBlueprint,
@@ -78,16 +78,43 @@ function 效果行(数据: 图纸数据): string[] {
   });
 }
 
+/** 数值来源一行（v2.1）：v2.1 把「名字」与「数值」分了家——种类名是自由文本、AI 自创（「浮游炮」），
+ *  真正的数值来自 参照模板 / 结构化字段。玩家若在**付费那一刻**看不到这一行，就只能对着自创名猜强度。
+ *  数值一律从 equipTables 的**实际表**取（weaponStats/armorStats/attrBonus），绝不硬编码字符串——
+ *  表一改，硬编码的文案就开始骗人。文案与 CraftingView 的「数值来源文本」逐字对齐，制作页与确认框同口径。
+ *  本函数是**展示路径**：非法阶位/模板（AI·GM 直写背包的坏图纸）一律不抛错，只回落成不带数值的写法。 */
+function 数值来源行(r: 配方): string {
+  if (r.成品类型 === '道具') {
+    return `道具数值：${r.道具类型}${r.道具固定值 ? ` · 固定值 ${r.道具固定值}` : ''}（吃 ${r.关联属性} 修正）`;
+  }
+  try {
+    if (r.装备子类 === '饰品') {
+      const b = attrBonus('饰品', r.阶位, r.品质);
+      return `饰品数值：主属性加成 +${b.主} / 副属性 +${b.副}（无伤害骰/防御/负重）`;
+    }
+    if (!r.参照模板) return '未指定数值参照——补全或制作前请先选一个';
+    if (r.装备子类 === '武器') {
+      const w = weaponStats(r.参照模板, r.阶位, r.品质);
+      return `数值参照【${r.参照模板}】→ 伤害骰 ${w.伤害骰} / 倍率 ${w.倍率} / 负重 ${w.负重}kg`;
+    }
+    const a = armorStats(r.参照模板 as ArmorSpectrum, r.阶位, r.品质);
+    return `数值参照【${r.参照模板}】→ 装备防御 ${a.装备防御} / 闪避 ${a.装备闪避} / 负重 ${a.负重}kg`;
+  } catch (_) {
+    return r.装备子类 === '饰品' ? '饰品数值：只加主/副属性加成' : `数值参照【${r.参照模板}】`;
+  }
+}
+
 /** 图纸可读摘要：AI 风味文案 + 机械要点（确认弹窗与图纸物品「描述」共用） */
 function 图纸摘要(数据: 图纸数据): string {
   const r = 数据.配方;
+  // 种类名与数值来源是**两个字段**（v2.1）：前者标「种类：」、后者另起一段，免得玩家把自创名当数值来源
   const 类型 = r.成品类型 === '装备'
-    ? `装备·${r.装备子类}${r.装备基础 ? `（${r.装备基础}）` : ''}`
+    ? `装备·${r.装备子类}${r.装备基础 ? `（种类：${r.装备基础}）` : ''}`
     : '道具';
   const 材料 = r.材料.map(m => `${m.核心 ? '★' : ''}${m.类别}×${m.数量}`).join('、');
   return [
     r.描述,
-    `${r.品质}·${r.阶位}阶 ${类型}`,
+    `${r.品质}·${r.阶位}阶 ${类型} ｜ ${数值来源行(r)}`,
     `材料：${材料}`,
     ...效果行(数据).map(l => `效果：${l}`),
   ].filter(Boolean).join('\n');

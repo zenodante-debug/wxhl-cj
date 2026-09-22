@@ -77,6 +77,8 @@ describe('assembleMaker · 制作者组装（归一位阶 0基→1基 回归）'
 /** 假 toastr：错误与警告收进 提示、成功收进 成功 —— 「不许假报成功」这类断言要看得到 success。 */
 const 提示: string[] = [];
 const 成功: string[] = [];
+/** 假确认框：capture 弹窗正文。确认框是玩家**付费那一刻**唯一看到的东西，文案值得钉住。 */
+let 确认框 = '';
 /** 假聊天变量（getVariables 读、replaceVariables 写，用来喂 配方库）。 */
 let chatVars: any = {};
 /** 假存档（Mvu.getMvuData 读它、replaceMvuData 写回它 —— commit 之后还要回读，故必须是同一个对象）。 */
@@ -158,6 +160,7 @@ const 图纸物品 = (名称: string, 数量 = 1, 数据: 图纸数据 = 图纸(
 beforeEach(() => {
   提示.length = 0;
   成功.length = 0;
+  确认框 = '';
   chatVars = {};
   genMock.mockReset();
   mvu = {
@@ -188,7 +191,12 @@ beforeEach(() => {
     warning: (m: string) => 提示.push(m),
     success: (m: string) => 成功.push(m),
   };
-  (globalThis as any).window = { confirm: () => true };
+  (globalThis as any).window = {
+    confirm: (m: string) => {
+      确认框 = m;
+      return true;
+    },
+  };
   setActivePinia(createPinia());
 });
 
@@ -260,6 +268,48 @@ describe('C1 · 道具定价走结构化基准（不再按成品名查 GOODS_UNI
     expect(await s.designBlueprint(目标('狼王牙刃', '装备'))).toBe(true);
     expect(当前UP()).toBe(18800); // 20000 − 1200
     expect(当前背包()[blueprintItemName('狼王牙刃')].图纸数据.配方.参照模板).toBe('短剑');
+  });
+});
+
+describe('确认框 · 数值来源必须在付费那一刻可见（v2.1 名字与数值分家）', () => {
+  it('装备：种类名与「数值参照」分列，数值取自武器表实算', async () => {
+    genMock.mockResolvedValue({
+      ok: true, 数据: 图纸('浮游炮', '装备', { 装备基础: '浮游炮', 参照模板: '突击步枪' }), clamped: [],
+    });
+    const s = useCraftingStore();
+    expect(await s.designBlueprint(目标('浮游炮', '装备', { 种类: '浮游炮' }))).toBe(true);
+    // 突击步枪 一阶 = [3 骰, d6, 倍率 0.5, 负重 4kg]；金色升两档骰面 → d6→d10
+    expect(确认框).toContain('装备·武器（种类：浮游炮） ｜ 数值参照【突击步枪】→ 伤害骰 3d10 / 倍率 0.5 / 负重 4kg');
+    // 同一份摘要也是图纸物品的「描述」，两处同源（AI 自创的种类名绝不冒充数值来源）
+    expect(当前背包()[blueprintItemName('浮游炮')].描述).toContain('数值参照【突击步枪】→ 伤害骰 3d10');
+  });
+
+  it('道具：展示 道具类型 + 固定值 + 关联属性', async () => {
+    genMock.mockResolvedValue({
+      ok: true, 数据: 图纸('不存在的药', '道具', { 道具类型: '恢复HP', 道具固定值: 20 }), clamped: [],
+    });
+    const s = useCraftingStore();
+    expect(await s.designBlueprint(目标('不存在的药', '道具'))).toBe(true);
+    expect(确认框).toContain('金色·1阶 道具 ｜ 道具数值：恢复HP · 固定值 20（吃 PER 修正）');
+  });
+
+  it('饰品：展示 attrBonus 实算的主/副属性加成（饰品没有参照模板这一栏）', async () => {
+    genMock.mockResolvedValue({
+      ok: true, 数据: 图纸('寒铁指环', '装备', { 装备子类: '饰品', 装备基础: '指环', 参照模板: '' }), clamped: [],
+    });
+    const s = useCraftingStore();
+    expect(await s.designBlueprint(目标('寒铁指环', '装备', { 装备子类: '饰品', 种类: '指环' }))).toBe(true);
+    // attrBonus('饰品', 一阶, 金色) = 主 1 / 副 floor(1×0.5) = 0
+    expect(确认框).toContain('装备·饰品（种类：指环） ｜ 饰品数值：主属性加成 +1 / 副属性 +0（无伤害骰/防御/负重）');
+  });
+
+  it('未指定参照模板的武器图纸：不假装有数值（也不抛错）', async () => {
+    genMock.mockResolvedValue({
+      ok: true, 数据: 图纸('无名刀', '装备', { 装备基础: '无名刀', 参照模板: '' }), clamped: [],
+    });
+    const s = useCraftingStore();
+    expect(await s.designBlueprint(目标('无名刀', '装备', { 种类: '无名刀' }))).toBe(true);
+    expect(确认框).toContain('未指定数值参照');
   });
 });
 
