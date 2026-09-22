@@ -83,12 +83,18 @@ export function uploadBlueprint(
   return { bag: nextBag, 配方库: { ...配方库, [名称]: 数据.配方 } };
 }
 
-/** 是否「已填」：undefined/null/空串/空数组/0 视为未填（0 判定只对数值字段有意义） */
-function 已填(v: unknown): boolean {
+/** 零也是合法取值的数值字段（终审 M2）：`0` 是 `道具固定值` 在世界书物价表里的正常取值
+ *  （弹药/状态/餐食/陷阱 全为 0，恢复类为 0 亦合法），不能按「未填」处理——
+ *  否则 base 的合法 0 会被 AI 的非零值静默覆盖（对恢复类图纸就是免费加强，且不留痕）。
+ *  其余数值字段（阶位、批量上限、版本）的 0 都是非法/哨兵值，仍按未填让位给 AI。 */
+const 零合法字段 = new Set<string>(['道具固定值']);
+
+/** 是否「已填」：undefined/null/空串/空数组/0 视为未填（0 判定只对数值字段有意义；零合法字段除外） */
+function 已填(v: unknown, 字段 = ''): boolean {
   if (v === undefined || v === null) return false;
   if (typeof v === 'string') return v.trim() !== '';
   if (Array.isArray(v)) return v.length > 0;
-  if (typeof v === 'number') return v !== 0;
+  if (typeof v === 'number') return v !== 0 || 零合法字段.has(字段);
   return true;
 }
 
@@ -102,7 +108,7 @@ function 取对象(v: unknown): Record<string, unknown> {
 /** base 的该字段算「已有有效内容」：已填 且 通过字段自身的 schema 校验 */
 function 有效字段(base: Record<string, unknown>, k: string, 形状: 字段形状): boolean {
   const v = base[k];
-  return 已填(v) && (形状[k]?.safeParse(v).success ?? true);
+  return 已填(v, k) && (形状[k]?.safeParse(v).success ?? true);
 }
 
 /** 逐字段合并：base 优先；base 缺失/空/非法时才用补的 */

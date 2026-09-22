@@ -378,6 +378,18 @@ describe('v2.1 AI 定制', () => {
     expect(r.数据.配方.成品名).toBe('浮游炮');
     expect(r.数据.配方.名称).toBe('浮游炮');
   });
+  // 终审 I1：空名 → blueprintItemName('') = 「图纸·」→ 配方库[''] → 背包空键（无法上架/识别、可无限复制）。
+  // 设计表单已不强制填名（交给 AI），故写入侧必须把「两边都空」这条堵死。
+  it('玩家留空 + AI 也没起名 → 拒（不让空名变成「图纸·」与背包空键）', () => {
+    const r = sanitizeDesign(rawAI({ 名称: '' }), { ...目标, 名称: '' });
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reasons.join()).toContain('成品名');
+  });
+  it('玩家只填空白字符 + AI 也没起名 → 同样拒（trim 后为空）', () => {
+    const r = sanitizeDesign(rawAI({ 名称: '   ' }), { ...目标, 名称: '  ' });
+    expect(r.ok).toBe(false);
+  });
   it('设计要求 落进配方（存档留痕）', () => {
     const r = sanitizeDesign(rawAI(), 目标);
     expect(r.ok).toBe(true);

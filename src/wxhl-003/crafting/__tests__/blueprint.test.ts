@@ -176,4 +176,28 @@ describe('mergeBlueprintData · 补全（base 优先，绝不覆盖已有合法�
   it('收口：补全后仍缺必填字段（材料）时 parse 抛错', () => {
     expect(() => mergeBlueprintData({}, 补({ 名称: '半成品' }))).toThrow();
   });
+  // 终审 M2：0 是 道具固定值 的合法取值（弹药/状态/餐食/陷阱 全为 0），不是「未填」。
+  // 若按未填处理，base 的合法 0 会被 AI 的非零值静默覆盖——对恢复类图纸就是免费加强，且不记入 clamped。
+  it('道具固定值 0 是合法值 → 不被 AI 的非零值改写', () => {
+    const 道具底稿 = (道具固定值: number | undefined = 0): 图纸数据 =>
+      BlueprintDataSchema.parse({
+        配方: {
+          名称: '制式爆炸物', 来源: '标准', 行业: '工程', 成品类型: '道具', 品质: '蓝色',
+          材料: [{ 类别: '火药', 数量: 2, 核心: true }], 技能要求: { 分类: '基础', 等级: 3 },
+          道具类型: '爆炸物', 道具固定值, 关联属性: 'PER',
+        },
+        制作者: '玩家', 补全: false, 版本: 1,
+      });
+    expect(mergeBlueprintData(道具底稿(), 补({ 道具固定值: 999 })).配方.道具固定值).toBe(0);
+    expect(mergeBlueprintData(道具底稿(), 补({ 道具固定值: 999 })).配方.道具类型).toBe('爆炸物');
+    // 边界：字段真的缺席（raw 底稿未过 parse）时仍要让 AI 补上
+    const 缺字段 = { 配方: { ...道具底稿().配方, 道具固定值: undefined } };
+    expect(mergeBlueprintData(缺字段, 补({ 道具固定值: 45 })).配方.道具固定值).toBe(45);
+  });
+  it('其余数值字段的 0 仍按未填处理（阶位/版本让位给 AI）', () => {
+    const 坏 = { 配方: { ...金配方, 阶位: 0 }, 制作者: '玩家', 版本: 0 };
+    const r = mergeBlueprintData(坏, { 配方: { 阶位: 3 }, 版本: 2 } as unknown as Partial<图纸数据>);
+    expect(r.配方.阶位).toBe(3);
+    expect(r.版本).toBe(2);
+  });
 });
