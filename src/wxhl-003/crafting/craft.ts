@@ -69,6 +69,7 @@ export interface CraftInput {
   核心材料: { 物品名: string; 数量: number };
   辅料: { 物品名: string; 数量: number }[];
   缺图纸: boolean;
+  图纸持有: boolean; // 金/紫：图纸物品是否在手（不在手 → 强制降档 + 基础 DC+5）
   越阶材料: boolean;
   劣质材料: boolean;
   设施: { 修正: number; 仅白色: boolean; 标签: string };
@@ -95,12 +96,15 @@ export interface CraftOutcome {
 
 export function validateCraft(input: CraftInput, bag: Bag): string[] {
   const errs: string[] = [];
+  const sk = input.制作者.技能;
+  // 金/紫（v2 图纸系统）：需高级技能 + 对应生活系职业；缺图纸**不阻断**——由 executeCraft 走「降档 + DC+5」
   if (input.配方.品质 === '金色' || input.配方.品质 === '紫色') {
-    errs.push('金色/紫色配方需要图纸系统，v2 开放');
-    return errs;
+    if (!sk) return [`未掌握生活技能「${input.配方.行业}」`];
+    if (input.配方.品质 === '金色' && sk.等级 < 1) errs.push('金色图纸需高级技能 Lv.1');
+    if (input.配方.品质 === '紫色' && sk.等级 < 5) errs.push('紫色图纸需高级技能 Lv.5');
+    if (!input.制作者.职业名 || input.制作者.职业名 === '无') errs.push('金/紫品质需对应生活系职业');
   }
   if (input.阶位 > input.制作者.阶位上限) errs.push(`成品阶位超过契约者阶位上限（${input.制作者.阶位上限}）`);
-  const sk = input.制作者.技能;
   if (!sk) {
     errs.push(`未掌握生活技能「${input.配方.行业}」`);
     return errs;
@@ -118,38 +122,61 @@ export function validateCraft(input: CraftInput, bag: Bag): string[] {
   return errs;
 }
 
+/** 缺图纸判定：金/紫 = 图纸物品不在手（世界书「金/紫须图纸，无则强制降档且基础 DC+5」）；
+ *  白/蓝本就不需图纸，沿用 v1 的「缺图纸」修正入口（兼容既有调用方，store 恒传 false） */
+function 缺图纸降档(input: CraftInput): boolean {
+  const 金紫 = input.配方.品质 === '金色' || input.配方.品质 === '紫色';
+  return 金紫 ? !input.图纸持有 : input.缺图纸;
+}
+
+/** 缺图纸降档：金→蓝、紫→金；白/蓝不在降档范围（世界书只对金/紫强制降档），原样返回 */
+function downgrade(q: Quality): Quality {
+  if (q === '金色') return '蓝色';
+  if (q === '紫色') return '金色';
+  return q;
+}
+
 /** 装备成品生成 */
 function buildEquip(input: CraftInput, 结果: CraftResult, rand: () => number): MarketItemSnapshot & { 数量: number } {
-  // 杰作升档；但野外简陋环境（仅白色）升档也守住白色——validateCraft 只拦非白配方，拦不住掷出的升档
-  const q = 结果 === '杰作' && !input.设施.仅白色 ? nextQuality(input.配方.品质) : input.配方.品质;
+  // 缺图纸先强制降一档，杰作再升档；野外简陋环境（仅白色）升档也守住白色——validateCraft 只拦非白配方，拦不住掷出的升档
+  const 基础品质 = 缺图纸降档(input) ? downgrade(input.配方.品质) : input.配方.品质;
+  const q = 结果 === '杰作' && !input.设施.仅白色 ? nextQuality(基础品质) : 基础品质;
   const full = 结果 === '精制' || 结果 === '杰作';
   const roll = (b: number) => (full ? b : fluctuate(b, rand));
   const tier = input.阶位;
   const core = input.核心材料.物品名;
   const 主属性 = INDUSTRY_ATTR[input.配方.行业][0];
   const 署名 = 结果 === '杰作' ? `\n署名：由${input.制作者.姓名}亲手制造，永久刻印。` : '';
+  // 图纸可指定武器类型/光谱（AI 定制），优先于制作时选的子类型；模板/标准配方该字段为空串 → 回落子类型
+  const 基础 = input.配方.装备基础 || input.子类型;
+  // 武器类型词（用于回落命名）；防具同理用光谱词
+  const 词 = input.配方.装备子类 === '武器' ? 基础 : ARMOR_NAME[基础 as ArmorSpectrum];
+  // 图纸特效落装：特效名 → 描述
+  const 效果 = Object.fromEntries((input.配方.效果 ?? []).map(e => [e.描述, e.描述]));
+  const 风味 = input.配方.描述 ? ` ${input.配方.描述}` : '';
+  const 名称 = input.配方.成品名 || `${core}${词}`;
 
   if (input.配方.装备子类 === '武器') {
-    const w = weaponStats(input.子类型, tier, q);
+    const w = weaponStats(基础, tier, q);
     const b = attrBonus('武器', tier, q);
     return {
-      名称: `${core}${input.子类型}`, 类型: '武器', 品质: q, 阶位: TIER_NAMES[tier - 1],
+      名称, 类型: '武器', 品质: q, 阶位: TIER_NAMES[tier - 1],
       穿戴门槛: '无', 强化等级: 0, 伤害骰: w.伤害骰, 倍率: w.倍率,
       主属性, 副属性: input.副属性, 主属性加成: roll(b.主), 副属性加成: roll(b.副),
-      装备防御: 0, 装备闪避: 0, 负重: w.负重, 效果: {},
-      描述: `手工制作的${q}${input.子类型}，以${core}为核心材料打造。${署名}`, 数量: 1,
+      装备防御: 0, 装备闪避: 0, 负重: w.负重, 效果,
+      描述: `手工制作的${q}${基础}，以${core}为核心材料打造。${风味}${署名}`, 数量: 1,
     };
   }
   // 防具
-  const 光谱 = input.子类型 as ArmorSpectrum;
+  const 光谱 = 基础 as ArmorSpectrum;
   const a = armorStats(光谱, tier, q);
   const b = attrBonus('躯干', tier, q);
   return {
-    名称: `${core}${ARMOR_NAME[光谱]}`, 类型: '防具', 品质: q, 阶位: TIER_NAMES[tier - 1],
+    名称, 类型: '防具', 品质: q, 阶位: TIER_NAMES[tier - 1],
     穿戴门槛: wearThreshold(光谱, tier, q), 强化等级: 0, 伤害骰: '无', 倍率: 0,
     主属性, 副属性: input.副属性, 主属性加成: roll(b.主), 副属性加成: roll(b.副),
-    装备防御: roll(a.装备防御), 装备闪避: roll(a.装备闪避), 负重: a.负重, 效果: {},
-    描述: `手工制作的${q}${ARMOR_NAME[光谱]}，以${core}为核心材料打造。${署名}`, 数量: 1,
+    装备防御: roll(a.装备防御), 装备闪避: roll(a.装备闪避), 负重: a.负重, 效果,
+    描述: `手工制作的${q}${ARMOR_NAME[光谱]}，以${core}为核心材料打造。${风味}${署名}`, 数量: 1,
   };
 }
 
@@ -159,6 +186,8 @@ function buildGoods(input: CraftInput, 结果: CraftResult, rand: () => number):
   const tier = input.阶位;
   const q = input.配方.品质;
   const 署名 = 结果 === '杰作' ? `\n署名：由${input.制作者.姓名}亲手调制，永久刻印。` : '';
+  // 图纸自带的风味文案（AI 定制）落到成品描述；模板/标准配方为空串
+  const 风味 = input.配方.描述 ? ` ${input.配方.描述}` : '';
   let 效果描述 = '';
   if (base && (base.类别 === '恢复HP' || base.类别 === '恢复MP')) {
     const full = 结果 === '精制' || 结果 === '杰作';
@@ -175,14 +204,14 @@ function buildGoods(input: CraftInput, 结果: CraftResult, rand: () => number):
   return {
     名称: input.配方.名称, 类型: '消耗品', 品质: q, 阶位: TIER_NAMES[tier - 1],
     自制: true, 毒性值: tier,
-    描述: `${效果描述}（自制品：同类连用效果减半，含毒性需医疗中心净化）${署名}`,
+    描述: `${效果描述}（自制品：同类连用效果减半，含毒性需医疗中心净化）${风味}${署名}`,
     数量: input.数量,
   };
 }
 
 export function executeCraft(input: CraftInput, d20: number, rand: () => number): CraftOutcome {
   const 修正 = [
-    ...(input.缺图纸 ? [{ 项: '缺图纸', 值: 5 }] : []),
+    ...(缺图纸降档(input) ? [{ 项: '缺图纸', 值: 5 }] : []),
     ...(input.越阶材料 ? [{ 项: '越阶高级材料代替', 值: -2 }] : []),
     ...(input.劣质材料 ? [{ 项: '劣质材料替代', 值: 3 }] : []),
     ...(input.设施.修正 !== 0 ? [{ 项: input.设施.标签, 值: input.设施.修正 }] : []),
