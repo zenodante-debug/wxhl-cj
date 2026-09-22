@@ -124,12 +124,25 @@
             <span>单价 UP</span>
             <input v-model.number="sellSel[entry.name].price" type="number" min="0" max="9999999" />
           </label>
-          <div v-if="entry.kindCheck" class="sf-check">
-            <div v-for="e in entry.kindCheck.errors" :key="e" class="sf-err">✕ {{ e }}</div>
-            <div v-for="w in entry.kindCheck.warnings" :key="w" class="sf-warn">⚠ {{ w }}</div>
+          <div v-if="selectedRow(entry.name)?.无法定价" class="sf-check">
+            <div class="sf-err">✕ 物品带有装备字段但品质或类型无法识别，回廊无法定价——请先补全「品质」与「类型」字段，或点上方标签改判为道具</div>
           </div>
-          <div v-if="entry.priceHint" class="sf-hint" :class="{ bad: !entry.priceHint.ok }">
-            {{ entry.priceHint.ok ? `合法区间 ${entry.priceHint.min} ~ ${entry.priceHint.max} UP` : entry.priceHint.reason }}
+          <template v-else-if="selectedRow(entry.name)?.equipCheck">
+            <div
+              v-if="selectedRow(entry.name)!.equipCheck!.errors.length || selectedRow(entry.name)!.equipCheck!.warnings.length"
+              class="sf-check"
+            >
+              <div v-for="e in selectedRow(entry.name)!.equipCheck!.errors" :key="e" class="sf-err">✕ {{ e }}</div>
+              <div v-for="w in selectedRow(entry.name)!.equipCheck!.warnings" :key="w" class="sf-warn">⚠ {{ w }}</div>
+            </div>
+            <div v-else class="sf-check ok">✓ 装备规则校验通过（效果条目 / 属性加成基准 / 骰面格式 / 强效果限制）</div>
+          </template>
+          <div v-if="selectedRow(entry.name)?.priceHint" class="sf-hint" :class="{ bad: !selectedRow(entry.name)!.priceHint!.ok }">
+            {{
+              selectedRow(entry.name)!.priceHint!.ok
+                ? `合法区间 ${selectedRow(entry.name)!.priceHint!.min} ~ ${selectedRow(entry.name)!.priceHint!.max} UP`
+                : selectedRow(entry.name)!.priceHint!.reason
+            }}
           </div>
         </div>
       </div>
@@ -289,7 +302,9 @@ const bagRows = computed(() =>
       auto.kind === 'goods' &&
       hasEquipMarkers({ ...item, 名称: name }) &&
       !kindOverride[name]; // 未手动标注且带装备字段却定不了价 → 服务器会拒
-    return { name, item, kind, auto, 无法定价 };
+    // 物品标签（「蓝色·防具」，道具为空串）
+    const tag = auto.kind === 'equip' ? `${auto.gray ? `灰色封印(${auto.quality})` : auto.quality}·${auto.category}` : '';
+    return { name, item, kind, auto, tag, 无法定价 };
   }),
 );
 
@@ -303,16 +318,13 @@ const sellRows = computed(() =>
       const priceNum = Number(sel.price);
       const priceValid = sel.price !== '' && Number.isFinite(priceNum) && priceNum >= 0;
       const equipCheck =
-        r.kind === 'equip'
-          ? validateEquip(
-              snap,
-              r.auto.kind === 'equip' ? r.auto : { quality: '蓝色', category: '武器', gray: false },
-              tierIndexOfItem(r.item, store.playerTier) ?? 0,
-            )
-          : null;
+        r.kind === 'equip' && r.auto.kind === 'equip' ? validateEquip(snap, r.auto, tierIndexOfItem(r.item, store.playerTier) ?? 0) : null;
       return {
-        ...r,
+        name: r.name,
+        item: r.item,
+        kind: r.kind,
         entry: sel,
+        无法定价: r.无法定价,
         // 价格合法区间提示（按标注口径算）
         priceHint: priceValid ? checkPrice(r.kind, snap, store.playerTier, priceNum) : null,
         equipCheck,
@@ -327,13 +339,16 @@ const sellRows = computed(() =>
     }),
 );
 
-/** 模板用：每件背包物品 + 勾选状态（放最后，避免引用未初始化的 sellRows） */
-const bagTagged = computed(() =>
-  bagRows.value.map(r => ({ ...r, sel: sellSel[r.name] ?? null })),
-);
+/** 模板用：每件背包物品 + 勾选状态 */
+const bagTagged = computed(() => bagRows.value.map(r => ({ ...r, sel: sellSel[r.name] ?? null })));
 
 const selCount = computed(() => sellRows.value.length);
 const sellableCount = computed(() => sellRows.value.filter(r => r.canSell).length);
+
+/** 模板用：取已勾选行的派生信息（价格提示/装备校验），未勾选返回 null */
+function selectedRow(name: string) {
+  return sellRows.value.find(r => r.name === name) ?? null;
+}
 
 function toggleSel(name: string, item: MarketItemSnapshot & { 数量: number }) {
   if (sellSel[name]) delete sellSel[name];
@@ -373,19 +388,6 @@ async function doSellAll() {
 }
 
 // ============ 展示辅助 ============
-/** 背包物品的装备标签（「蓝色·防具」，道具返回空串） */
-function equipTag(name: string, item: MarketItemSnapshot): string {
-  const c = classify({ ...item, 名称: name });
-  if (c.kind !== 'equip') return '';
-  const q = c.gray ? `灰色封印(${c.quality})` : c.quality;
-  return `${q}·${c.category}`;
-}
-
-/** 背包物品列表（一次性算好装备标签，避免模板每个卡片重复 classify） */
-const bagTagged = computed(() =>
-  bagEntries.value.map(([name, item]) => ({ name, item, tag: equipTag(name, item) })),
-);
-
 function qualityColor(item: MarketItemSnapshot): string {
   // 按解包后的原品质上色（灰色封印(紫色) → 紫色）
   switch (parseQuality(item.品质)?.quality) {
