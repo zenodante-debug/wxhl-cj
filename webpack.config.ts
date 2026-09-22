@@ -59,10 +59,13 @@ function glob_script_files() {
       const file_dirname = path.dirname(file);
       for (const [index, result] of results.entries()) {
         const result_dirname = path.dirname(result);
+<<<<<<< HEAD
         // 顶层 src/ 或 示例/ 不应遮蔽其子目录中的独立项目
         if (result_dirname === 'src' || result_dirname === '示例') {
           continue;
         }
+=======
+>>>>>>> 4a9344276d925a83e32726c58b9b05debdf4a8ad
         const common = common_path(result_dirname, file_dirname);
         if (common === result_dirname) {
           return;
@@ -186,6 +189,7 @@ function tavern_sync(compiler: webpack.Compiler) {
   });
 }
 
+<<<<<<< HEAD
 /** 脚本项目目录下的 CDN 加载器/手机端兼容补丁外壳文件, 存在时自动注入构建产物首尾 */
 interface WxhlWrapper {
   prelude?: string;
@@ -238,12 +242,17 @@ function wxhl_wrapper(wrapper: WxhlWrapper) {
   };
 }
 
+=======
+>>>>>>> 4a9344276d925a83e32726c58b9b05debdf4a8ad
 function parse_configuration(entry: Entry): (_env: any, argv: any) => webpack.Configuration {
   const should_obfuscate = fs
     .readFileSync(path.join(import.meta.dirname, entry.script), 'utf-8')
     .includes('@obfuscate');
   const script_filepath = path.parse(entry.script);
+<<<<<<< HEAD
   const wrapper = find_wxhl_wrapper(entry);
+=======
+>>>>>>> 4a9344276d925a83e32726c58b9b05debdf4a8ad
 
   return (_env, argv) => ({
     experiments: {
@@ -538,8 +547,12 @@ function parse_configuration(entry: Entry): (_env: any, argv: any) => webpack.Co
               }),
             ]
           : [],
+<<<<<<< HEAD
       )
       .concat(wrapper.prelude !== undefined || wrapper.patch !== undefined ? [{ apply: wxhl_wrapper(wrapper) }] : []),
+=======
+      ),
+>>>>>>> 4a9344276d925a83e32726c58b9b05debdf4a8ad
     optimization: {
       minimize: true,
       minimizer: [
@@ -597,12 +610,15 @@ function parse_configuration(entry: Entry): (_env: any, argv: any) => webpack.Co
         return callback();
       }
 
+<<<<<<< HEAD
       // CDN 加载器外壳存在时, pinia/klona 由外壳在运行时经多 CDN 回退加载后填充到全局变量,
       // vue 仍复用酒馆页面已有的 Vue 全局对象 (外壳会在缺失时从 CDN 加载并补上)
       if (wrapper.prelude !== undefined && (request === 'pinia' || request === 'klona')) {
         return callback(null, 'var __wxhl' + (request === 'pinia' ? 'Pinia' : 'Klona'));
       }
 
+=======
+>>>>>>> 4a9344276d925a83e32726c58b9b05debdf4a8ad
       if (
         ['vue', 'vue-router'].every(key => request !== key) &&
         ['pixi', 'react', 'vue'].some(key => request.includes(key))
