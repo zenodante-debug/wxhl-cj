@@ -15,7 +15,7 @@ import {
   STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES, blueprintItemName,
   type MaterialCategory, type 材料档案条目, type 配方, type 配方库, type 图纸数据,
 } from './recipes';
-import type { Attr } from './equipTables';
+import { ARMOR_NAME, WEAPON_TABLE, type Attr } from './equipTables';
 import { 启发式归类 } from './recipes';
 import {
   blueprintPrice, collectBlueprints, readBlueprint, uploadBlueprint, writeBlueprint,
@@ -427,6 +427,39 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     }
   }
 
+  /** 回写图纸的「装备基础」（武器类型 / 防具光谱）：残缺图纸的 装备基础 为空时，
+   *  completeBlueprint 会因装备基础校验不过而拒绝，需要先补这一格——UI 不该自备 MVU 管道。
+   *  先验后写：该值会被 craft.ts 的 buildEquip 直接查表消费（weaponStats / armorStats），
+   *  编造的值会产出坏成品，故只收 equipTables 真实表里的键。 */
+  async function setBpBase(物品名: string, 装备基础: string): Promise<boolean> {
+    // 纯入参校验放在最前：不合法时不必碰存档，存档读不到也照样能报出参数错
+    if (!Object.hasOwn(WEAPON_TABLE, 装备基础) && !Object.hasOwn(ARMOR_NAME, 装备基础)) {
+      const msg = `非法装备基础「${装备基础}」：武器须是 WEAPON_TABLE 的键（${Object.keys(WEAPON_TABLE).join('/')}），防具须是光谱之一（${Object.keys(ARMOR_NAME).join('/')}）`;
+      lastError.value = msg;
+      toastr.error(msg);
+      return false;
+    }
+    // 与 doCraft/designBlueprint/completeBp/uploadBp 一致：入口先按存档刷新，写入基底取新读值
+    if (!syncFromMvu()) return false;
+    const rr = readContractor();
+    if (!rr) return false;
+    const 当前背包 = (rr.c.背包 ?? {}) as Bag;
+    const 数据 = readBlueprint(当前背包, 物品名);
+    if (!数据) {
+      const msg = `「${物品名}」不是有效图纸或已不在背包`;
+      lastError.value = msg;
+      toastr.error(msg);
+      return false;
+    }
+    const newBag = writeBlueprint(当前背包, 物品名, { ...数据, 配方: { ...数据.配方, 装备基础 } });
+    // 只写 背包（不碰 UP）；一次 commit
+    _.set(rr.mvu, ['stat_data', '契约者', '背包'], newBag);
+    await commit(rr.mvu, rr.mid, [[['stat_data', '契约者', '背包'], newBag]]);
+    syncFromMvu();
+    toastr.success(`图纸「${物品名}」装备基础已设为「${装备基础}」`);
+    return true;
+  }
+
   /** 上传学习：图纸物品出包，配方登记进配方库（背包走一次 commit，配方库走聊天变量落盘） */
   async function uploadBp(物品名: string): Promise<boolean> {
     // 重入守卫：两次上传都在 await 之前读同一份 配方库.value，后完成的那次会用陈旧库覆盖，
@@ -472,6 +505,6 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
   return {
     codex, 配方库, playerName, playerTier, playerUP, bag, lastOutcome, lastError, designing, completing, uploading,
     allRecipes, 背包图纸, syncFromMvu, facilityInfo, matchMaterials, setCodex, doCraft,
-    designBlueprint, completeBp, uploadBp, deleteRecipe,
+    designBlueprint, completeBp, setBpBase, uploadBp, deleteRecipe,
   };
 });
