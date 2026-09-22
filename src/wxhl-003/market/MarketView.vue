@@ -286,6 +286,8 @@ import {
 import { validateEquip } from './equipRules';
 import type { Bag } from './settle';
 import { useMarketStore } from './store';
+// 图纸转卖属 spec §5.2 的 v3 范围：图纸是工坊的生产资料，这里只借它的命名约定把图纸挡在上架候选之外
+import { isBlueprintName } from '../crafting/recipes';
 
 const emit = defineEmits<{ close: [] }>();
 const store = useMarketStore();
@@ -396,7 +398,11 @@ const sellSel = reactive<Record<string, SellEntry>>({});
 const kindOverride = reactive<Record<string, 'equip' | 'goods'>>({});
 
 const bagEntries = computed(() =>
-  Object.entries(store.playerBag as Bag).filter(([, item]) => Number(item.数量) > 0),
+  Object.entries(store.playerBag as Bag)
+    // 排除图纸：图纸转卖属 v3（spec §5.2）。当前上架只按普通道具价（[5,3000]×阶位²）估，
+    // 会把 4500~112500 UP 买来的生产资料贱卖；且买家能否拿到可用图纸取决于 worker 是否保留
+    // 「图纸数据」这种未知字段，保真度未知。故图纸一律不进上架候选。
+    .filter(([name, item]) => Number(item.数量) > 0 && !isBlueprintName(name)),
 );
 
 /** 每件物品的自动判定（重量级价格提示/装备校验只在勾选后算） */
@@ -530,6 +536,8 @@ watch(
     if (!name) return;
     const item = (store.playerBag as Bag)[name];
     if (!item || Number(item.数量) <= 0) return;
+    // 与 bagEntries 同一道门：工坊「上架市场」目前只带成品名过来，但入口不该各自为政
+    if (isBlueprintName(name)) return;
     tab.value = 'sell';
     if (!sellSel[name]) sellSel[name] = { name, item, qty: 1, price: '', desc: String(item.描述 ?? '') };
     store.pendingSell = '';

@@ -57,9 +57,9 @@
               <option value="紫色">紫色</option>
             </select>
           </label>
-          <label>阶位
+          <label>{{ 定制阶位标签 }}
             <select v-model.number="定制.阶位">
-              <option v-for="t in 5" :key="t" :value="t">{{ t }}阶</option>
+              <option v-for="t in 定制阶位上限" :key="t" :value="t">{{ t }}阶</option>
             </select>
           </label>
           <label>核心材料<input v-model="定制.核心材料" type="text" placeholder="背包里的物品名" /></label>
@@ -126,7 +126,7 @@
           <label v-if="bp.数据.配方.成品类型 === '装备'" class="crf-bp-base">装备基础
             <select
               :value="写回暂存[bp.物品名] ?? bp.数据.配方.装备基础"
-              :disabled="写回中 !== '' || store.completing"
+              :disabled="写回中 !== '' || 丢弃中 !== '' || store.completing"
               @change="改装备基础(bp.物品名, $event.target as HTMLSelectElement)"
             >
               <option value="" disabled>未指定（请选择）</option>
@@ -135,11 +135,14 @@
           </label>
           <div v-if="装备基础提示(bp.数据.配方)" class="crf-warn">{{ 装备基础提示(bp.数据.配方) }}</div>
           <div class="crf-bp-btns">
-            <button class="crf-mini" :disabled="store.completing || store.uploading || 写回中 !== ''" @click="补全(bp.物品名)">
+            <button class="crf-mini" :disabled="store.completing || store.uploading || 写回中 !== '' || 丢弃中 !== ''" @click="补全(bp.物品名)">
               {{ 补全目标 === bp.物品名 ? '补全中…' : '补全词条' }}
             </button>
             <button v-if="已掌握(bp.数据.配方.名称)" class="crf-mini" disabled>已掌握</button>
-            <button v-else class="crf-mini" :disabled="store.uploading || store.completing" @click="store.uploadBp(bp.物品名)">上传学习</button>
+            <button v-else class="crf-mini" :disabled="store.uploading || store.completing || 丢弃中 !== ''" @click="store.uploadBp(bp.物品名)">上传学习</button>
+            <button class="crf-mini crf-mini-dang" :disabled="store.uploading || store.completing || 写回中 !== '' || 丢弃中 !== ''" @click="丢弃(bp.物品名)">
+              {{ 丢弃中 === bp.物品名 ? '丢弃中…' : '丢弃' }}
+            </button>
           </div>
         </div>
       </div>
@@ -202,6 +205,7 @@
         </div>
 
         <div class="crf-dc">DC 预览：{{ dcPreview }}（D20+基础属性+技能Lv ≥ DC）</div>
+        <div class="crf-dc" :class="难度提示.类">{{ 难度提示.文 }}</div>
         <button class="crf-go" :disabled="!form.核心材料名" @click="go">开工</button>
 
         <div v-if="store.lastOutcome" class="crf-result" :class="'r-' + store.lastOutcome.结果">
@@ -242,11 +246,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref } from 'vue';
+import { computed, onMounted, reactive, ref, watchEffect } from 'vue';
+import { 归一位阶 } from '../dice';
 import { computeDC } from './craft';
 import { WEAPON_TABLE, type ArmorSpectrum, type Attr, type Quality } from './equipTables';
-import { 材料类别, 行业列表, isBlueprintName, type 配方, type 行业 } from './recipes';
-import { useCraftingStore } from './store';
+import { INDUSTRY_ATTR, 材料类别, 行业列表, isBlueprintName, type 配方, type 行业 } from './recipes';
+import { makerFor, useCraftingStore } from './store';
 
 const emit = defineEmits<{ close: []; 'goto-market': [name: string] }>();
 const store = useCraftingStore();
@@ -286,6 +291,31 @@ const dcPreview = computed(() => {
     ...(store.facilityInfo().修正 !== 0 ? [{ 项: 设施标签.value, 值: store.facilityInfo().修正 }] : []),
   ];
   return computeDC(form.配方.品质, form.阶位, 修正).最终;
+});
+
+// ---------------- v2 收尾：开工前把难度如实摊给玩家（避免「花了 UP 买图纸才发现做不出来」）----------------
+
+/** 玩家本次能掷出的检定值上限 = D20 满值 20 + 行业对应最高基础属性 + 技能等级。
+ *  与 executeCraft 的检定值同式（属性修正值不参与检定），只是 d20 取满值；
+ *  makerFor 与 facilityInfo 同形：直接读 MVU 的非响应式取用，故放在 computed 里。 */
+const 检定值上限 = computed(() => {
+  const r = form.配方;
+  if (!r) return 0;
+  const m = makerFor(r.行业);
+  if (!m) return 0;
+  return 20 + Math.max(...INDUSTRY_ATTR[r.行业].map(a => m.基础属性[a])) + (m.技能?.等级 ?? 0);
+});
+
+/** 难度分档（如实，不粉饰）：judgeRoll 里 d20=1 恒「大失败」、d20=20 恒「杰作」，其余按 检定值 ≥ DC 判成功。
+ *  由 检定值 = d20 + (上限 − 20) 反推「成功所需的最小 d20」= DC − 上限 + 20。 */
+const 难度提示 = computed(() => {
+  const dc = Number(dcPreview.value);
+  const 上限 = 检定值上限.value;
+  if (!Number.isFinite(dc)) return { 类: '', 文: '' };
+  const 需骰 = dc - 上限 + 20;
+  if (需骰 <= 2) return { 类: 'ok', 文: `检定值上限 ${上限} vs DC ${dc} —— 除自然 1 外必成` };
+  if (需骰 <= 19) return { 类: 'warn', 文: `检定值上限 ${上限} vs DC ${dc} —— 需 d20 ≥ ${需骰}` };
+  return { 类: 'bad', 文: `检定值上限 ${上限} vs DC ${dc} —— 掷满 d20 也不够，仅自然 20 可成（杰作）` };
 });
 
 // ---------------- v2：折叠区 / AI 定制 / 背包图纸 ----------------
@@ -341,6 +371,18 @@ const 定制 = reactive({
 const 定制子类 = computed(() => (定制.装备类 === '武器' ? 定制.武器类 : 定制.防具类));
 const 定制可提交 = computed(() => 定制.名称.trim() !== '' && 定制.核心材料.trim() !== '');
 
+/** 玩家自身阶位（1~5）：playerTier 是「一阶」这类字符串，归一位阶 返回 **0 基**下标故 +1；
+ *  认不出（超脱/空/六阶…）保守取 1——与 assembleMaker 的兜底同源。 */
+const 玩家阶位 = computed(() => (归一位阶(store.playerTier) ?? 0) + 1);
+/** 定制阶位上限 = min(5, 自身阶位)：validateCraft 按 制作者.阶位上限 拦成品阶位，放开就会花钱
+ *  买到一张自己做不出来的图纸（五阶紫 = 112,500 UP）。 */
+const 定制阶位上限 = computed(() => Math.min(5, 玩家阶位.value));
+const 定制阶位标签 = computed(() => (定制阶位上限.value < 5 ? `阶位（最高 ${定制阶位上限.value} 阶）` : '阶位'));
+// 自身阶位刷新后（syncFromMvu）可能低于已选值：把选择夹回上限，避免下拉停在无对应选项的空值上
+watchEffect(() => {
+  if (定制.阶位 > 定制阶位上限.value) 定制.阶位 = 定制阶位上限.value;
+});
+
 async function 提交定制(): Promise<void> {
   if (!定制可提交.value) {
     toastr.warning('请先填写图纸名称与核心材料');
@@ -369,6 +411,9 @@ function 定核心材料默认(): void {
 // ---- 背包图纸：补全 / 上传学习（store 侧 completing/uploading 是全局守卫，这里只做按钮文案与置灰）----
 const 补全目标 = ref('');
 const 写回中 = ref('');
+/** 丢弃在途守卫（单飞）：与写回中同类的「上一次落档还没回来」窗口——两次丢弃都在 await 之前
+ *  读同一份背包，后完成的那次会用陈旧基底把前一次的结果覆盖回去（图纸复活）。置灰同组按钮。 */
+const 丢弃中 = ref('');
 /** 写回在途的乐观值（物品名 → 玩家刚选的值），只活到本次写回结束。
  *  为什么需要它：Vue 对 `value` 这个 prop 是**每次 patch 都强刷**（renderer 里 `next !== prev || key === 'value'`，
  *  不参与「值没变就跳过」的优化），而 `写回中` 的置位本身就会触发一次重渲染 —— 若 `:value` 直接绑存档值，
@@ -428,6 +473,23 @@ async function 改装备基础(物品名: string, el: HTMLSelectElement): Promis
   }
 }
 
+/** 丢弃一张背包图纸：图纸转卖属 v3、市场不收（见 MarketView 的 bagEntries），同名配方已掌握时
+ *  也传不上去，没有这个出口玩家只能让它永久占位。落档全在 store.discardBp（只写背包），
+ *  视图只管确认框、单飞守卫与按钮文案。 */
+async function 丢弃(物品名: string): Promise<void> {
+  if (丢弃中.value !== '') return;
+  const 份 = Number(store.bag[物品名]?.数量 ?? 1);
+  if (!window.confirm(
+    `确认丢弃图纸「${物品名}」${份 > 1 ? `（${份} 张）` : ''}？\n\n丢弃后无法找回。若还想学这张图纸的配方，请改用「上传学习」。`,
+  )) return;
+  丢弃中.value = 物品名;
+  try {
+    await store.discardBp(物品名);
+  } finally {
+    丢弃中.value = '';
+  }
+}
+
 function pickRecipe(r: 配方) {
   form.配方 = r;
   form.阶位 = r.来源 === '模板' ? 1 : r.阶位 || 1;
@@ -484,6 +546,10 @@ onMounted(() => {
 .crf-form select, .crf-form input { max-width: 60%; }
 .crf-check { justify-content: flex-start !important; }
 .crf-dc { font-size: 12px; opacity: .8; }
+/* 难度分档配色：必成 / 靠骰运 / 掷满也不够（分档口径见脚本里的 难度提示 注释） */
+.crf-dc.ok { color: #4a9d5f; opacity: 1; }
+.crf-dc.warn { color: #e67e22; opacity: 1; }
+.crf-dc.bad { color: #c0392b; opacity: 1; }
 .crf-go { padding: 10px; border-radius: 8px; border: none; background: #b8860b; color: #fff; font-weight: 700; cursor: pointer; }
 .crf-sell { margin-top: 6px; padding: 5px 12px; border-radius: 6px; border: 1px solid #b8860b; background: none; color: #b8860b; font-size: 12px; cursor: pointer; }
 .crf-go:disabled { opacity: .4; cursor: not-allowed; }
@@ -508,6 +574,8 @@ onMounted(() => {
 .crf-warn { margin-top: 4px; font-size: 11px; color: #e67e22; }
 .crf-bp-btns { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 6px; }
 .crf-mini { padding: 5px 12px; border-radius: 6px; border: 1px solid #b8860b; background: none; color: #b8860b; font-size: 12px; cursor: pointer; }
-.crf-mini:disabled, .crf-del:disabled { opacity: .4; cursor: not-allowed; }
+/* 丢弃（不可逆）：沿用「删除配方」的警示红，与同组的金色操作区分开 */
+.crf-mini-dang { border-color: #c0392b; color: #c0392b; }
+.crf-mini:disabled, .crf-mini-dang:disabled, .crf-del:disabled { opacity: .4; cursor: not-allowed; }
 .crf-owned { color: #b8860b; }
 </style>

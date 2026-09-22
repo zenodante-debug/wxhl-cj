@@ -12,7 +12,7 @@ import {
   autoPick, executeCraft, validateCraft, type CraftInput, type CraftOutcome,
 } from './craft';
 import {
-  STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES, blueprintItemName,
+  GOODS_BASE, STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES, blueprintItemName,
   type MaterialCategory, type 材料档案条目, type 配方, type 配方库, type 图纸数据,
 } from './recipes';
 import { ARMOR_NAME, WEAPON_TABLE, type Attr } from './equipTables';
@@ -130,6 +130,15 @@ export function assembleMaker(c: any, 行业: string): CraftInput['制作者'] {
   };
 }
 
+/** 当前存档的制作者组成（按行业取该行业的生活技能）。
+ *  供 UI 在开工前算「检定值上限 = 20 + 行业对应基础属性 + 技能等级」并与 DC 对比（executeCraft 同式，d20 取满值）。
+ *  与 facilityInfo 同形：直接读 MVU、非响应式，调用点放在 computed 里。
+ *  读不到存档返回 null（与 assembleMaker 的纯函数契约分开——这一层才是 I/O）。 */
+export function makerFor(行业: string): CraftInput['制作者'] | null {
+  const r = readContractor();
+  return r ? assembleMaker(r.c, 行业) : null;
+}
+
 export const useCraftingStore = defineStore('wxhl003-crafting', () => {
   const chatState = loadChatState();
   const codex = ref<Record<string, 材料档案条目>>(chatState.材料档案);
@@ -151,6 +160,24 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
 
   /** 背包里未上传的图纸（Task 7 的「背包图纸」区消费） */
   const 背包图纸 = computed(() => collectBlueprints(bag.value));
+
+  /** 消耗品图纸的成品名必须命中 GOODS_BASE（craft.ts 的 buildGoods 只从该表取数值/效果）：
+   *  AI 自创的消耗品名会产出「只有风味描述、没有数值也没有效果条目」的哑弹，
+   *  而这张图纸最多要花 12,500 UP（25 一阶单价 × 20 × 25 五阶系数）才买得到。 */
+  function 消耗品名理由(名称: string): string | null {
+    if (Object.hasOwn(GOODS_BASE, 名称)) return null;
+    return `消耗品图纸仅支持已有配方（${Object.keys(GOODS_BASE).join('/')}）`;
+  }
+
+  /** 同名图纸/配方查重：命中返回给玩家看的理由，无命中返回 null（调用方负责 toastr + lastError）。
+   *  查的是「实际会写进背包的图纸物品名」——AI 可能自行改成品名，故拿到生成结果的 r.名称 之后要再查一次。
+   *  用 hasOwn：图纸名由 AI 生成，`constructor`/`toString` 之类会让真值判定误报。 */
+  function 同名理由(名称: string, 背包: Bag): string | null {
+    if (Object.hasOwn(配方库.value, 名称)) return `已掌握该配方「${名称}」，不能重复购买`;
+    const 物品名 = blueprintItemName(名称);
+    if (Object.hasOwn(背包, 物品名)) return `背包里已有一张同名图纸「${物品名}」，不能重复购买`;
+    return null;
+  }
 
   // 材料档案/配方库变更 → 读-并-写聊天变量（保留同键其他字段，也不动其他顶层变量）
   watchEffect(() => {
@@ -294,6 +321,15 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     if (designing.value) return false;
     // 早失败：先确认存档可读、顺手刷新 UP，再去烧 token
     if (!syncFromMvu()) return false;
+    // 两道「扣款前早退」：都不写任何变量、也不烧 AI token。查的是**目标名**——AI 若自行改成品名，
+    // 拿到生成结果后还会按最终名再收口一次（见下面 r.名称 处的两处复查）。
+    const 早退 = (目标.成品类型 === '消耗品' ? 消耗品名理由(目标.名称) : null)
+      ?? 同名理由(目标.名称, bag.value);
+    if (早退) {
+      lastError.value = 早退;
+      toastr.error(早退);
+      return false;
+    }
     designing.value = true;
     try {
       const gen = await generateBlueprint(目标);
@@ -306,15 +342,29 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
       const 数据 = gen.数据;
       const r = 数据.配方;
 
+      // 复查其一：消耗品的成品名（AI 可能改过名）。buildGoods 只认 GOODS_BASE，
+      // 名字落不进去就是哑弹——宁可拒掉这次定制（只亏 token）也不让玩家花钱买到废纸。
+      if (r.成品类型 === '消耗品') {
+        const 名理由 = 消耗品名理由(r.名称);
+        if (名理由) {
+          const msg = r.名称 === 目标.名称 ? 名理由 : `AI 返回的成品名「${r.名称}」不在配方表内——${名理由}`;
+          lastError.value = msg;
+          toastr.error(msg);
+          return false;
+        }
+      }
+
       // 定价：装备按成品一阶中值×2，消耗品按道具一阶单价×20，阶位系数由 blueprintPrice 内部乘
       // 用 sanitizeDesign 收口后的 r（成品类型/装备子类/阶位/品质已归一到目标值），免去手写映射；
-      // 道具单价先按玩家点名的目标查表（AI 可能给配方改名），再退回收口后的成品名
+      // 道具单价按**实际产出的成品名** r.名称 查表——buildGoods 就是拿 r.名称 查 GOODS_BASE 的，
+      // 上面的复查又已保证它命中该表，故这里「按成品名计价」与「按成品名产装」是同一把尺子；
+      // 目标名只作防御性兜底，两者都查不到（GOODS_BASE 里 5 个未列价的道具）才走 DEFAULT 初值。
       let 价: number;
       try {
         价 = blueprintPrice(
           r.成品类型, r.装备子类, r.阶位, r.品质,
           r.成品类型 === '消耗品'
-            ? (GOODS_UNIT_PRICE[目标.名称] ?? GOODS_UNIT_PRICE[r.成品名] ?? DEFAULT_GOODS_UNIT_PRICE)
+            ? (GOODS_UNIT_PRICE[r.名称] ?? GOODS_UNIT_PRICE[目标.名称] ?? DEFAULT_GOODS_UNIT_PRICE)
             : undefined,
         );
       } catch (e: any) {
@@ -335,6 +385,15 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
       }
       const 当前UP = Number(rr.c.经济?.UP ?? 0);
       const 当前背包 = (rr.c.背包 ?? {}) as Bag;
+
+      // 复查其二：同名图纸/配方（按最终名 + 新读的背包）。第二张既不能上传学习（「已掌握」会被拒），
+      // 又占着背包与已付的 UP，故必须在 spendUP 之前拒掉——此处零变量变动，玩家只亏一次 AI 调用。
+      const 重复 = 同名理由(r.名称, 当前背包);
+      if (重复) {
+        lastError.value = 重复;
+        toastr.error(重复);
+        return false;
+      }
 
       const 摘要 = 图纸摘要(数据);
       const 钳制 = gen.clamped.length ? `\n\n【系统钳制】\n${gen.clamped.map(c => `· ${c}`).join('\n')}` : '';
@@ -470,6 +529,41 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     return true;
   }
 
+  /** 丢弃背包里的一张图纸物品（图纸转卖属 spec §5.2 的 v3 范围，市场不收；同名配方已掌握时也传不上去，
+   *  没有这个出口玩家就只能让它永久占位）。丢弃整条物品：数量 >1 时一并丢，免得卡片留在原地像没生效。
+   *  与 setBpBase 同形：入口 syncFromMvu → 新读背包为基底 → 一次 commit → syncFromMvu，只写 契约者.背包。
+   *  入参仍按图纸收口（readBlueprint），不让这个动作变成通用的删物品后门。 */
+  async function discardBp(物品名: string): Promise<boolean> {
+    if (!syncFromMvu()) return false;
+    const rr = readContractor();
+    if (!rr) {
+      lastError.value = '读不到存档变量（契约者不存在）';
+      toastr.error(lastError.value);
+      return false;
+    }
+    const 当前背包 = (rr.c.背包 ?? {}) as Bag;
+    if (!readBlueprint(当前背包, 物品名)) {
+      const msg = `「${物品名}」不是有效图纸或已不在背包`;
+      lastError.value = msg;
+      toastr.error(msg);
+      return false;
+    }
+    let newBag: Bag;
+    try {
+      newBag = bagRemove(当前背包, 物品名, Number(当前背包[物品名].数量));
+    } catch (e: any) {
+      const msg = e?.message ?? '图纸数量不足';
+      lastError.value = msg;
+      toastr.error(msg);
+      return false;
+    }
+    _.set(rr.mvu, ['stat_data', '契约者', '背包'], newBag);
+    await commit(rr.mvu, rr.mid, [[['stat_data', '契约者', '背包'], newBag]]);
+    syncFromMvu();
+    toastr.success(`已丢弃图纸「${物品名}」`);
+    return true;
+  }
+
   /** 上传学习：图纸物品出包，配方登记进配方库（背包走一次 commit，配方库走聊天变量落盘） */
   async function uploadBp(物品名: string): Promise<boolean> {
     // 重入守卫：两次上传都在 await 之前读同一份 配方库.value，后完成的那次会用陈旧库覆盖，
@@ -515,6 +609,6 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
   return {
     codex, 配方库, playerName, playerTier, playerUP, bag, lastOutcome, lastError, designing, completing, uploading,
     allRecipes, 背包图纸, syncFromMvu, facilityInfo, matchMaterials, setCodex, doCraft,
-    designBlueprint, completeBp, setBpBase, uploadBp, deleteRecipe,
+    designBlueprint, completeBp, setBpBase, discardBp, uploadBp, deleteRecipe,
   };
 });
