@@ -12,11 +12,10 @@ import {
   autoPick, executeCraft, validateCraft, type CraftInput, type CraftOutcome,
 } from './craft';
 import {
-  STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES, blueprintItemName, 道具基准价,
+  STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES, blueprintItemName, isBlueprintName, 道具基准价, 启发式归类,
   type MaterialCategory, type 材料档案条目, type 配方, type 配方库, type 图纸数据,
 } from './recipes';
 import { ARMOR_NAME, WEAPON_TABLE, armorStats, attrBonus, weaponStats, type ArmorSpectrum, type Attr } from './equipTables';
-import { 启发式归类 } from './recipes';
 import {
   blueprintPrice, collectBlueprints, readBlueprint, uploadBlueprint, writeBlueprint,
 } from './blueprint';
@@ -316,8 +315,16 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     return codex.value[name];
   }
 
+  /** 按类别从背包里拣材料（制作页的「核心材料」候选由它供水）。
+   *  **必须排除图纸**：图纸是生产资料、不是材料——启发式归类按子串匹配，`图纸·秘银护符` 会被「银」字
+   *  归进金属，一旦出现在候选里被玩家勾中，4,500~112,500 UP 买来的图纸就当材料烧了（不可逆）。
+   *  排除收口在**这里**而不是各调用点：autoPick（craft.ts）与设计表单的候选各自排了一遍，唯独本函数
+   *  的消费路径漏了——修在调用点，每加一个消费点就得重修一次。与 autoPick 的排除同源、同一把尺子。
+   *  注意这里只影响「候选列表」：玩家显式指定图纸当核心材料照旧可用（doCraft 不经本函数），
+   *  显式选择的那条路径由 codexOf 照常归档，行为与 v1 一致。 */
   function matchMaterials(类别: MaterialCategory): string[] {
-    return Object.keys(bag.value).filter(n => 类别 === '任意' || codexOf(n).类别 === 类别);
+    return Object.keys(bag.value)
+      .filter(n => !isBlueprintName(n) && (类别 === '任意' || codexOf(n).类别 === 类别));
   }
 
   function setCodex(name: string, patch: Partial<材料档案条目>): void {

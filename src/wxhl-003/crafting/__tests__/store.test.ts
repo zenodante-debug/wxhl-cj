@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import {
-  BlueprintDataSchema, 配方Schema, blueprintItemName,
+  BlueprintDataSchema, 配方Schema, blueprintItemName, 启发式归类,
   type 图纸数据, type 道具类型, type 配方,
 } from '../recipes';
 import type { Quality } from '../equipTables';
@@ -678,5 +678,51 @@ describe('Task 6 · 行业技能映射（wxhl003_crafting.行业技能映射）�
     mvu.stat_data.契约者.通用技能 = { 锻造术: { 分类: '基础', 阶位: '一阶', 等级: 3 } };
     chatVars = {};
     expect((await 开工())?.结果).toBe('杰作');
+  });
+});
+
+// ================================================================
+// matchMaterials 源头排除图纸（T5 评审抓到的真花钱漏洞）
+// 启发式归类按子串匹配：`图纸·秘银护符` 会被「银」字归进「金属」，于是出现在制作页的核心材料候选里；
+// 玩家勾中 → 分配核心材料 认领 → bagRemove 消耗 —— 4,500~112,500 UP 买来的生产资料一次性烧掉，不可逆。
+// 排除收口在本函数（制作页候选的唯一供水方），而不是各调用点：修在调用点就得每加一个消费点重修一次。
+// ================================================================
+describe('matchMaterials · 候选里不得出现图纸（否则手工勾选就能烧掉生产资料）', () => {
+  /** 备货：一张会被误归成「金属」的图纸 + 真金属/怪物素材；图纸名里的「银」是漏洞成立的原因 */
+  const 备货 = (): void => {
+    mvu.stat_data.契约者.背包 = {
+      '图纸·秘银护符': { 名称: '图纸·秘银护符', 数量: 1, 类型: '图纸' },
+      精铁: { 名称: '精铁', 数量: 5 },
+      狼牙: { 名称: '狼牙', 数量: 2 },
+      兽骨: { 名称: '兽骨', 数量: 3 },
+    };
+  };
+
+  it('被误归成「金属」的图纸不出现在金属候选里（旧实现会）', () => {
+    备货();
+    const s = useCraftingStore();
+    s.syncFromMvu();
+    // 先复核漏洞前提：这条启发式确实会把图纸归成金属（不是凭空假设的输入）
+    expect(启发式归类('图纸·秘银护符')).toBe('金属');
+    const 金属 = s.matchMaterials('金属');
+    expect(金属).toContain('精铁');
+    expect(金属).not.toContain('图纸·秘银护符');
+  });
+
+  it('「任意」候选同样排除图纸，真材料一个不少', () => {
+    备货();
+    const s = useCraftingStore();
+    s.syncFromMvu();
+    const 任意 = s.matchMaterials('任意');
+    expect(任意).not.toContain('图纸·秘银护符');
+    expect(任意).toEqual(expect.arrayContaining(['精铁', '狼牙', '兽骨']));
+  });
+
+  it('其它类别的过滤未被误伤（排除图纸不是把整张候选清空）', () => {
+    备货();
+    const s = useCraftingStore();
+    s.syncFromMvu();
+    expect(s.matchMaterials('怪物素材')).toEqual(expect.arrayContaining(['狼牙', '兽骨']));
+    expect(s.matchMaterials('草药')).toEqual([]);
   });
 });
