@@ -125,9 +125,9 @@
           <div v-if="bp.数据.配方.描述" class="cc-line crf-desc">{{ bp.数据.配方.描述 }}</div>
           <label v-if="bp.数据.配方.成品类型 === '装备'" class="crf-bp-base">装备基础
             <select
-              :value="bp.数据.配方.装备基础"
+              :value="写回暂存[bp.物品名] ?? bp.数据.配方.装备基础"
               :disabled="写回中 !== '' || store.completing"
-              @change="改装备基础(bp.物品名, bp.数据.配方.装备基础, $event.target as HTMLSelectElement)"
+              @change="改装备基础(bp.物品名, $event.target as HTMLSelectElement)"
             >
               <option value="" disabled>未指定（请选择）</option>
               <option v-for="o in 基础选项(bp.数据.配方.装备子类)" :key="o" :value="o">{{ o }}</option>
@@ -369,6 +369,14 @@ function 定核心材料默认(): void {
 // ---- 背包图纸：补全 / 上传学习（store 侧 completing/uploading 是全局守卫，这里只做按钮文案与置灰）----
 const 补全目标 = ref('');
 const 写回中 = ref('');
+/** 写回在途的乐观值（物品名 → 玩家刚选的值），只活到本次写回结束。
+ *  为什么需要它：Vue 对 `value` 这个 prop 是**每次 patch 都强刷**（renderer 里 `next !== prev || key === 'value'`，
+ *  不参与「值没变就跳过」的优化），而 `写回中` 的置位本身就会触发一次重渲染 —— 若 `:value` 直接绑存档值，
+ *  在途那次重渲染就会把玩家刚选的值刷回存档旧值（成功后再跳回来，肉眼看到「选完弹回去、过一会又跳回来」）。
+ *  绑乐观值后，在途渲染写的是同一个串，runtime-dom 的 `oldValue !== newValue` 判定直接跳过赋值，闪烁即消。
+ *  写回一结束就撤掉（无论成败）：成功时它与存档真值相同故无感，失败时 `:value` 自然回落存档真值，
+ *  也避免条目长期留着把「别处改动的真值」遮住。 */
+const 写回暂存 = ref<Record<string, string | undefined>>({});
 
 /** 是否已掌握同名配方：用 hasOwn，图纸名由 AI 生成，`constructor` 之类会让真值判定误判 */
 function 已掌握(名称: string): boolean {
@@ -402,20 +410,20 @@ async function 补全(物品名: string): Promise<void> {
 /** 装备基础下拉：换值即写回。落档（入参校验 / 新读背包为基底 / commit / 回读）全在
  *  store.setBpBase 里，视图只管 UI 状态与禁用——UI 不自备 MVU 管道。
  *  来由：补全（completeBlueprint）把 现有.配方.装备基础 当 DesignTarget.子类，为空或非法一律拒绝，
- *  而 AI 无权提供该字段、completeBp 也没有它的参数位，故必须先由玩家选定并落档。 */
-async function 改装备基础(物品名: string, 原值: string, el: HTMLSelectElement): Promise<void> {
+ *  而 AI 无权提供该字段、completeBp 也没有它的参数位，故必须先由玩家选定并落档。
+ *  本函数不做手工 DOM 回退：`写回暂存` 撤掉后，:value 的强刷机制自会把控件刷回存档真值。 */
+async function 改装备基础(物品名: string, el: HTMLSelectElement): Promise<void> {
   if (写回中.value !== '') return;
   const 选中 = el.value; // 先取：await 期间控件可能被别处重渲染
+  写回暂存.value = { ...写回暂存.value, [物品名]: 选中 };
   写回中.value = 物品名;
   try {
     // 失败时 store 已 toastr + 写 lastError（顶部错误条会显示），视图不重复播报
-    const ok = await store.setBpBase(物品名, 选中);
-    if (ok) return;
-    // 失败要把控件退回存档里的真值：`:value` 绑定的值没变时 Vue 不会重刷 DOM，
-    // 不退回就会显示成一个其实没落档的选择（提示行说「未指定」而下拉显示「巨剑」）
-    const 真值 = store.背包图纸.find(b => b.物品名 === 物品名)?.数据.配方.装备基础 ?? 原值;
-    if (el.value !== 真值) el.value = 真值;
+    await store.setBpBase(物品名, 选中);
   } finally {
+    const 下一份 = { ...写回暂存.value };
+    delete 下一份[物品名];
+    写回暂存.value = 下一份;
     写回中.value = '';
   }
 }
