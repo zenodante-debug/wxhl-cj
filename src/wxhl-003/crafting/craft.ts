@@ -8,8 +8,8 @@ import {
   weaponStats, wearThreshold, type ArmorSpectrum, type Attr, type Quality,
 } from './equipTables';
 import {
-  INDUSTRY_ATTR, STANDARD_GOODS_RECIPES, isBlueprintName,
-  type MaterialCategory, type 材料档案条目, type 配方, type 道具类型,
+  INDUSTRY_ATTR, isBlueprintName,
+  type MaterialCategory, type 材料档案条目, type 配方,
 } from './recipes';
 
 export type CraftResult = '大失败' | '失败' | '成功' | '精制' | '杰作';
@@ -94,10 +94,12 @@ export function autoPick(
 export interface CraftInput {
   配方: 配方;
   阶位: number; // 1~5，制作时选定
-  子类型: string; // 武器: WEAPON_TABLE 键；防具: ArmorSpectrum；道具: ''
+  // 数值模板（v2.1 起一律由 配方.参照模板 决定；本字段是配方未指定模板时的回落）：
+  // 武器 = WEAPON_TABLE 键；防具 = ArmorSpectrum；饰品/道具 = ''
+  子类型: string;
   副属性: Attr;
   数量: number; // 批量（≤ 配方.批量上限）
-  核心材料: { 物品名: string; 数量: number };
+  核心材料: { 物品名: string; 数量: number }[]; // 配方可要求多种核心材料（v2.1）
   辅料: { 物品名: string; 数量: number }[];
   缺图纸: boolean;
   图纸持有: boolean; // 金/紫：图纸物品是否在手（不在手 → 强制降档 + 基础 DC+5）
@@ -125,7 +127,8 @@ export interface CraftOutcome {
   摘要: string[];
 }
 
-/** 前置校验。`核心材料档位` = 玩家实际投入的那件核心材料在材料档案里的阶位（由调用方从 codex 查出）：
+/** 前置校验。`核心材料档位` = 玩家实际投入的核心材料在材料档案里的阶位（由调用方从 codex 查出；
+ *  配方要求多种核心材料时传其中最高的那件）：
  *  validateCraft 是纯函数、签名里没有材料档案，spec §6.1 的「紫需高阶材料」只能靠调用方喂入。
  *  该参数仅紫色配方会读；白/蓝/金传不传都一样。未传（纯函数调用方无档案）按**不满足**处理——fail-closed。 */
 export function validateCraft(input: CraftInput, bag: Bag, 核心材料档位?: number): string[] {
@@ -152,7 +155,7 @@ export function validateCraft(input: CraftInput, bag: Bag, 核心材料档位?: 
   if (sk.等级 < 需要等级) errs.push(`技能等级不足：需要 Lv.${需要等级}，当前 Lv.${sk.等级}`);
   if (input.设施.仅白色 && input.配方.品质 !== '白色') errs.push('野外简陋环境仅可制作白色品质');
   if (input.数量 > input.配方.批量上限) errs.push(`批量超过上限（${input.配方.批量上限}）`);
-  const 全部投入 = [input.核心材料, ...input.辅料];
+  const 全部投入 = [...input.核心材料, ...input.辅料];
   for (const m of 全部投入) {
     const have = Number(bag[m.物品名]?.数量 ?? 0);
     if (have < m.数量) errs.push(`「${m.物品名}」数量不足：现有 ${have}，需要 ${m.数量}`);
@@ -182,16 +185,35 @@ function buildEquip(input: CraftInput, 结果: CraftResult, rand: () => number):
   const full = 结果 === '精制' || 结果 === '杰作';
   const roll = (b: number) => (full ? b : fluctuate(b, rand));
   const tier = input.阶位;
-  const core = input.核心材料.物品名;
+  // 多核心材料：命名与描述里把各核心材料串起来（单核心时与 v1 逐字相同）
+  const core = input.核心材料.map(m => m.物品名).join('、');
   const 主属性 = INDUSTRY_ATTR[input.配方.行业][0];
   const 署名 = 结果 === '杰作' ? `\n署名：由${input.制作者.姓名}亲手制造，永久刻印。` : '';
-  // 图纸可指定武器类型/光谱（AI 定制），优先于制作时选的子类型；模板/标准配方该字段为空串 → 回落子类型
-  const 基础 = input.配方.装备基础 || input.子类型;
-  // 武器类型词（用于回落命名）；防具同理用光谱词
-  const 词 = input.配方.装备子类 === '武器' ? 基础 : ARMOR_NAME[基础 as ArmorSpectrum];
+  // 数值一律取 配方.参照模板（v2.1）；配方.装备基础 已改为自由文本种类名，只参与显示/命名，**绝不查表**：
+  // 「浮游炮」这类 AI 自创种类名若被当键查表要么抛错要么静默取错数值。模板/标准/旧图纸该字段为空 → 回落制作时选的子类型。
+  const 基础 = input.配方.参照模板 || input.子类型;
   // 图纸特效落装：特效名 → 描述
   const 效果 = Object.fromEntries((input.配方.效果 ?? []).map(e => [e.描述, e.描述]));
   const 风味 = input.配方.描述 ? ` ${input.配方.描述}` : '';
+
+  // 饰品（v2.1 新分支）：只加主/副属性，无伤害骰、无防闪、不负重
+  if (input.配方.装备子类 === '饰品') {
+    const 词 = input.配方.装备基础 || '饰品'; // 自由文本种类名即命名用词（如「指环」）
+    const 名称 = input.配方.成品名 || `${core}${词}`;
+    const b = attrBonus('饰品', tier, q);
+    return {
+      名称, 类型: '饰品', 品质: q, 阶位: TIER_NAMES[tier - 1],
+      // 设计填补：世界书未给饰品专属穿戴门槛基准（只给了轻/中/重三档防具），饰品属轻量装备，
+      // 故借用最宽松的轻装档；数值偏高时若裁决给出饰品专属基准，改这一行即可。
+     穿戴门槛: wearThreshold('轻装', tier, q), 强化等级: 0, 伤害骰: '无', 倍率: 0,
+      主属性, 副属性: input.副属性, 主属性加成: roll(b.主), 副属性加成: roll(b.副),
+      装备防御: 0, 装备闪避: 0, 负重: 0, 效果,
+      描述: `手工制作的${q}${词}，以${core}为核心材料打造。${风味}${署名}`, 数量: 1,
+    };
+  }
+
+  // 武器类型词（用于回落命名）；防具同理用光谱词
+  const 词 = input.配方.装备子类 === '武器' ? 基础 : ARMOR_NAME[基础 as ArmorSpectrum];
   const 名称 = input.配方.成品名 || `${core}${词}`;
 
   if (input.配方.装备子类 === '武器') {
@@ -218,36 +240,40 @@ function buildEquip(input: CraftInput, 结果: CraftResult, rand: () => number):
   };
 }
 
-/** 道具数值表：按成品名从内置标准道具配方取结构化数值（旧 GOODS_BASE 已删除，数值改由配方携带）。
- *  Task 2 会把 buildGoods 改为直接消费 配方.道具类型/道具固定值/关联属性，本表届时删除。 */
-const 道具数值表 = new Map<string, { 类别: 道具类型; 固定值: number; 关联属性: 'PER' | 'CON' }>(
-  STANDARD_GOODS_RECIPES.map(r => [r.名称, { 类别: r.道具类型, 固定值: r.道具固定值, 关联属性: r.关联属性 }]),
-);
-
-/** 道具成品生成（恢复量=固定值×阶位+属性修正×阶位系数；固定值/倍率均为设计填补） */
+/** 道具成品生成（恢复量=固定值×阶位+属性修正×阶位系数；固定值/倍率均为设计填补）。
+ *  v2.1：数值与效果一律取配方自带的结构化字段（道具类型/道具固定值/关联属性/效果），
+ *  不再按成品名查内置标准道具配方——AI 自创道具与内置标准道具由此走同一条路径。 */
 function buildGoods(input: CraftInput, 结果: CraftResult, rand: () => number): MarketItemSnapshot & { 数量: number } {
-  const base = 道具数值表.get(input.配方.名称);
   const tier = input.阶位;
   const q = input.配方.品质;
+  const 类别 = input.配方.道具类型;
+  const 基准 = input.配方.道具固定值;
+  const 关联属性 = input.配方.关联属性;
   const 署名 = 结果 === '杰作' ? `\n署名：由${input.制作者.姓名}亲手调制，永久刻印。` : '';
   // 图纸自带的风味文案（AI 定制）落到成品描述；模板/标准配方为空串
   const 风味 = input.配方.描述 ? ` ${input.配方.描述}` : '';
+  // 图纸特效落装（与装备同一口径）：特效名 → 描述。AI 自创道具的效果就靠这一格带出来
+  const 效果 = Object.fromEntries((input.配方.效果 ?? []).map(e => [e.描述, e.描述]));
   let 效果描述 = '';
-  if (base && (base.类别 === '恢复HP' || base.类别 === '恢复MP')) {
+  if (类别 === '恢复HP' || 类别 === '恢复MP') {
     const full = 结果 === '精制' || 结果 === '杰作';
-    const 固定 = (full ? base.固定值 : fluctuate(base.固定值, rand)) * (结果 === '杰作' ? 1.5 : 1);
-    const 恢复量 = Math.round(固定 * tier + input.制作者.属性修正值[base.关联属性] * TIER_COEF[tier]);
-    效果描述 = `${base.类别 === '恢复HP' ? '恢复HP' : '恢复MP'} ${恢复量}点。`;
-  } else if (base && base.类别 === '爆炸物') {
-    const 骰数 = (q === '白色' ? 2 : 4) * tier; // 世界书一阶白2d6/蓝4d6，高阶骰数×阶位（设计填补）
-    const 加值 = input.制作者.属性修正值[base.关联属性] * TIER_COEF[tier];
+    const 固定 = (full ? 基准 : fluctuate(基准, rand)) * (结果 === '杰作' ? 1.5 : 1);
+    const 恢复量 = Math.round(固定 * tier + input.制作者.属性修正值[关联属性] * TIER_COEF[tier]);
+    效果描述 = `${类别} ${恢复量}点。`;
+  } else if (类别 === '爆炸物') {
+    // 配方给的 固定值 即「每阶骰数基准」；未给（标准配方恒为 0）时沿用品质骰 × 阶位（设计填补）
+    const 骰数 = (基准 > 0 ? 基准 : q === '白色' ? 2 : 4) * tier;
+    const 加值 = input.制作者.属性修正值[关联属性] * TIER_COEF[tier];
     效果描述 = `爆炸伤害 ${骰数}d6+${加值}。`;
-  } else if (base) {
-    效果描述 = `${base.类别}用品。`;
+  } else {
+    效果描述 = `${类别}用品。`;
   }
+  // 名称：配方.成品名（图纸指定）优先；为空回落配方名——内置标准道具是「按配方名认货」的
+  //（世界书物价表商品名），若改用「核心材料名+类型词」会一次性改掉全部标准道具的名字
+  const 名称 = input.配方.成品名 || input.配方.名称;
   return {
-    名称: input.配方.名称, 类型: '道具', 品质: q, 阶位: TIER_NAMES[tier - 1],
-    自制: true, 毒性值: tier,
+    名称, 类型: '道具', 品质: q, 阶位: TIER_NAMES[tier - 1],
+    自制: true, 毒性值: tier, 效果,
     描述: `${效果描述}（自制品：同类连用效果减半，含毒性需医疗中心净化）${风味}${署名}`,
     数量: input.数量,
   };
@@ -266,7 +292,7 @@ export function executeCraft(input: CraftInput, d20: number, rand: () => number)
   const 检定值 = d20 + attr值 + 技能等级;
   const 结果 = judgeRoll(d20, 检定值, DC.最终);
 
-  const 全部投入 = [input.核心材料, ...input.辅料];
+  const 全部投入 = [...input.核心材料, ...input.辅料];
   let 扣减: CraftOutcome['扣减'];
   let 新增: CraftOutcome['新增'] = [];
   let HP伤害 = 0;
@@ -275,7 +301,8 @@ export function executeCraft(input: CraftInput, d20: number, rand: () => number)
     扣减 = 全部投入.map(m => ({ ...m }));
     HP伤害 = input.阶位 * 10;
   } else if (结果 === '失败') {
-    扣减 = [{ 物品名: input.核心材料.物品名, 数量: Math.ceil(input.核心材料.数量 / 2) }];
+    // 世界书原文「每种核心材料损毁 50%」：多核心时逐件各损一半（向上取整，与 v1 单核心口径一致），辅料保留
+    扣减 = input.核心材料.map(m => ({ 物品名: m.物品名, 数量: Math.ceil(m.数量 / 2) }));
     新增 = [{ 名称: '灰色废料', 描述: '制作失败留下的残渣，毫无价值。', 数量: input.数量 }];
   } else {
     扣减 = 全部投入.map(m => ({ ...m }));

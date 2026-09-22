@@ -255,8 +255,10 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     const 制作者 = assembleMaker(c, args.配方.行业);
 
     // 核心材料 = 玩家选定；辅料 = autoPick 自动拣选（排除核心物品）
+    // v2.1：CraftInput.核心材料 已是列表（配方可要求多种核心材料）。多选交互属 Task 4，
+    // 这里先按现有单件入参包成单元素列表，行为与 v1 逐字不变。
     const 核心需求 = args.配方.材料.find(m => m.核心);
-    const 核心材料 = { 物品名: args.核心材料名, 数量: (核心需求?.数量 ?? 1) * args.数量 };
+    const 核心材料 = [{ 物品名: args.核心材料名, 数量: (核心需求?.数量 ?? 1) * args.数量 }];
     const 辅料: { 物品名: string; 数量: number }[] = [];
     for (const req of args.配方.材料.filter(m => !m.核心)) {
       const picks = autoPick(bag.value, codex.value, req.类别, req.数量 * args.数量, [args.核心材料名]);
