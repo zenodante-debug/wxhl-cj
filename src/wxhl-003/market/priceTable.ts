@@ -65,7 +65,7 @@ export function parseQuality(raw: unknown): ParsedQuality | null {
 
 // ———— 装备信号与分类 ————
 
-const NONE_STRINGS = ['', '无', '无.', 'none', 'None'];
+const NONE_STRINGS = ['', '无', 'none', 'None'];
 
 function notNone(v: unknown): boolean {
   if (v === undefined || v === null) return false;
@@ -84,7 +84,8 @@ export function hasEquipMarkers(item: MarketItemSnapshot): boolean {
     notNone(item.装备闪避) ||
     notNone(item.负重) ||
     notNone(item.主属性) ||
-    Object.hasOwn(item, '强化等级')
+    // 模板必填而道具绝无（JSON 数据里不会出现显式 undefined，语义等同 hasOwn）
+    item.强化等级 !== undefined
   );
 }
 
@@ -113,13 +114,14 @@ export type ItemClass =
   | { kind: 'goods' };
 
 /**
- * 物品分类（装备/道具）。判定：品质可定价 + 有装备字段信号（真实存档里
- * 消耗品也带品质和效果，但绝无穿戴门槛/伤害骰/装备防御等模板字段）。
+ * 物品分类（装备/道具）。装备 = 品质可定价 + 类型/信号可判分类。
+ * 不要求装备字段信号齐全——卖家可能剥离属性字段伪装成道具，只要品质+类型仍在
+ * 就按装备定价（防绕价）；两类都不满足才是道具（真实存档里消耗品也带品质
+ * 和效果，但其类型不含武器/防具/饰品词、也无任何装备字段信号）。
  */
 export function classify(item: MarketItemSnapshot): ItemClass {
   const q = parseQuality(item.品质);
   if (!q) return { kind: 'goods' };
-  if (!hasEquipMarkers(item)) return { kind: 'goods' };
   const category = parseCategory(item);
   if (!category) return { kind: 'goods' };
   return { kind: 'equip', quality: q.quality, gray: q.gray, category };
@@ -169,9 +171,7 @@ export function checkPrice(kind: MarketKind, item: MarketItemSnapshot, sellerTie
   }
 
   // equip
-  const 品质 = String(item.品质 ?? '');
-  const 类型 = String(item.类型 ?? '');
-  const parsed = parseQuality(品质);
+  const parsed = parseQuality(item.品质);
   const category = parseCategory(item);
   if (!parsed || !category || !BASE[category]?.[parsed.quality])
     return fail('装备缺少可定价的品质/类型字段');

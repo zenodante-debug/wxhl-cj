@@ -135,6 +135,18 @@ describe('worker 六接口 · 真实存档物品', () => {
     expect(await res.text()).toContain('不得超过');
   });
 
+  it('剥离属性字段伪装道具（品质+类型保留）仍按装备定价', async () => {
+    const e = env();
+    // 蓝武二阶上限 800；剥离全部属性字段后谎称道具挂 5000（道具区间二阶可到 12000）
+    const res = await worker.fetch(post('/market/list', {
+      client: 'seller1', seller: '测试甲', tier: '二阶', kind: 'goods',
+      item: { 名称: '制式长刀', 品质: '蓝色', 类型: '武器', 阶位: '二阶' },
+      qty: 1, price: 5000,
+    }), e);
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain('不得超过');
+  });
+
   it('带装备字段但品质无法识别 → 拒绝', async () => {
     const e = env();
     const item = { ...披风挂单.item, 品质: '特殊' };

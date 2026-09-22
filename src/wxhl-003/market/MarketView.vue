@@ -64,15 +64,13 @@
       <template v-if="!sellPick">
         <div class="mkt-hint">选择要上架的背包物品（装备按品质与阶位定价并做规则校验，道具按阶位定价）</div>
         <div v-if="bagEntries.length === 0" class="mkt-empty">背包里没有可上架的物品</div>
-        <div v-for="[name, item] in bagEntries" :key="name" class="mkt-card pick" @click="pickItem(name, item)">
+        <div v-for="entry in bagTagged" :key="entry.name" class="mkt-card pick" @click="pickItem(entry.name, entry.item)">
           <div class="mc-head">
-            <span class="mc-name" :style="{ color: qualityColor(item) }">{{ name }}</span>
-            <span class="mc-tag">×{{ item.数量 }}</span>
+            <span class="mc-name" :style="{ color: qualityColor(entry.item) }">{{ entry.name }}</span>
+            <span class="mc-tag">×{{ entry.item.数量 }}</span>
           </div>
           <div class="mc-tags">
-            <span v-if="equipTag(name, item)" class="mc-tag">
-              {{ equipTag(name, item) }}·{{ item.阶位 || store.playerTier }}
-            </span>
+            <span v-if="entry.tag" class="mc-tag">{{ entry.tag }}·{{ entry.item.阶位 || store.playerTier }}</span>
             <span v-else class="mc-tag goods">道具·按阶位定价</span>
           </div>
         </div>
@@ -280,6 +278,11 @@ function equipTag(name: string, item: MarketItemSnapshot): string {
   const q = c.gray ? `灰色封印(${c.quality})` : c.quality;
   return `${q}·${c.category}`;
 }
+
+/** 背包物品列表（一次性算好装备标签，避免模板每个卡片重复 classify） */
+const bagTagged = computed(() =>
+  bagEntries.value.map(([name, item]) => ({ name, item, tag: equipTag(name, item) })),
+);
 
 function qualityColor(item: MarketItemSnapshot): string {
   // 按解包后的原品质上色（灰色封印(紫色) → 紫色）

@@ -190,15 +190,14 @@ function validateListing(b) {
   if (JSON.stringify(b.item).length > 2048) return '物品快照过大';
 
   // 服务器自行分类: 客户端 kind 仅供参考
+  // 装备 = 品质可定价 + 类型/信号可判分类（防剥离属性字段伪装道具绕价）；
+  // 带装备字段却定不了价的直接拒绝；两者皆无才是道具
   const hasMarkers = hasEquipMarkers(b.item);
   const q = parseQuality(b.item.品质);
+  const category = q ? parseCategory(b.item) : null;
   const tier = String(b.item.阶位 ?? '') || String(b.tier ?? '一阶');
 
-  if (hasMarkers) {
-    // 带装备字段信号的物品必须能作为装备定价（防"伪装成道具"绕过装备价格上限）
-    if (!q) return '物品带装备字段但品质无法识别，无法定价';
-    const category = parseCategory(b.item);
-    if (!category) return '装备类型无法判定为武器/防具/饰品';
+  if (q && category) {
     b.kind = 'equip';
     const chk = checkPrice('equip', b.item, String(b.tier ?? '一阶'), Number(b.price));
     if (!chk.ok) return chk.reason;
@@ -207,6 +206,9 @@ function validateListing(b) {
     const hard = validateHard(b.item, q.quality, category, idx);
     if (hard) return hard;
     return null;
+  }
+  if (hasMarkers) {
+    return '物品带装备字段但品质或类型无法识别，无法定价——请补全「品质」与「类型」';
   }
 
   b.kind = 'goods';

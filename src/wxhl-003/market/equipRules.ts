@@ -1,4 +1,3 @@
-import { 归一位阶 } from '../dice';
 import type { EquipCategory, EquipQuality, MarketItemSnapshot } from './priceTable';
 
 // ================================================================
@@ -144,11 +143,4 @@ export function validateEquip(
   }
 
   return { ok: errors.length === 0, errors, warnings };
-}
-
-/** 便捷入口：从物品直接校验（阶位缺省回退卖家阶位） */
-export function validateEquipItem(item: MarketItemSnapshot, sellerTier: string): ValidationResult & { tierIdx: number } {
-  const tierIdx = 归一位阶(String(item.阶位 ?? '') || sellerTier) ?? 0;
-  const r = validateEquip(item, { quality: '蓝色', category: '武器' }, tierIdx);
-  return { ...r, tierIdx };
 }

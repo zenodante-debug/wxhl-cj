@@ -30,7 +30,7 @@ const 圣水凝晶 = {
 const 徽记 = { 描述: '特管局合作凭证', 数量: 1, 名称: '特管局合作者徽记', 品质: '特殊', 类型: '凭证' };
 /** 真实存档：背包里的技能条目（类型"被动" → 道具） */
 const 技能卷轴 = {
-  关联属性: 'AGI', 冷却: '无', 分类: '基础', 射程: '自身', 技能名称: '基础十字弩精通',
+  名称: '基础十字弩精通', 关联属性: 'AGI', 冷却: '无', 分类: '基础', 射程: '自身', 技能名称: '基础十字弩精通',
   描述: '学习后更熟练使用十字弩。', 效果: { 准星校准: '命中加值。' }, 数量: 1,
   消耗: '无', 目标: '自身', 等级: 1, 类型: '被动', 行动类型: '无', 阶位: '一阶',
 };
@@ -80,19 +80,19 @@ describe('parseCategory · 类型→武器/防具/饰品', () => {
     expect(parseCategory(夜翼披风)).toBe('防具'); // 躯干_极轻
     expect(parseCategory(制式重甲)).toBe('防具'); // 躯干_重装
     expect(parseCategory({ ...撕裂指套 })).toBe('武器'); // 伤害骰 1d6 信号
-    expect(parseCategory({ 类型: '短兵器' })).toBe('武器');
-    expect(parseCategory({ 类型: '副武器' })).toBe('武器');
-    expect(parseCategory({ 类型: '饰品' })).toBe('饰品');
-    expect(parseCategory({ 类型: '戒指' })).toBe('饰品');
+    expect(parseCategory({ 名称: '测试', 类型: '短兵器' })).toBe('武器');
+    expect(parseCategory({ 名称: '测试', 类型: '副武器' })).toBe('武器');
+    expect(parseCategory({ 名称: '测试', 类型: '饰品' })).toBe('饰品');
+    expect(parseCategory({ 名称: '测试', 类型: '戒指' })).toBe('饰品');
   });
   it('部位槽位词优先于饰品词', () => {
-    expect(parseCategory({ 类型: '头部_轻装' })).toBe('防具');
-    expect(parseCategory({ 类型: '下装_重装' })).toBe('防具');
+    expect(parseCategory({ 名称: '测试', 类型: '头部_轻装' })).toBe('防具');
+    expect(parseCategory({ 名称: '测试', 类型: '下装_重装' })).toBe('防具');
   });
   it('无类型时按数值信号兜底', () => {
-    expect(parseCategory({ 伤害骰: '2d6' })).toBe('武器');
-    expect(parseCategory({ 装备防御: 3, 装备闪避: -1 })).toBe('防具');
-    expect(parseCategory({ 主属性: 'AGI', 主属性加成: 1 })).toBe('饰品');
+    expect(parseCategory({ 名称: '测试', 伤害骰: '2d6' })).toBe('武器');
+    expect(parseCategory({ 名称: '测试', 装备防御: 3, 装备闪避: -1 })).toBe('防具');
+    expect(parseCategory({ 名称: '测试', 主属性: 'AGI', 主属性加成: 1 })).toBe('饰品');
   });
 });
 
@@ -121,6 +121,18 @@ describe('classify · 装备/道具分类（真实存档回归）', () => {
   });
   it('技能卷轴 → 道具', () => {
     expect(classify(技能卷轴).kind).toBe('goods');
+  });
+  it('剥离属性字段但保留品质+类型的武器 → 仍判装备（防伪装绕价）', () => {
+    const 剥离的武器 = { 名称: '制式长刀', 品质: '蓝色', 类型: '武器', 阶位: '二阶', 数量: 1 };
+    const c = classify(剥离的武器);
+    expect(c.kind).toBe('equip');
+    if (c.kind === 'equip') {
+      expect(c.category).toBe('武器');
+      expect(c.quality).toBe('蓝色');
+    }
+  });
+  it('品质+类型都剥掉的无信号物品 → 道具（市集按道具卡如实展示）', () => {
+    expect(classify({ 名称: '神秘宝物', 数量: 1, 描述: '看不出是什么' }).kind).toBe('goods');
   });
 });
 
@@ -156,8 +168,8 @@ describe('checkPrice · equip（底价=基准下限，无折扣）', () => {
     expect(checkPrice('equip', 紫饰品三阶, '一阶', 10799).ok).toBe(false);
   });
   it('白装/银装拒绝上架', () => {
-    expect(checkPrice('equip', { 品质: '白色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
-    expect(checkPrice('equip', { 品质: '银色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
+    expect(checkPrice('equip', { 名称: '铁剑', 品质: '白色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
+    expect(checkPrice('equip', { 名称: '圣剑', 品质: '银色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
   });
   it('物品缺阶位时按卖家阶位算', () => {
     const 无阶蓝武 = { 名称: '制式长刀', 品质: '蓝色', 类型: '武器' };
