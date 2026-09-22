@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type { Bag } from '../../market/settle';
 import { STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES, type 配方 } from '../recipes';
-import { autoPick, computeDC, executeCraft, fluctuate, judgeRoll, validateCraft, type CraftInput } from '../craft';
+import { autoPick, computeDC, executeCraft, fluctuate, judgeRoll, validateCraft, 难度分档, type CraftInput, type 难度档位 } from '../craft';
 
 const 锻造武器白 = TEMPLATE_RECIPES.find(r => r.名称 === '锻造·武器（白色）')!;
 const 锻造武器蓝 = TEMPLATE_RECIPES.find(r => r.名称 === '锻造·武器（蓝色）')!;
@@ -61,6 +61,38 @@ describe('judgeRoll · 五档判定', () => {
     expect(judgeRoll(5, 10, 10)).toBe('成功');
     expect(judgeRoll(5, 14, 10)).toBe('成功');
     expect(judgeRoll(5, 15, 10)).toBe('精制');
+  });
+});
+
+describe('难度分档 · 开工前的难度明示（与 judgeRoll 逐点一致）', () => {
+  it('表驱动：档位与「成功所需最小 d20」都对得上', () => {
+    // [检定值上限, DC, 期望档, 期望需骰]
+    const 表: [number, number, 难度档位['档'], number][] = [
+      [80, 30, '必成', 2], // 上限远超 DC：d20=2 就够
+      [48, 30, '必成', 2], // 必成档的下边界：需骰 = 2（DC = 上限 − 18）
+      [47, 30, '靠骰运', 3], // 再低一点就必须掷 3+
+      [50, 48, '靠骰运', 18], // 高档位长区间
+      [31, 30, '靠骰运', 19], // 靠骰运档的上边界：需骰 = 19
+      [30, 30, '仅自然20', 21], // 上限 = DC：2..19 全失败
+      [28, 30, '仅自然20', 21], // 上限 < DC：终审举的「花 UP 买图纸却发现做不出来」场景
+      [20, 48, '仅自然20', 21],
+    ];
+    for (const [上限, dc, 档, 需骰] of 表) {
+      expect(难度分档(上限, dc)).toEqual({ 档, 需骰 });
+      // 引擎侧逐点校验：需骰 就是 2..19 里第一个不出「失败」的骰面（d20 的检定值 = d20 + 上限 − 20）
+      let 实 = 21;
+      for (let d = 2; d <= 19; d++) {
+        if (judgeRoll(d, d + 上限 - 20, dc) !== '失败') {
+          实 = d;
+          break;
+        }
+      }
+      expect(实).toBe(需骰);
+      // 自然 20 恒杰作：再难的图纸也留一口气（所以「仅自然20」不等于做不出来）
+      expect(judgeRoll(20, 20 + 上限 - 20, dc)).toBe('杰作');
+      // 自然 1 恒大失败：连「必成」档也不是稳成，文案与配色都不许写成「必成无风险」
+      expect(judgeRoll(1, 1 + 上限 - 20, dc)).toBe('大失败');
+    }
   });
 });
 

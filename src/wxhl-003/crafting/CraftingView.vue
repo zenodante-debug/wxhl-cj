@@ -248,7 +248,7 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watchEffect } from 'vue';
 import { 归一位阶 } from '../dice';
-import { computeDC } from './craft';
+import { computeDC, 难度分档 } from './craft';
 import { WEAPON_TABLE, type ArmorSpectrum, type Attr, type Quality } from './equipTables';
 import { INDUSTRY_ATTR, 材料类别, 行业列表, isBlueprintName, type 配方, type 行业 } from './recipes';
 import { makerFor, useCraftingStore } from './store';
@@ -306,16 +306,17 @@ const 检定值上限 = computed(() => {
   return 20 + Math.max(...INDUSTRY_ATTR[r.行业].map(a => m.基础属性[a])) + (m.技能?.等级 ?? 0);
 });
 
-/** 难度分档（如实，不粉饰）：judgeRoll 里 d20=1 恒「大失败」、d20=20 恒「杰作」，其余按 检定值 ≥ DC 判成功。
- *  由 检定值 = d20 + (上限 − 20) 反推「成功所需的最小 d20」= DC − 上限 + 20。 */
+/** 难度分档（如实，不粉饰）：口径与 judgeRoll 的对齐关系全部收在 craft.ts 的 难度分档 里（纯函数，可单测），
+ *  视图只负责取数、拼文案与配色。`需骰` = 成功所需的最小 d20 = DC − 上限 + 20。 */
 const 难度提示 = computed(() => {
   const dc = Number(dcPreview.value);
   const 上限 = 检定值上限.value;
   if (!Number.isFinite(dc)) return { 类: '', 文: '' };
-  const 需骰 = dc - 上限 + 20;
-  if (需骰 <= 2) return { 类: 'ok', 文: `检定值上限 ${上限} vs DC ${dc} —— 除自然 1 外必成` };
-  if (需骰 <= 19) return { 类: 'warn', 文: `检定值上限 ${上限} vs DC ${dc} —— 需 d20 ≥ ${需骰}` };
-  return { 类: 'bad', 文: `检定值上限 ${上限} vs DC ${dc} —— 掷满 d20 也不够，仅自然 20 可成（杰作）` };
+  const { 档, 需骰 } = 难度分档(上限, dc);
+  const 前缀 = `检定值上限 ${上限} vs DC ${dc} —— `;
+  if (档 === '必成') return { 类: 'ok', 文: `${前缀}除自然 1 外必成` };
+  if (档 === '靠骰运') return { 类: 'warn', 文: `${前缀}需 d20 ≥ ${需骰}` };
+  return { 类: 'bad', 文: `${前缀}掷满 d20 也不够，仅自然 20 可成（杰作）` };
 });
 
 // ---------------- v2：折叠区 / AI 定制 / 背包图纸 ----------------
