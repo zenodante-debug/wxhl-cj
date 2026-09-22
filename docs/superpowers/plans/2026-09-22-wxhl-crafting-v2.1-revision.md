@@ -375,7 +375,92 @@ describe('v2.1 AI 定制', () => {
 
 ---
 
-### Task 6: 全量回归与终审
+### Task 6: skillMatch.ts —— 制造系技能解析（多级回退）+ 分类校验
+
+**背景**：v2 的判定是 `通用技能[行业名]` 精确匹配 —— 技能叫「锻造术」就查不到；且只校验 `等级`、**不校验 `分类`**（金图纸世界书要求"高级技能 Lv.1"，基础系 Lv.9 也能过）。
+
+**Files:**
+- Create: `src/wxhl-003/crafting/skillMatch.ts`
+- Modify: `src/wxhl-003/crafting/store.ts`（`assembleMaker` 改用新解析）、`src/wxhl-003/crafting/craft.ts`（`validateCraft` 补分类校验）
+- Test: `src/wxhl-003/crafting/__tests__/skillMatch.test.ts`
+
+**Interfaces:**
+- Produces:
+  - `type 行业 = '锻造'|'裁缝'|'炼金'|'工程'|'烹饪'`（从 `recipes.ts` 复用）
+  - `interface 技能命中 { 技能名: string; 技能: 技能数据; 依据: '映射表'|'精确名'|'模糊名'|'效果文本' }`
+  - `resolveSkill(通用技能: Record<string, any>, 行业: string, 映射表?: Record<string, string[]>): 技能命中 | null`
+    - **解析顺序**（首个命中即止，按可靠性从高到低）：
+      1. **映射表**：`映射表[行业]` 列出的技能名，按序取首个存在于 `通用技能` 的
+      2. **精确名**：`通用技能[行业]` 存在则命中
+      3. **模糊名**：技能名**包含**行业名（「锻造术」「高级锻造」命中「锻造」）
+      4. **效果文本**：技能的 `效果` record 的 **key 或 value** 文本包含行业名
+    - 全不中 → `null`
+  - `checkSkill(命中: 技能命中 | null, 技能要求: { 分类: '基础'|'高级'; 等级: number }): string[]`（返回错误列表，空 = 通过）
+    - 无命中 → `未掌握生活技能「${行业}」`
+    - **分类**：要求「高级」时命中技能必须为 `分类 === '高级'`；要求「基础」时 `基础` 或 `高级` 皆可（**设计决定：高级可代基础，反之不可**，注释标明）
+    - 等级：`技能.等级 < 技能要求.等级` → 报错
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+describe('resolveSkill · 多级回退', () => {
+  it('映射表优先', () => {
+    const 技能 = { 铸造: { 分类: '高级', 等级: 3 }, 锻造: { 分类: '基础', 等级: 1 } };
+    const hit = resolveSkill(技能, '锻造', { 锻造: ['铸造'] });
+    expect(hit?.技能名).toBe('铸造');
+    expect(hit?.依据).toBe('映射表');
+  });
+  it('精确名次之', () => {
+    const hit = resolveSkill({ 锻造: { 分类: '基础', 等级: 2 } }, '锻造');
+    expect(hit?.技能名).toBe('锻造');
+    expect(hit?.依据).toBe('精确名');
+  });
+  it('模糊名：包含行业名即命中', () => {
+    const hit = resolveSkill({ 高级锻造术: { 分类: '高级', 等级: 2 } }, '锻造');
+    expect(hit?.技能名).toBe('高级锻造术');
+    expect(hit?.依据).toBe('模糊名');
+  });
+  it('效果文本：效果里提到行业名也算', () => {
+    const hit = resolveSkill({ 铁匠之心: { 分类: '基础', 等级: 1, 效果: { 锻造精通: '提升锻造成功率' } } }, '锻造');
+    expect(hit?.技能名).toBe('铁匠之心');
+    expect(hit?.依据).toBe('效果文本');
+  });
+  it('全不中 → null', () => {
+    expect(resolveSkill({ 剑术: { 分类: '基础', 等级: 5 } }, '锻造')).toBeNull();
+  });
+});
+
+describe('checkSkill · 分类与等级', () => {
+  const 命中 = (分类: string, 等级: number, 依据: any = '精确名') =>
+    ({ 技能名: 'x', 技能: { 分类, 等级 }, 依据 });
+  it('金图纸要高级：基础系不通过', () => {
+    expect(checkSkill(命中('基础', 9), { 分类: '高级', 等级: 1 })[0]).toContain('高级');
+  });
+  it('高级可代基础', () => {
+    expect(checkSkill(命中('高级', 3), { 分类: '基础', 等级: 3 })).toEqual([]);
+  });
+  it('等级不足报错', () => {
+    expect(checkSkill(命中('基础', 1), { 分类: '基础', 等级: 3 })[0]).toContain('Lv');
+  });
+  it('未命中报错', () => {
+    expect(checkSkill(null, { 分类: '基础', 等级: 1 })[0]).toContain('未掌握');
+  });
+});
+```
+
+- [ ] **Step 2: Run** — Expected: FAIL
+
+- [ ] **Step 3: Write implementation**
+  - `skillMatch.ts` 按上述解析顺序实现（纯函数，零酒馆依赖，可测）
+  - `store.ts` 的 `assembleMaker` 改用 `resolveSkill(c.通用技能, 行业, 映射表)`，并把 `技能要求` 一并交给 `checkSkill`；`映射表` 从聊天变量 `wxhl003_crafting.行业技能映射` 读（缺省 `{}`），玩家可在「材料」页或设置里维护——**本任务只做读取，UI 编辑入口留待后续**
+  - `craft.ts` 的 `validateCraft`：把现有的「技能等级」零散校验替换为调用 `checkSkill`，并**补上分类校验**（当前完全缺失）
+
+- [ ] **Step 4: Run** — Expected: PASS
+- [ ] **Step 5: Commit** — `feat(wxhl): 制造系技能多级回退解析（映射表/精确/模糊/效果文本）+ 分类校验`
+
+---
+
+### Task 7: 全量回归与终审
 
 - [ ] `pnpm test` 全绿
 - [ ] `npx tsc --noEmit`（crafting/ 零新增）
