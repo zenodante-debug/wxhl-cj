@@ -229,7 +229,8 @@ export function sanitizeDesign(
 /** 补全的纯函数主体：AI 原始返回 → 硬校验 → 与「现有」做 base 优先合并
  *  合流必须走 blueprint.mergeBlueprintData（Task 3 裁决：只填缺失/非法字段，绝不覆盖既有合法内容；
  *  名称是配方库去重键，尤不可被 AI 改写）——整份替换配方会让一次补全抹掉玩家已有的风味描述。
- *  抽成纯函数是为了可单测；completeBlueprint 只剩「取配置 + 调 AI」。 */
+ *  抽成纯函数是为了可单测；completeBlueprint 只剩「取配置 + 调 AI」。
+ *  契约与 sanitizeDesign 一致：任何输入都不抛错，只返回 ok:false + 理由。 */
 export function sanitizeCompletion(
   raw: unknown,
   现有: 图纸数据,
@@ -247,7 +248,14 @@ export function sanitizeCompletion(
   };
   const r = sanitizeDesign(raw, 目标);
   if (!r.ok) return r;
-  return { ok: true, 数据: mergeBlueprintData(现有, r.数据), clamped: r.clamped };
+  // mergeBlueprintData 末尾还有一次 BlueprintDataSchema.parse：那条路径当前不可达失败
+  // （送进去的「补」恒为 sanitizeDesign 产出的完整合法对象），但本函数已 export 为公开 API，
+  // 与 sanitizeDesign 同契约——parse 失败时一律返回 ok:false 而非抛出，不给未来调用方埋坑。
+  try {
+    return { ok: true, 数据: mergeBlueprintData(现有, r.数据), clamped: r.clamped };
+  } catch (e: any) {
+    return { ok: false, reasons: [`合流后图纸不合法：${e?.message ?? '未知错误'}`] };
+  }
 }
 
 function activeCfg() {
