@@ -143,6 +143,7 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
   const lastError = ref('');
   const designing = ref(false);
   const completing = ref(false);
+  const uploading = ref(false);
 
   const allRecipes = computed<配方[]>(() => [
     ...TEMPLATE_RECIPES, ...STANDARD_GOODS_RECIPES, ...Object.values(配方库.value),
@@ -323,21 +324,28 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
         return false;
       }
 
-      const 摘要 = 图纸摘要(数据);
-      const 钳制 = gen.clamped.length ? `\n\n【系统钳制】\n${gen.clamped.map(c => `· ${c}`).join('\n')}` : '';
-      if (!window.confirm(
-        `【AI 定制图纸】${r.名称}\n\n${摘要}\n\n定价：${价} UP（当前 ${playerUP.value} UP）${钳制}\n\n确认支付并生成图纸？`,
-      )) return false; // 不付款零变量变动
-
+      // AI 调用耗时数秒，期间市场可能改过同一楼层的存档（卖物写 背包 −物 / 经济.UP +货款）。
+      // 故确认框余额、随后的扣款、以及背包写入基底一律取「确认前」的新读值——
+      // 绝不能用 await 之前的 bag.value / playerUP.value，否则会把玩家这期间的卖出覆盖回去（凭空复制）。
       const rr = readContractor();
       if (!rr) {
         lastError.value = '读不到存档变量（契约者不存在）';
         toastr.error(lastError.value);
         return false;
       }
+      const 当前UP = Number(rr.c.经济?.UP ?? 0);
+      const 当前背包 = (rr.c.背包 ?? {}) as Bag;
+
+      const 摘要 = 图纸摘要(数据);
+      const 钳制 = gen.clamped.length ? `\n\n【系统钳制】\n${gen.clamped.map(c => `· ${c}`).join('\n')}` : '';
+      // 显示余额与扣款用同一个 当前UP（同一 tick 内无 await），玩家看到的就是实际扣的
+      if (!window.confirm(
+        `【AI 定制图纸】${r.名称}\n\n${摘要}\n\n定价：${价} UP（当前 ${当前UP} UP）${钳制}\n\n确认支付并生成图纸？`,
+      )) return false; // 不付款零变量变动
+
       let 余UP: number;
       try {
-        余UP = spendUP(Number(rr.c.经济?.UP ?? 0), 价);
+        余UP = spendUP(当前UP, 价);
       } catch (e: any) {
         const msg = e?.message ?? 'UP 不足';
         lastError.value = msg;
@@ -350,7 +358,7 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
       const 物品 = {
         名称: 物品名, 描述: 摘要, 品质: r.品质, 阶位: `${r.阶位}阶`, 类型: '图纸', 图纸数据: klona(数据),
       };
-      const 累加 = bagAdd(bag.value, 物品, 1);
+      const 累加 = bagAdd(当前背包, 物品, 1);
       // 包里已有同名图纸时 bagAdd 只加数量、保留旧的图纸数据；本次是玩家刚花钱买下的结果，显式让它胜出
       const newBag = { ...累加, [物品名]: { ...累加[物品名], ...物品 } };
       _.set(rr.mvu, ['stat_data', '契约者', '背包'], newBag);
@@ -371,6 +379,8 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
   /** AI 补全残缺图纸：只填缺失/非法字段，回写背包物品（一次 commit 只写 背包） */
   async function completeBp(物品名: string): Promise<boolean> {
     if (completing.value) return false;
+    // 先按存档刷新背包：图纸若已不在，下面直接报错，不必白烧一次 AI 调用
+    if (!syncFromMvu()) return false;
     const 现有 = readBlueprint(bag.value, 物品名);
     if (!现有) {
       const msg = `「${物品名}」不是有效图纸或已不在背包`;
@@ -393,7 +403,16 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
         toastr.error(lastError.value);
         return false;
       }
-      const newBag = writeBlueprint(bag.value, 物品名, res.数据);
+      // 同 designBlueprint：AI 调用期间存档可能被市场改动，写入基底必须取新读的背包，
+      // 不能用 await 之前的 bag.value（否则会把这期间玩家的卖出覆盖回去）
+      const 当前背包 = (rr.c.背包 ?? {}) as Bag;
+      if (!Object.hasOwn(当前背包, 物品名)) {
+        const msg = `图纸「${物品名}」已不在背包（AI 调用期间被卖出或上传），补全结果作废`;
+        lastError.value = msg;
+        toastr.error(msg);
+        return false;
+      }
+      const newBag = writeBlueprint(当前背包, 物品名, res.数据);
       _.set(rr.mvu, ['stat_data', '契约者', '背包'], newBag);
       await commit(rr.mvu, rr.mid, [[['stat_data', '契约者', '背包'], newBag]]);
       syncFromMvu();
@@ -410,6 +429,9 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
 
   /** 上传学习：图纸物品出包，配方登记进配方库（背包走一次 commit，配方库走聊天变量落盘） */
   async function uploadBp(物品名: string): Promise<boolean> {
+    // 重入守卫：两次上传都在 await 之前读同一份 配方库.value，后完成的那次会用陈旧库覆盖，
+    // 丢掉前一条配方——故与 designing/completing 同套守卫，在 await 前同步占位
+    if (uploading.value) return false;
     const r = readContractor();
     if (!r) return false;
     const res = uploadBlueprint(bag.value, 物品名, 配方库.value);
@@ -418,12 +440,17 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
       toastr.error(res.error);
       return false;
     }
-    _.set(r.mvu, ['stat_data', '契约者', '背包'], res.bag as any);
-    await commit(r.mvu, r.mid, [[['stat_data', '契约者', '背包'], res.bag]]);
-    配方库.value = res.配方库;
-    syncFromMvu();
-    toastr.success(`已掌握配方「${Object.keys(res.配方库).slice(-1)[0]}」`);
-    return true;
+    uploading.value = true;
+    try {
+      _.set(r.mvu, ['stat_data', '契约者', '背包'], res.bag as any);
+      await commit(r.mvu, r.mid, [[['stat_data', '契约者', '背包'], res.bag]]);
+      配方库.value = res.配方库;
+      syncFromMvu();
+      toastr.success(`已掌握配方「${Object.keys(res.配方库).slice(-1)[0]}」`);
+      return true;
+    } finally {
+      uploading.value = false;
+    }
   }
 
   /** 删除配方：只动配方库（watchEffect 自动落盘），不走 MVU 写入；图纸已在上传时消耗，不退回 */
@@ -437,7 +464,7 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
   }
 
   return {
-    codex, 配方库, playerName, playerTier, playerUP, bag, lastOutcome, lastError, designing, completing,
+    codex, 配方库, playerName, playerTier, playerUP, bag, lastOutcome, lastError, designing, completing, uploading,
     allRecipes, 背包图纸, syncFromMvu, facilityInfo, matchMaterials, setCodex, doCraft,
     designBlueprint, completeBp, uploadBp, deleteRecipe,
   };
