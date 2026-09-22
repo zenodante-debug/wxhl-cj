@@ -212,15 +212,14 @@ function buildEquip(input: CraftInput, 结果: CraftResult, rand: () => number):
     };
   }
 
-  // 武器类型词（用于回落命名）；防具同理用光谱词
-  const 词 = input.配方.装备子类 === '武器' ? 基础 : ARMOR_NAME[基础 as ArmorSpectrum];
-  const 名称 = input.配方.成品名 || `${core}${词}`;
-
+  // 武器类型词（用于回落命名）；防具同理用光谱词。
+  // 命名词一律在数值查询**之后**才算：非法输入若先撞 ARMOR_NAME[基础] 只会得到一条
+  // 「Cannot read properties of undefined」，与武器分支 weaponStats 的可读报错不对称。
   if (input.配方.装备子类 === '武器') {
     const w = weaponStats(基础, tier, q);
     const b = attrBonus('武器', tier, q);
     return {
-      名称, 类型: '武器', 品质: q, 阶位: TIER_NAMES[tier - 1],
+      名称: input.配方.成品名 || `${core}${基础}`, 类型: '武器', 品质: q, 阶位: TIER_NAMES[tier - 1],
       穿戴门槛: '无', 强化等级: 0, 伤害骰: w.伤害骰, 倍率: w.倍率,
       主属性, 副属性: input.副属性, 主属性加成: roll(b.主), 副属性加成: roll(b.副),
       装备防御: 0, 装备闪避: 0, 负重: w.负重, 效果,
@@ -229,14 +228,17 @@ function buildEquip(input: CraftInput, 结果: CraftResult, rand: () => number):
   }
   // 防具
   const 光谱 = 基础 as ArmorSpectrum;
+  const 光谱词 = ARMOR_NAME[光谱];
+  // 与武器分支对称的可读报错：armorStats 内部先取 ARMOR_BASE[光谱][品质]，非法光谱在那里只会抛 TypeError
+  if (!光谱词) throw new Error(`未知防具光谱：${光谱}（合法值：${Object.keys(ARMOR_NAME).join('/')}）`);
   const a = armorStats(光谱, tier, q);
   const b = attrBonus('躯干', tier, q);
   return {
-    名称, 类型: '防具', 品质: q, 阶位: TIER_NAMES[tier - 1],
+    名称: input.配方.成品名 || `${core}${光谱词}`, 类型: '防具', 品质: q, 阶位: TIER_NAMES[tier - 1],
     穿戴门槛: wearThreshold(光谱, tier, q), 强化等级: 0, 伤害骰: '无', 倍率: 0,
     主属性, 副属性: input.副属性, 主属性加成: roll(b.主), 副属性加成: roll(b.副),
     装备防御: roll(a.装备防御), 装备闪避: roll(a.装备闪避), 负重: a.负重, 效果,
-    描述: `手工制作的${q}${ARMOR_NAME[光谱]}，以${core}为核心材料打造。${风味}${署名}`, 数量: 1,
+    描述: `手工制作的${q}${光谱词}，以${core}为核心材料打造。${风味}${署名}`, 数量: 1,
   };
 }
 
@@ -261,10 +263,14 @@ function buildGoods(input: CraftInput, 结果: CraftResult, rand: () => number):
     const 恢复量 = Math.round(固定 * tier + input.制作者.属性修正值[关联属性] * TIER_COEF[tier]);
     效果描述 = `${类别} ${恢复量}点。`;
   } else if (类别 === '爆炸物') {
-    // 配方给的 固定值 即「每阶骰数基准」；未给（标准配方恒为 0）时沿用品质骰 × 阶位（设计填补）
-    const 骰数 = (基准 > 0 ? 基准 : q === '白色' ? 2 : 4) * tier;
+    // 世界书伤害口径：伤害 = 基础随机骰 +（制作者对应属性修正 × 道具阶位系数），**骰数由品质决定**
+    // （一阶 白2d6 / 蓝4d6 / 金6d6，没有自由参数）；世界书只列到金，紫沿用金的 6（设计填补）。
+    // 配方.道具固定值 是**附加**固定伤害、不是骰数的替代——写成独立的加法项，0（标准配方恒为 0）时与 v1 逐字一致。
+    const 品质骰: Record<Quality, number> = { 白色: 2, 蓝色: 4, 金色: 6, 紫色: 6 };
+    const 骰数 = 品质骰[q] * tier;
+    const 附加 = 基准 > 0 ? `+${基准}` : '';
     const 加值 = input.制作者.属性修正值[关联属性] * TIER_COEF[tier];
-    效果描述 = `爆炸伤害 ${骰数}d6+${加值}。`;
+    效果描述 = `爆炸伤害 ${骰数}d6${附加}+${加值}。`;
   } else {
     效果描述 = `${类别}用品。`;
   }
