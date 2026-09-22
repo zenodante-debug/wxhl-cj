@@ -3,6 +3,7 @@
 // 设计填补：GOODS_BASE 固定值、启发式词典内容均为可调初值
 // ================================================================
 import type { Attr, Quality } from './equipTables';
+import type { EffectEntry } from './effectRules';
 
 export const 材料类别 = ['金属', '布料皮革', '草药', '矿石', '能量', '怪物素材', '食材', '火药', '任意'] as const;
 export type MaterialCategory = (typeof 材料类别)[number];
@@ -14,6 +15,24 @@ export const 材料需求Schema = z.object({
   数量: z.coerce.number(),
   核心: z.boolean().prefault(false),
 });
+
+/** 效果条目 zod 版（与 effectRules.EffectEntry 同构） */
+export const EffectEntrySchema = z.object({
+  类型: z.enum(['常驻', '触发', '消耗']).prefault('常驻'),
+  描述: z.string().prefault(''),
+  命中闪避: z.coerce.number().optional(),
+  伤害百分比: z.coerce.number().optional(),
+  属性加成: z.coerce.number().optional(),
+  触发条件: z.string().optional(),
+  消耗: z.string().optional(),
+});
+
+/** 编译期同构断言：zod 产出必须与 effectRules.EffectEntry 双向兼容，任一侧漂移即编译失败 */
+export type 效果条目同构 = z.infer<typeof EffectEntrySchema> extends EffectEntry
+  ? EffectEntry extends z.infer<typeof EffectEntrySchema>
+    ? true
+    : never
+  : never;
 
 export const 配方Schema = z.object({
   名称: z.string(),
@@ -29,6 +48,9 @@ export const 配方Schema = z.object({
     等级: z.coerce.number(),
   }),
   批量上限: z.coerce.number().prefault(1),
+  装备基础: z.string().prefault(''), // 武器=WEAPON_TABLE 键；防具=光谱；消耗品=''
+  成品名: z.string().prefault(''), // 图纸指定成品名；空则用「核心材料名+类型词」
+  效果: z.array(EffectEntrySchema).prefault([]), // 金/紫图纸配方的特效（白/蓝为空）
 });
 export type 配方 = z.infer<typeof 配方Schema>;
 
@@ -135,3 +157,28 @@ export const GOODS_BASE: Record<string, {
   烈性爆炸物: { 类别: '爆炸物', 固定值: 0, 关联属性: 'PER' },
   绊线陷阱: { 类别: '陷阱', 固定值: 0, 关联属性: 'PER' },
 };
+
+// ================================================================
+// 图纸（Blueprint）：物品命名 + 图纸物品内承载的数据
+// ================================================================
+export const BLUEPRINT_PREFIX = '图纸·';
+
+export function isBlueprintName(name: string): boolean {
+  return name.startsWith(BLUEPRINT_PREFIX);
+}
+
+export function blueprintItemName(配方名: string): string {
+  return BLUEPRINT_PREFIX + 配方名;
+}
+
+/** 图纸物品内承载的数据（存背包 catchall 字段 + 小手机本地备份） */
+export const BlueprintDataSchema = z.object({
+  配方: 配方Schema,
+  制作者: z.string().prefault(''),
+  补全: z.boolean().prefault(false), // 是否经 AI 补全过
+  版本: z.coerce.number().prefault(1),
+});
+export type 图纸数据 = z.infer<typeof BlueprintDataSchema>;
+
+/** 已上传配方库的键 = 配方名 */
+export type 配方库 = Record<string, 配方>;

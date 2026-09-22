@@ -1,5 +1,15 @@
 import { describe, expect, it } from 'vitest';
-import { GOODS_BASE, 启发式归类, 配方Schema, STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES } from '../recipes';
+import {
+  BLUEPRINT_PREFIX,
+  BlueprintDataSchema,
+  blueprintItemName,
+  GOODS_BASE,
+  isBlueprintName,
+  启发式归类,
+  配方Schema,
+  STANDARD_GOODS_RECIPES,
+  TEMPLATE_RECIPES,
+} from '../recipes';
 
 describe('启发式归类 · 材料分类词典', () => {
   it('怪物素材/草药/金属/火药', () => {
@@ -40,5 +50,33 @@ describe('内置配方合法性', () => {
     for (const r of STANDARD_GOODS_RECIPES) {
       expect(GOODS_BASE[r.名称], r.名称).toBeDefined();
     }
+  });
+});
+
+describe('图纸数据与命名', () => {
+  it('图纸物品名前缀', () => {
+    expect(blueprintItemName('狼王牙刃')).toBe('图纸·狼王牙刃');
+    expect(isBlueprintName('图纸·狼王牙刃')).toBe(true);
+    expect(isBlueprintName('精铁')).toBe(false);
+    expect(BLUEPRINT_PREFIX).toBe('图纸·');
+  });
+  it('图纸数据承载完整配方并通过校验', () => {
+    const data = BlueprintDataSchema.parse({
+      配方: {
+        名称: '狼王牙刃', 来源: '图纸', 行业: '锻造', 成品类型: '装备', 装备子类: '武器',
+        品质: '金色', 阶位: 3, 装备基础: '短剑',
+        材料: [{ 类别: '怪物素材', 数量: 1, 核心: true }, { 类别: '金属', 数量: 2, 核心: false }],
+        技能要求: { 分类: '高级', 等级: 1 },
+        效果: [{ 类型: '触发', 描述: '撕咬：攻击附加流血', 伤害百分比: 10, 触发条件: '命中时', 消耗: '每场3次' }],
+      },
+      制作者: 'AI',
+    });
+    expect(data.配方.品质).toBe('金色');
+    expect(data.配方.效果[0].类型).toBe('触发');
+    expect(data.补全).toBe(false);
+    expect(data.版本).toBe(1);
+  });
+  it('金色配方可含效果，白色配方效果为空', () => {
+    expect(配方Schema.parse({ ...TEMPLATE_RECIPES[0] }).效果).toEqual([]);
   });
 });
