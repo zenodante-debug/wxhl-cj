@@ -9,7 +9,7 @@ import {
   uploadBlueprint,
   writeBlueprint,
 } from '../blueprint';
-import { BlueprintDataSchema, blueprintItemName, type 图纸数据 } from '../recipes';
+import { BlueprintDataSchema, blueprintItemName, type 图纸数据, type 配方库 } from '../recipes';
 
 const 金配方 = {
   名称: '狼王牙刃', 来源: '图纸' as const, 行业: '锻造' as const, 成品类型: '装备' as const,
@@ -92,6 +92,23 @@ describe('uploadBlueprint · 上传学习', () => {
     const r = uploadBlueprint(空, 图纸物品, {});
     expect('error' in r).toBe(true);
     if ('error' in r) expect(r.error).toContain('数量不足');
+  });
+  // 终审 I1 的另一入口：设计路径已由 sanitizeDesign 拦住空名，但 AI/GM 可直写背包，
+  // 上传后 配方库[''] 会做出空名背包条目（主卡背包空键 → 无法上架/识别、可无限复制）。只报错、不写档。
+  it.each(['', '   '])('空名图纸（「%s」）→ 拒绝上传，背包与配方库均不动', (名称) => {
+    const 物品 = blueprintItemName('空名');
+    const bag: Bag = {
+      [物品]: {
+        名称: 物品, 描述: '', 数量: 1,
+        图纸数据: { 配方: { ...金配方, 名称 }, 制作者: 'AI', 补全: false, 版本: 1 },
+      },
+    };
+    const 库: 配方库 = {};
+    const r = uploadBlueprint(bag, 物品, 库);
+    expect('error' in r).toBe(true);
+    if ('error' in r) expect(r.error).toContain('名称为空');
+    expect(bag[物品].数量).toBe(1); // 背包：图纸没被扣掉
+    expect(Object.keys(库)).toEqual([]); // 配方库：没有 配方库[''] 混进来
   });
   it('配方名撞原型链键（constructor）不误判为已掌握', () => {
     const 名 = 'constructor';

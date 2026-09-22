@@ -72,6 +72,10 @@ export function uploadBlueprint(
   const 数据 = readBlueprint(bag, 物品名);
   if (!数据) return { error: `「${物品名}」不是有效图纸` };
   const 名称 = 数据.配方.名称;
+  // 空名图纸不得入库（终审 I1 的另一入口）：设计路径已由 sanitizeDesign 拦住，但 AI/GM 可以直写背包，
+  // 上传后 配方库[''] 会制作出**空名背包条目**（主卡背包空键 → 无法上架/识别、可无限复制）。
+  // 与「不是有效图纸」「已掌握」同一形态：只返回 error，背包与配方库都不动。
+  if (String(名称).trim() === '') return { error: '图纸名称为空，无法上传学习' };
   // 用 hasOwn：图纸名由 AI 生成，`constructor`/`toString` 之类会让真值判定误报"已掌握"
   if (Object.hasOwn(配方库, 名称)) return { error: `已掌握配方「${名称}」，不能重复上传` };
   let nextBag: Bag;
