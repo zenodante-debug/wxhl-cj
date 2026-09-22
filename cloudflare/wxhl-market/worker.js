@@ -1,14 +1,19 @@
-// 无限回廊 · 自由市场 Worker
-// 部署: Cloudflare Dashboard → Workers & Pages → wxhl-market → 编辑代码 → 粘贴本文件 →
-//       Settings → Variables → KV Namespace Bindings 绑定一个 KV 命名空间, 变量名填 MARKET。
-//       (或用 wrangler deploy, 见同目录 README.md)
+// 无限回廊 · 自由市场 Worker（存储层：Cloudflare D1）
+// 部署: 见同目录 README.md。绑定: D1 数据库，变量名 MARKET_DB。
+//
+// 存储选型说明（2026-09-22 从 KV 迁移）：
+//   KV 的 list() 有每日配额，而「逛市场」每次都要遍历全库 key，配额很快爆掉
+//   （表现为 1101 / "KV list() limit exceeded for the day"）。
+//   D1 免费版每天 500 万行读 / 10 万行写，且能 WHERE / ORDER BY / LIMIT，
+//   不再需要把全库 key 拉出来——挂单再多也不会拖垮浏览。
+//
 // 模式: 上架即扣物/购买即扣款在玩家本地结算, 服务器只记账挂货款, 卖家随时领取;
 //       服务器无法校验卖家是否真有此物, 熟人小圈子以信义为本——但价格与装备规则由本 Worker 硬校验。
 // 防伪装: 服务器不信任客户端的 kind 字段, 一律按物品快照自行分类定价
-//         (装备字段信号 → 必须有可定价品质+可判定类型; 无信号 → 道具)。
+//         (品质可定价 + 类型可判分类 → 装备; 带装备字段却定不了价 → 拒绝; 其余 → 道具)。
 // 定价: 参考价 = 一阶基准价 × 阶位²(×1/×4/×9/×16/×25);
 //       装备区间 = [基准下限, 基准上限×溢价](蓝×1.0/金×1.5/紫×2.0); 白装/银装拒绝上架;
-//       道具区间 = [5, 3000] × 阶位²。
+//       道具区间 = [5, 3000] × 阶位²; 单价 × 数量 = 成交总价。
 // 规则: 世界书<装备效果强度限制>+<装备与消耗品系统>——效果≤2条(破限器上限3, >3拒)、
 //       主/副属性加成按基准表、防闪软上限、骰面格式 d4~d40、
 //       必中/无敌/锁血/即死/无限 仅四阶以上紫银可出现。
@@ -181,8 +186,8 @@ function validateHard(item, quality, category, tierIdx) {
 }
 
 // ———— 挂单整包校验: 结构防刷 + 服务器自行分类定价 + 装备规则硬校验 ————
-// 返回拒绝原因字符串, null = 通过。同时通过 mutate b.kind 落下服务器认定的分类。
-function validateListing(b) {
+// 返回拒绝原因字符串, null = 通过。同时把服务器认定的分类与筛选列写进 out。
+function validateListing(b, out) {
   if (!b) return 'bad request';
   if (typeof b.client !== 'string' || b.client.length === 0 || b.client.length > 64) return 'client 缺失或过长';
   if (typeof (b.seller ?? '') !== 'string' || String(b.seller).length > 24) return 'seller 过长';
@@ -191,11 +196,8 @@ function validateListing(b) {
     return '物品名称缺失或过长';
   if (typeof (b.item.描述 ?? '') !== 'string' || String(b.item.描述).length > 500) return '物品描述过长（上限 500 字）';
   if (!Number.isInteger(Number(b.qty)) || Number(b.qty) < 1 || Number(b.qty) > 999) return '数量须为 1~999 的整数';
-  if (JSON.stringify(b.item).length > 2048) return '物品快照过大';
+  if (JSON.stringify(b.item).length > 4096) return '物品快照过大';
 
-  // 服务器自行分类: 客户端 kind 仅供参考
-  // 装备 = 品质可定价 + 类型/信号可判分类（防剥离属性字段伪装道具绕价）；
-  // 带装备字段却定不了价的直接拒绝；两者皆无才是道具
   const hasMarkers = hasEquipMarkers(b.item);
   const q = parseQuality(b.item.品质);
   const category = q ? parseCategory(b.item) : null;
@@ -209,28 +211,66 @@ function validateListing(b) {
     if (idx === null) return '阶位无法识别';
     const hard = validateHard(b.item, q.quality, category, idx);
     if (hard) return hard;
+    out.category = category;
+    out.tier_idx = idx;
     return null;
   }
-  if (hasMarkers) {
-    return '物品带装备字段但品质或类型无法识别，无法定价——请补全「品质」与「类型」';
-  }
+  if (hasMarkers) return '物品带装备字段但品质或类型无法识别，无法定价——请补全「品质」与「类型」';
 
   b.kind = 'goods';
   const chk = checkPrice('goods', b.item, String(b.tier ?? '一阶'), Number(b.price));
-  return chk.ok ? null : chk.reason;
+  if (!chk.ok) return chk.reason;
+  out.category = '道具';
+  out.tier_idx = tierIdxOf(tier);
+  return null;
 }
 
-// 列出全部在售挂单的 key (KV list 分页游走, 字典序 = 上架时间序)
-async function list_market_keys(env) {
-  const names = [];
-  let cursor;
-  while (true) {
-    const page = await env.MARKET.list(cursor ? { prefix: 'm:i:', cursor } : { prefix: 'm:i:' });
-    for (const k of page.keys) names.push(k.name);
-    if (page.list_complete) break;
-    cursor = page.cursor;
-  }
-  return names;
+// ———— D1 建表（每个 isolate 只跑一次；失败下次请求重试，不让建表问题拖垮整个 Worker） ————
+let schemaReady = false;
+async function ensureSchema(env) {
+  if (schemaReady) return;
+  await env.MARKET_DB.batch([
+    env.MARKET_DB.prepare(
+      `CREATE TABLE IF NOT EXISTS listings (
+         id TEXT PRIMARY KEY,
+         client TEXT NOT NULL,
+         seller TEXT NOT NULL,
+         tier TEXT NOT NULL,
+         kind TEXT NOT NULL,
+         category TEXT NOT NULL,
+         tier_idx INTEGER,
+         quality TEXT,
+         item_name TEXT NOT NULL,
+         item_json TEXT NOT NULL,
+         qty INTEGER NOT NULL,
+         price INTEGER NOT NULL,
+         created INTEGER NOT NULL
+       )`,
+    ),
+    env.MARKET_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_listings_created ON listings (created DESC)`),
+    env.MARKET_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_listings_client ON listings (client)`),
+    env.MARKET_DB.prepare(
+      `CREATE TABLE IF NOT EXISTS earnings (
+         client TEXT PRIMARY KEY,
+         amount INTEGER NOT NULL
+       )`,
+    ),
+  ]);
+  schemaReady = true;
+}
+
+/** 行 → 下发给前端的挂单对象（与旧 KV 版字段完全一致，前端零改动） */
+function rowToListing(r) {
+  return {
+    id: r.id,
+    seller: r.seller,
+    tier: r.tier,
+    kind: r.kind,
+    item: JSON.parse(r.item_json),
+    qty: r.qty,
+    price: r.price,
+    created: r.created,
+  };
 }
 
 function json(data, headers, status = 200) {
@@ -238,6 +278,21 @@ function json(data, headers, status = 200) {
     status,
     headers: { ...headers, 'Content-Type': 'application/json' },
   });
+}
+
+/** 写冲突（D1 偶发 database is busy）重试几次 */
+async function withRetry(fn, tries = 3) {
+  let lastErr;
+  for (let i = 0; i < tries; i++) {
+    try {
+      return await fn();
+    } catch (e) {
+      lastErr = e;
+      if (!/busy|locked/i.test(String(e && e.message))) throw e;
+      await new Promise(r => setTimeout(r, 60 * (i + 1)));
+    }
+  }
+  throw lastErr;
 }
 
 export default {
@@ -250,29 +305,47 @@ export default {
     };
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
 
+    // 建表：只在需要访问数据时初始化（未建好就返回明确原因，而不是 1101）
+    try {
+      await ensureSchema(env);
+    } catch (e) {
+      return new Response('数据库初始化失败: ' + String(e && e.message ? e.message : e), { status: 500, headers: cors });
+    }
+
     // ———— 自由市场: 玩家把背包物品挂上全服市场, 其他玩家用 UP 购买 ————
-    // 挂单 id 用「毫秒时间戳-随机数」生成: KV 计数器读改写不保证立即可见, 会撞号互相覆盖;
-    // 定长时间戳的字典序即时间序, 市集浏览按 key 升序扫描取尾部即为最新挂单。
-    // 售出/下架直接删除挂单键, 市集里只剩在售单, 扫描量恒小。
+    // 挂单 id 用「毫秒时间戳-随机数」生成，字典序即时间序（老数据沿用同一格式）；
+    // 列表查询走 SQL ORDER BY created DESC LIMIT，不再遍历全库 key。
 
     // POST /market/list  { client, seller, tier, kind, item, qty, price }  →  { id }
     if (url.pathname === '/market/list' && request.method === 'POST') {
       try {
         const b = await request.json();
-        const reason = validateListing(b);
+        const cols = {};
+        const reason = validateListing(b, cols);
         if (reason) return new Response(reason, { status: 400, headers: cors });
         const id = String(Date.now()).padStart(15, '0') + '-' + Math.random().toString(36).slice(2, 8);
-        await env.MARKET.put(`m:i:${id}`, JSON.stringify({
-          id,
-          client: b.client.slice(0, 64),
-          seller: String(b.seller ?? '无名契约者').slice(0, 24),
-          tier: String(b.tier ?? '').slice(0, 12),
-          kind: b.kind, // validateListing 已按物品快照重新认定
-          item: b.item,
-          qty: Number(b.qty),
-          price: Number(b.price),
-          created: Date.now(),
-        }), { expirationTtl: 60 * 60 * 24 * 30 }); // 30 天无人问津则自动下架
+        await withRetry(() =>
+          env.MARKET_DB.prepare(
+            `INSERT INTO listings (id, client, seller, tier, kind, category, tier_idx, quality, item_name, item_json, qty, price, created)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+            .bind(
+              id,
+              b.client.slice(0, 64),
+              String(b.seller ?? '无名契约者').slice(0, 24),
+              String(b.tier ?? '').slice(0, 12),
+              b.kind,
+              cols.category ?? '道具',
+              cols.tier_idx ?? null,
+              parseQuality(b.item.品质)?.quality ?? null,
+              String(b.item.名称).slice(0, 40),
+              JSON.stringify(b.item),
+              Number(b.qty),
+              Number(b.price),
+              Date.now(),
+            )
+            .run(),
+        );
         return json({ id }, cors);
       } catch {
         return new Response('bad request', { status: 400, headers: cors });
@@ -280,33 +353,51 @@ export default {
     }
 
     // GET /market/listings  →  { listings: [在售挂单, 最新 50 条] }
+    // 可选查询参数（服务端筛选，前端暂未使用；老前端传空即全量最新 50 条）
     if (url.pathname === '/market/listings' && request.method === 'GET') {
-      const names = await list_market_keys(env);
-      const listings = [];
-      for (const name of names.slice(-50)) {
-        const raw = await env.MARKET.get(name);
-        if (!raw) continue;
-        const l = JSON.parse(raw);
-        listings.push({ id: l.id, seller: l.seller, tier: l.tier, kind: l.kind, item: l.item, qty: l.qty, price: l.price, created: l.created });
+      try {
+        const where = [];
+        const args = [];
+        const category = url.searchParams.get('category');
+        const tierIdx = url.searchParams.get('tier');
+        const quality = url.searchParams.get('quality');
+        if (category) { where.push('category = ?'); args.push(category); }
+        if (tierIdx !== null && tierIdx !== '') { where.push('tier_idx = ?'); args.push(Number(tierIdx)); }
+        if (quality) { where.push('quality = ?'); args.push(quality); }
+        const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 50) || 50, 1), 200);
+        const sql =
+          `SELECT id, seller, tier, kind, item_json, qty, price, created FROM listings` +
+          (where.length ? ` WHERE ${where.join(' AND ')}` : '') +
+          ` ORDER BY created DESC LIMIT ?`;
+        const rows = await env.MARKET_DB.prepare(sql).bind(...args, limit).all();
+        return json({ listings: (rows.results ?? []).map(rowToListing) }, { ...cors, 'Cache-Control': 'no-store' });
+      } catch (e) {
+        console.error('[wxhl-market] listings 查询失败', String(e));
+        return new Response('市集查询失败: ' + String(e && e.message ? e.message : e), { status: 500, headers: cors });
       }
-      return json({ listings }, { ...cors, 'Cache-Control': 'no-store' });
     }
 
     // POST /market/buy  { id, buyer, client }  →  { ok }
-    //   给卖家挂账后删除挂单 (买家付款在买家本地结算, 服务器只记账);
-    //   KV 无原子判重, 极小概率两买家同刻购买同一单会双计一次货款, 小圈子市集可接受
+    //   给卖家挂账后删除挂单（买家付款在买家本地结算，服务器只记账）。
+    //   成交价 = 单价 × 数量，与前端一致。
     if (url.pathname === '/market/buy' && request.method === 'POST') {
       try {
         const { id, buyer, client } = await request.json();
-        const key = `m:i:${String(id ?? '')}`;
-        const raw = await env.MARKET.get(key);
-        if (!raw) return new Response('not found', { status: 404, headers: cors });
-        const l = JSON.parse(raw);
-        if (client && String(client).slice(0, 64) === l.client) {
+        const row = await env.MARKET_DB.prepare(`SELECT * FROM listings WHERE id = ?`).bind(String(id ?? '')).first();
+        if (!row) return new Response('not found', { status: 404, headers: cors });
+        if (client && String(client).slice(0, 64) === row.client) {
           return new Response('own listing', { status: 403, headers: cors });
         }
-        await env.MARKET.put(`m:pro:${l.client}`, String(Number((await env.MARKET.get(`m:pro:${l.client}`)) ?? 0) + Number(l.price ?? 0)));
-        await env.MARKET.delete(key);
+        const total = Number(row.price) * Number(row.qty);
+        await withRetry(() =>
+          env.MARKET_DB.batch([
+            env.MARKET_DB.prepare(
+              `INSERT INTO earnings (client, amount) VALUES (?, ?)
+               ON CONFLICT(client) DO UPDATE SET amount = amount + excluded.amount`,
+            ).bind(row.client, total),
+            env.MARKET_DB.prepare(`DELETE FROM listings WHERE id = ?`).bind(row.id),
+          ]),
+        );
         return json({ ok: true }, cors);
       } catch {
         return new Response('bad request', { status: 400, headers: cors });
@@ -317,26 +408,32 @@ export default {
     if (url.pathname === '/market/cancel' && request.method === 'POST') {
       try {
         const { id, client } = await request.json();
-        const key = `m:i:${String(id ?? '')}`;
-        const raw = await env.MARKET.get(key);
-        if (!raw) return new Response('not found', { status: 404, headers: cors });
-        const l = JSON.parse(raw);
-        if (l.client !== String(client).slice(0, 64)) return new Response('forbidden', { status: 403, headers: cors });
-        await env.MARKET.delete(key);
+        const row = await env.MARKET_DB.prepare(`SELECT client FROM listings WHERE id = ?`).bind(String(id ?? '')).first();
+        if (!row) return new Response('not found', { status: 404, headers: cors });
+        if (row.client !== String(client).slice(0, 64)) return new Response('forbidden', { status: 403, headers: cors });
+        await withRetry(() =>
+          env.MARKET_DB.prepare(`DELETE FROM listings WHERE id = ?`).bind(String(id)).run(),
+        );
         return json({ ok: true }, cors);
       } catch {
         return new Response('bad request', { status: 400, headers: cors });
       }
     }
 
-    // POST /market/collect  { client }  →  { gained }  领取全部挂账 UP (读后即清)
+    // POST /market/collect  { client }  →  { gained }  领取全部挂账 UP（读后即清）
     if (url.pathname === '/market/collect' && request.method === 'POST') {
       try {
         const { client } = await request.json();
         if (!client) return new Response('bad request', { status: 400, headers: cors });
-        const key = `m:pro:${String(client).slice(0, 64)}`;
-        const gained = Number((await env.MARKET.get(key)) ?? 0);
-        if (gained > 0) await env.MARKET.put(key, '0');
+        const key = String(client).slice(0, 64);
+        const row = await env.MARKET_DB.prepare(`SELECT amount FROM earnings WHERE client = ?`).bind(key).first();
+        const gained = Number(row?.amount ?? 0);
+        if (gained > 0) {
+          // 条件删除：与读取到的金额一致才清零，避免并发领取双花
+          await withRetry(() =>
+            env.MARKET_DB.prepare(`DELETE FROM earnings WHERE client = ? AND amount = ?`).bind(key, gained).run(),
+          );
+        }
         return json({ gained }, cors);
       } catch {
         return new Response('bad request', { status: 400, headers: cors });
@@ -345,18 +442,22 @@ export default {
 
     // GET /market/mine?client=xxx  →  { pending, listings: [我未售出的挂单] }
     if (url.pathname === '/market/mine' && request.method === 'GET') {
-      const client = String(url.searchParams.get('client') ?? '').slice(0, 64);
-      const pending = Number((await env.MARKET.get(`m:pro:${client}`)) ?? 0);
-      const names = await list_market_keys(env);
-      const listings = [];
-      for (const name of names) {
-        const raw = await env.MARKET.get(name);
-        if (!raw) continue;
-        const l = JSON.parse(raw);
-        if (l.client !== client) continue;
-        listings.push({ id: l.id, seller: l.seller, tier: l.tier, kind: l.kind, item: l.item, qty: l.qty, price: l.price, created: l.created });
+      try {
+        const client = String(url.searchParams.get('client') ?? '').slice(0, 64);
+        const earn = await env.MARKET_DB.prepare(`SELECT amount FROM earnings WHERE client = ?`).bind(client).first();
+        const rows = await env.MARKET_DB.prepare(
+          `SELECT id, seller, tier, kind, item_json, qty, price, created FROM listings WHERE client = ? ORDER BY created DESC LIMIT 200`,
+        )
+          .bind(client)
+          .all();
+        return json(
+          { pending: Number(earn?.amount ?? 0), listings: (rows.results ?? []).map(rowToListing) },
+          { ...cors, 'Cache-Control': 'no-store' },
+        );
+      } catch (e) {
+        console.error('[wxhl-market] mine 查询失败', String(e));
+        return new Response('摊位查询失败: ' + String(e && e.message ? e.message : e), { status: 500, headers: cors });
       }
-      return json({ pending, listings }, { ...cors, 'Cache-Control': 'no-store' });
     }
 
     return new Response('not found', { status: 404, headers: cors });

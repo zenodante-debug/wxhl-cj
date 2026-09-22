@@ -41,21 +41,96 @@ describe('worker checkPrice（与前端 priceTable 同规则镜像）', () => {
   });
 });
 
-// ———— 六接口（假 KV 环境） ————
-function fakeKv() {
-  const m = new Map();
+// ———— 六接口（假 D1 环境） ————
+/**
+ * 假 D1：只实现本 Worker 用到的 SQL 子集（CREATE TABLE/INDEX、INSERT…ON CONFLICT、
+ * SELECT/WHERE/ORDER BY/LIMIT、DELETE）。够真实到能验证业务逻辑，不追求通用。
+ * 注意：判定必须用 ^ 锚定的前缀匹配——INSERT 语句里含 `created` 列名，/CREATE/i 会误匹配。
+ */
+function fakeD1() {
+  const listings = new Map();
+  const earnings = new Map();
+
+  function runDelete(sql, args) {
+    if (/^DELETE FROM listings/i.test(sql)) {
+      const id = args[0];
+      if (!listings.has(id)) return { changes: 0 };
+      listings.delete(id);
+      return { changes: 1 };
+    }
+    // DELETE FROM earnings WHERE client = ? AND amount = ?
+    const client = args[0];
+    if (!earnings.has(client)) return { changes: 0 };
+    if (earnings.get(client) !== args[1]) return { changes: 0 };
+    earnings.delete(client);
+    return { changes: 1 };
+  }
+
+  function runSelect(sql, args) {
+    if (/FROM listings/i.test(sql)) {
+      let rows = [...listings.values()];
+      const whereStr = sql.split(/WHERE/i)[1] ?? '';
+      let argi = 0;
+      for (const cond of whereStr.split(/AND/i).map(s => s.trim()).filter(Boolean)) {
+        if (/^id = \?/i.test(cond)) { const v = args[argi++]; rows = rows.filter(r => r.id === v); }
+        else if (/^client = \?/i.test(cond)) { const v = args[argi++]; rows = rows.filter(r => r.client === v); }
+        else if (/^category = \?/i.test(cond)) { const v = args[argi++]; rows = rows.filter(r => r.category === v); }
+        else if (/^tier_idx = \?/i.test(cond)) { const v = args[argi++]; rows = rows.filter(r => r.tier_idx === v); }
+        else if (/^quality = \?/i.test(cond)) { const v = args[argi++]; rows = rows.filter(r => r.quality === v); }
+      }
+      rows.sort((a, b) => b.created - a.created);
+      const limit = args[args.length - 1];
+      if (typeof limit === 'number') rows = rows.slice(0, limit);
+      return { results: rows.map(r => ({ ...r })) };
+    }
+    if (/FROM earnings/i.test(sql)) {
+      const v = earnings.get(args[0]);
+      return { results: [], first: v === undefined ? null : { amount: v } };
+    }
+    return { results: [] };
+  }
+
   return {
-    async get(k) { return m.has(k) ? m.get(k) : null; },
-    async put(k, v) { m.set(k, String(v)); },
-    async delete(k) { m.delete(k); },
-    async list({ prefix, cursor } = {}) {
-      const keys = [...m.keys()].filter(k => !prefix || k.startsWith(prefix)).sort().map(name => ({ name }));
-      return { keys, list_complete: true, cursor: '' };
+    prepare(sql) {
+      const stmt = {
+        _args: [],
+        bind(...a) { stmt._args = a; return stmt; },
+        async first() {
+          if (/FROM listings/i.test(sql)) return runSelect(sql, stmt._args).results[0] ?? null;
+          return runSelect(sql, stmt._args).first ?? null;
+        },
+        async all() { return runSelect(sql, stmt._args); },
+        async run() {
+          if (/^INSERT INTO earnings/i.test(sql)) {
+            const [client, amount] = stmt._args;
+            earnings.set(client, (earnings.get(client) ?? 0) + Number(amount));
+            return { changes: 1 };
+          }
+          if (/^INSERT INTO listings/i.test(sql)) {
+            const a = stmt._args;
+            listings.set(a[0], {
+              id: a[0], client: a[1], seller: a[2], tier: a[3], kind: a[4],
+              category: a[5], tier_idx: a[6], quality: a[7], item_name: a[8],
+              item_json: a[9], qty: a[10], price: a[11], created: a[12],
+            });
+            return { changes: 1 };
+          }
+          if (/^CREATE/i.test(sql)) return { changes: 0 };
+          if (/^DELETE/i.test(sql)) return runDelete(sql, stmt._args);
+          return { changes: 0 };
+        },
+      };
+      return stmt;
+    },
+    async batch(stmts) {
+      const out = [];
+      for (const s of stmts) out.push(await s.run());
+      return out;
     },
   };
 }
 
-const env = () => ({ MARKET: fakeKv() });
+const env = () => ({ MARKET_DB: fakeD1() });
 const post = (path, body) =>
   new Request('https://test.local' + path, {
     method: 'POST',

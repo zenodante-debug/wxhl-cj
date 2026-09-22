@@ -2,9 +2,13 @@ name = "wxhl-market"
 main = "worker.js"
 compatibility_date = "2026-09-21"
 
-[[kv_namespaces]]
-binding = "MARKET"
-id = "7278882c9ad949439c8fe6cd6159b237"
+# 挂单/货款存储（2026-09-22 从 KV 迁到 D1）
+# 起因：KV 的 list() 有每日配额，而市集每次浏览都要遍历全库 key，配额很快爆掉（error 1101）。
+# D1 免费版每天 500 万行读 / 10 万行写，且支持 WHERE / ORDER BY / LIMIT，不再需要遍历。
+[[d1_databases]]
+binding = "MARKET_DB"
+database_name = "wxhl-market-db"
+database_id = "f0cbe38c-0e74-4798-8558-48c663bf8e82"
 
-# 自定义域名（域名 657868.xyz 在 Cloudflare 账号内激活后，deploy 时自动绑定）
+# 自定义域名（657868.xyz 已在 Cloudflare 账号内激活后自动绑定）
 routes = [{ pattern = "market.657868.xyz", custom_domain = true }]
