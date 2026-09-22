@@ -181,6 +181,9 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
       配方: args.配方, 阶位: args.阶位, 子类型: args.子类型, 副属性: args.副属性,
       数量: args.数量, 核心材料, 辅料,
       缺图纸: false, 越阶材料: args.越阶材料, 劣质材料: args.劣质材料,
+      // 配方库只有在图纸「上传学习」后才进得来，故从配方库开单即为已掌握，恒 true；
+      // 「缺图纸」降档路径留给 AI 直接塞进背包、玩家尚未上传的图纸（不阻断，走降档 + DC+5）
+      图纸持有: true,
       设施: facilityInfo(), 制作者,
     };
 
