@@ -66,6 +66,15 @@ describe('checkEffects · 违禁与条数', () => {
     // 同上但条件缺失 → 仍拒（消耗字段不豁免）
     expect(checkEffects([{ 类型: '消耗', 描述: '即死', 消耗: '每场1次' }], 3).ok).toBe(false);
   });
+  it('无敌按「回合」限次豁免，消耗字样不得豁免', () => {
+    expect(checkEffects([{ 类型: '常驻', 描述: '永久无敌；每回合开始时发动' }], 3).ok).toBe(false);
+    // 消耗类词不得豁免无敌禁令（无「永久」硬子句时靠守卫兜住）
+    expect(checkEffects([{ 类型: '常驻', 描述: '永久无敌，消耗1点MP' }], 3).ok).toBe(false);
+    expect(checkEffects([{ 类型: '常驻', 描述: '无敌，消耗1点MP' }], 3).ok).toBe(false);
+    // 世界书约束：限定明确回合数的无敌是合法写法 → 放行
+    expect(checkEffects([{ 类型: '常驻', 描述: '无敌3回合' }], 3).ok).toBe(true);
+    expect(checkEffects([{ 类型: '常驻', 描述: '无敌，持续2回合' }], 3).ok).toBe(true);
+  });
   it('必中核心/弱点/要害双向都算违禁，写明条件才放行', () => {
     expect(checkEffects([{ 类型: '常驻', 描述: '核心弱点必中' }], 3).ok).toBe(false);
     expect(checkEffects([{ 类型: '常驻', 描述: '必中核心弱点' }], 3).ok).toBe(false);
