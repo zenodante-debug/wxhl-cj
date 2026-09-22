@@ -326,6 +326,20 @@ describe('金紫制作 · 图纸与降档', () => {
     input.制作者.技能 = { 分类: '高级', 阶位: 3, 等级: 3 };
     expect(validateCraft(input, bag)).toEqual([]);
   });
+  // 照裁定：分类要求由**品质**推导，不信任配方自带的 技能要求.分类
+  //（该字段由品质完全决定，存一份既能被撒谎又是冗余数据）
+  it('坏图纸谎报分类：金图纸把 技能要求.分类 写成「基础」→ 仍按品质要高级（读该字段的闸门会形同虚设）', () => {
+    const i = 金输入(true, 1);
+    i.配方 = { ...金配方, 技能要求: { 分类: '基础', 等级: 1 } }; // AI/GM 直写背包的坏图纸
+    i.制作者.技能 = { ...i.制作者.技能!, 分类: '基础', 等级: 9 }; // 基础系 Lv.9：旧口径下会放行
+    const errs = validateCraft(i, bag);
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toContain('高级');
+  });
+  it('反向同样走品质：白配方谎报「高级」→ 基础系玩家照样开工（旧口径会误拦）', () => {
+    const input = makeInput({ 配方: { ...锻造武器白, 技能要求: { 分类: '高级', 等级: 1 } } });
+    expect(validateCraft(input, bag)).toEqual([]);
+  });
   // spec §6.1：紫 = 高级技能 Lv.5 + 职业 + 高阶材料（核心材料档案阶位 ≥ 配方阶位）
   it('紫色配方 + 核心材料阶位 3 = 配方阶位 3 → 可制作', () => {
     expect(validateCraft(紫输入(), bag, 3)).toEqual([]);
