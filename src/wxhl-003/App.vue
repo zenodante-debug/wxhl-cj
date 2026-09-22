@@ -167,6 +167,17 @@
               </div>
             </div>
             <div class="app-grid" v-show="desktopPage === 1">
+              <div class="app-icon-wrapper" @click="openRank">
+                <div class="app-icon rank-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <path d="M8 21h8M12 17v4" />
+                    <path d="M7 4h10v5a5 5 0 0 1-10 0V4z" />
+                    <path d="M7 6H4.5a2.5 2.5 0 0 0 2.5 5M17 6h2.5a2.5 2.5 0 0 1-2.5 5" />
+                  </svg>
+                </div>
+                <span class="app-label">玩家排行榜</span>
+                <span class="app-sub">{{ appSubs.rank }}</span>
+              </div>
               <div class="app-icon-wrapper" @click="openSettings">
                 <div class="app-icon settings-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -2055,6 +2066,11 @@
           <CraftingView @close="goDesktop" @goto-market="onGotoMarket" />
         </div>
 
+        <!-- ============ RANK（玩家排行榜） ============ -->
+        <div v-if="currentView === 'rank'" class="app-page">
+          <RankView @close="goDesktop" />
+        </div>
+
         <!-- ============ STATUSBAR ============ -->
         <div v-if="currentView === 'statusbar'" class="app-page sb-page">
           <div class="app-header">
@@ -2096,6 +2112,7 @@ import ApiFields from './ApiFields.vue';
 import EditableObject from './EditableObject.vue';
 import MarketView from './market/MarketView.vue';
 import { useMarketStore } from './market/store';
+import RankView from './rank/RankView.vue';
 import CraftingView from './crafting/CraftingView.vue';
 import {
   isNewbieDungeon,
@@ -2278,6 +2295,7 @@ const appSubs = computed(() => ({
   roll: dungeonGenStore.rolledDungeons.length ? `${dungeonGenStore.rolledDungeons.length} 次掷骰` : '未掷骰',
   market: '以物易物，童叟无欺',
   crafting: '千锤百炼，巧夺天工',
+  rank: '以等级论高下',
   settlement: '结算空间',
   statusbar: idle.name,
 }));
@@ -2347,6 +2365,10 @@ function onGotoMarket(name: string) {
 
 function openCrafting() {
   currentView.value = 'crafting';
+}
+
+function openRank() {
+  currentView.value = 'rank';
 }
 
 function onRollDungeon() {

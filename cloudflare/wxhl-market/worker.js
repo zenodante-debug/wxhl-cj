@@ -20,6 +20,10 @@
 //       灰色封印(原品质) 解包按原品质定价。
 // 注意: 本文件与 src/wxhl-003/market/{priceTable,equipRules}.ts 是同一套规则, 改动须两边同步。
 //       国内直连 workers.dev 不通, 绑定自定义域名 market.657868.xyz。
+//
+// 本文件还含**玩家排行榜**（按等级排名, 见下方「玩家排行榜」段）:
+//   /rank/submit · /rank/top · /rank/admin/{list,delete,purge,clear}
+//   它自带 ensureRankSchema, 不经过市场那套建表 —— 两边互不波及。
 
 // ———— 价格表 [下限, 上限]（经济系统·恒定物价体系） ————
 const BASE = {
@@ -299,6 +303,245 @@ async function withRetry(fn, tries = 3) {
   throw lastErr;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// 玩家排行榜
+//
+// 排名依据是**等级**，不是资格分 —— 资格分每赛季清零，等级不会。
+// 唯一键是**契约者姓名**：同名后来者顶掉先前者（同一个玩家换新存档也走这条），
+//   服务器不做身份校验，和自由市场同一套信义模型（熟人圈子，以信义为本）。
+// Lv.1 不上榜，**Lv.10 起**才能参与；等级**无上限**（可以超脱）。
+// 排序：等级高的在前 → 同等级先上传的在前 → 再同则按姓名（保证名次可复现）。
+//
+// 建表与访问都走**独立**的 ensureRankSchema，不经过市场那套：
+//   市场数据库出问题不会波及榜单，榜单建表失败也不会波及市场。
+// 管理端点（/rank/admin/*）需要 Worker secret `RANK_ADMIN_KEY`；**没配就一律 403**，
+//   不能因为没配就放行。密钥只存在于 Worker，前端 bundle 里拿不到。
+// ════════════════════════════════════════════════════════════════════════════
+
+const RANK_MIN_LV = 10;
+const RANK_TOP_N = 20;
+const RANK_NAME_MAX = 24;
+const RANK_TEXT_MAX = 32;
+/** 只用来挡数字垃圾，**不是玩法上限** —— 等级无上限 */
+const RANK_LV_MAX = 999999;
+const RANK_ORDER_SQL = `ORDER BY lv DESC, updated ASC, name ASC`;
+/** 排在我前面的行：(lv 更大) 或 (同等级且传得更早) 或 (完全同键但姓名更小) */
+const RANK_AHEAD_SQL = `lv > ? OR (lv = ? AND updated < ?) OR (lv = ? AND updated = ? AND name < ?)`;
+
+/** 文本归一：空串与「无」都算没有，回落到兜底文案 */
+function rankText(v, fallback) {
+  const s = typeof v === 'string' ? v.trim() : '';
+  return !s || s === '无' ? fallback : s;
+}
+
+/** 上传整包校验 → { ok: true, payload } 或 { ok: false, reason } */
+function checkRankSubmission(b) {
+  const fail = reason => ({ ok: false, reason });
+  if (!b || typeof b !== 'object') return fail('bad request');
+
+  const name = typeof b.name === 'string' ? b.name.trim() : '';
+  if (!name) return fail('契约者姓名不能为空');
+  if (name.length > RANK_NAME_MAX) return fail(`契约者姓名过长（上限 ${RANK_NAME_MAX} 字）`);
+
+  const lv = Number(b.lv);
+  if (!Number.isInteger(lv)) return fail('等级必须是整数');
+  if (lv < RANK_MIN_LV) return fail(`Lv.${RANK_MIN_LV} 起才能参与排行（Lv.1 不上榜）`);
+  if (lv > RANK_LV_MAX) return fail(`等级 ${lv} 超出合理范围`);
+
+  const title = rankText(b.title, '无称号');
+  const job = rankText(b.job, '无职业');
+  if (title.length > RANK_TEXT_MAX) return fail(`称号过长（上限 ${RANK_TEXT_MAX} 字）`);
+  if (job.length > RANK_TEXT_MAX) return fail(`职业过长（上限 ${RANK_TEXT_MAX} 字）`);
+
+  return { ok: true, payload: { name, lv, title, job } };
+}
+
+/** 排行榜建表：独立于市场，失败只影响榜单 */
+let rankSchemaReady = false;
+async function ensureRankSchema(env) {
+  if (rankSchemaReady) return;
+  await env.MARKET_DB.batch([
+    env.MARKET_DB.prepare(
+      `CREATE TABLE IF NOT EXISTS ranks (
+         name TEXT PRIMARY KEY,
+         lv INTEGER NOT NULL,
+         title TEXT NOT NULL,
+         job TEXT NOT NULL,
+         updated INTEGER NOT NULL
+       )`,
+    ),
+    env.MARKET_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_ranks_lv ON ranks (lv DESC, updated ASC, name ASC)`),
+  ]);
+  rankSchemaReady = true;
+}
+
+const RANK_COLS = `name, lv, title, job, updated`;
+const countRanks = async db => Number((await db.prepare(`SELECT COUNT(*) AS n FROM ranks`).first())?.n ?? 0);
+
+/**
+ * D1 的 `run()` 把变更行数放在 **`meta.changes`**，不是顶层 `changes`。
+ * 2026-09-22 踩过：读到 undefined 后 `?? 0` 兜底，导致管理的删除计数恒为 0
+ * —— 明明删掉了却报「删了 0 条」。这里不设顶层回退，免得把同类错误再藏起来。
+ */
+const changesOf = r => Number(r?.meta?.changes ?? 0);
+
+/** 名次 = 排在我前面的行数 + 1 */
+async function rankOf(db, row) {
+  const r = await db
+    .prepare(`SELECT COUNT(*) AS n FROM ranks WHERE ${RANK_AHEAD_SQL}`)
+    .bind(row.lv, row.lv, row.updated, row.lv, row.updated, row.name)
+    .first();
+  return Number(r?.n ?? 0) + 1;
+}
+
+/** 非榜单路径返回 null，交给下面的市场分支 */
+async function handleRank(url, request, env, cors) {
+  if (!url.pathname.startsWith('/rank/')) return null;
+  const db = env.MARKET_DB;
+
+  try {
+    await ensureRankSchema(env);
+  } catch (e) {
+    return new Response('排行榜数据库初始化失败: ' + String(e && e.message ? e.message : e), { status: 500, headers: cors });
+  }
+
+  const bad = msg => new Response(msg, { status: 400, headers: cors });
+
+  // POST /rank/submit  { name, lv, title, job }  →  { rank, total }
+  // 上传后直接回名次，前端点完按钮立刻知道自己第几，省一次往返。
+  if (url.pathname === '/rank/submit' && request.method === 'POST') {
+    let b;
+    try {
+      b = await request.json();
+    } catch {
+      return bad('bad request');
+    }
+    const chk = checkRankSubmission(b);
+    if (!chk.ok) return bad(chk.reason);
+
+    const { name, lv, title, job } = chk.payload;
+    const updated = Date.now();
+    // 无条件覆盖 = 同名后来的顶掉先前的（换新存档等级更低也照样覆盖）
+    await withRetry(() =>
+      db
+        .prepare(
+          `INSERT INTO ranks (name, lv, title, job, updated) VALUES (?, ?, ?, ?, ?)
+           ON CONFLICT(name) DO UPDATE SET lv=excluded.lv, title=excluded.title, job=excluded.job, updated=excluded.updated`,
+        )
+        .bind(name, lv, title, job, updated)
+        .run(),
+    );
+    const total = await countRanks(db);
+    return json({ rank: await rankOf(db, { name, lv, updated }), total }, cors);
+  }
+
+  // GET /rank/top?name=xxx  →  { list: 前 20, total, me, near }
+  // 不传 name 就只出榜单（me 为 null）。
+  if (url.pathname === '/rank/top' && request.method === 'GET') {
+    const name = String(url.searchParams.get('name') ?? '').trim().slice(0, RANK_NAME_MAX);
+    const rows = await db
+      .prepare(`SELECT ${RANK_COLS} FROM ranks ${RANK_ORDER_SQL} LIMIT ?`)
+      .bind(RANK_TOP_N)
+      .all();
+    const list = rows.results ?? [];
+    const total = await countRanks(db);
+
+    let me = null;
+    let near = [];
+    if (name) {
+      const mine = await db.prepare(`SELECT ${RANK_COLS} FROM ranks WHERE name = ?`).bind(name).first();
+      if (mine) {
+        const rank = await rankOf(db, mine);
+        me = { rank, entry: mine };
+        // 名次在 TOP_N 之外：补「前一名 + 我 + 后一名」。
+        // 起点抬到 TOP_N+1，免得把榜单区已经显示过的第 TOP_N 名重复下发。
+        if (rank > RANK_TOP_N) {
+          const start = Math.max(RANK_TOP_N + 1, rank - 1);
+          const nb = await db
+            .prepare(`SELECT ${RANK_COLS} FROM ranks ${RANK_ORDER_SQL} LIMIT ? OFFSET ?`)
+            .bind(rank + 1 - start + 1, start - 1)
+            .all();
+          near = (nb.results ?? []).map((entry, i) => ({ rank: start + i, entry }));
+        }
+      }
+    }
+    return json({ list, total, me, near }, { ...cors, 'Cache-Control': 'no-store' });
+  }
+
+  // ———— 管理端点（运营清理）：全部要 RANK_ADMIN_KEY，密钥不对一律 403 ————
+  if (url.pathname.startsWith('/rank/admin/')) {
+    let b;
+    try {
+      b = await request.json();
+    } catch {
+      return bad('bad request');
+    }
+    // 没配就拒绝：绝不能因为环境变量缺失而放行
+    if (!env.RANK_ADMIN_KEY || b.key !== env.RANK_ADMIN_KEY) {
+      return new Response('forbidden', { status: 403, headers: cors });
+    }
+    const limit = Math.min(Math.max(Number(b.limit ?? 20) || 20, 1), 200);
+    const offset = Math.max(Number(b.offset ?? 0) || 0, 0);
+
+    // POST /rank/admin/list  { key, offset?, limit? }  →  { total, rows }  审计用
+    if (url.pathname === '/rank/admin/list') {
+      const rows = await db
+        .prepare(`SELECT ${RANK_COLS} FROM ranks ${RANK_ORDER_SQL} LIMIT ? OFFSET ?`)
+        .bind(limit, offset)
+        .all();
+      return json({ total: await countRanks(db), rows: rows.results ?? [] }, { ...cors, 'Cache-Control': 'no-store' });
+    }
+
+    // POST /rank/admin/delete  { key, names: [] }  →  { deleted }  定向删
+    if (url.pathname === '/rank/admin/delete') {
+      const names = Array.isArray(b.names) ? b.names.filter(n => typeof n === 'string' && n).slice(0, 200) : [];
+      if (!names.length) return bad('names 不能为空');
+      let deleted = 0;
+      await withRetry(async () => {
+        for (const n of names) {
+          const r = await db.prepare(`DELETE FROM ranks WHERE name = ?`).bind(n.slice(0, RANK_NAME_MAX)).run();
+          deleted += changesOf(r);
+        }
+      });
+      return json({ deleted }, cors);
+    }
+
+    // POST /rank/admin/purge  { key, before?, belowLv?, aboveLv? }  →  { deleted }
+    // 定期清理：删久未更新的 / 等级过低或异常高的。**不给条件就拒绝**，免得手滑清库。
+    if (url.pathname === '/rank/admin/purge') {
+      const where = [];
+      const args = [];
+      if (Number.isFinite(Number(b.before))) {
+        where.push('updated < ?');
+        args.push(Number(b.before));
+      }
+      if (Number.isFinite(Number(b.belowLv))) {
+        where.push('lv < ?');
+        args.push(Number(b.belowLv));
+      }
+      if (Number.isFinite(Number(b.aboveLv))) {
+        where.push('lv > ?');
+        args.push(Number(b.aboveLv));
+      }
+      if (!where.length) return bad('必须至少给一个条件（before / belowLv / aboveLv），否则拒绝执行');
+      const r = await withRetry(() => db.prepare(`DELETE FROM ranks WHERE ${where.join(' AND ')}`).bind(...args).run());
+      return json({ deleted: changesOf(r) }, cors);
+    }
+
+    // POST /rank/admin/clear  { key, confirm: 'CLEAR' }  →  { deleted }  清空
+    if (url.pathname === '/rank/admin/clear') {
+      if (b.confirm !== 'CLEAR') return bad('清空需要 confirm 字段字面填 CLEAR');
+      const r = await withRetry(() => db.prepare(`DELETE FROM ranks`).run());
+      return json({ deleted: changesOf(r) }, cors);
+    }
+
+    return new Response('not found', { status: 404, headers: cors });
+  }
+
+  return new Response('not found', { status: 404, headers: cors });
+}
+
+
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
@@ -308,6 +551,11 @@ export default {
       'Access-Control-Allow-Headers': 'Content-Type',
     };
     if (request.method === 'OPTIONS') return new Response(null, { headers: cors });
+
+    // 玩家排行榜自成一段：自带 ensureRankSchema，**排在这之前**，连市场的建表都不经过 ——
+    // 两边任何一方出问题都不会波及另一方。
+    const rankRes = await handleRank(url, request, env, cors);
+    if (rankRes) return rankRes;
 
     // 建表：只在需要访问数据时初始化（未建好就返回明确原因，而不是 1101）
     try {

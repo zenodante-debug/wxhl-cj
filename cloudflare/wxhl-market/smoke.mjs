@@ -1,70 +1,7 @@
 // 临时冒烟脚本（不自建测试框架，直接驱动 worker.js 走一遍六接口）
 // 用法: node smoke.mjs
+import { fakeD1 } from "./fake-d1.js";
 import worker, { checkPrice } from './worker.js';
-
-// ———— 假 D1（按本 Worker 实际用到的 SQL 子集实现） ————
-function fakeD1() {
-  const listings = new Map();
-  const earnings = new Map();
-  return {
-    prepare(sql) {
-      const st = { _a: [], bind(...a) { st._a = a; return st; } };
-      st.first = async () => {
-        if (/FROM listings/i.test(sql)) {
-          const id = st._a[0];
-          return listings.get(id) ?? null;
-        }
-        if (/FROM earnings/i.test(sql)) {
-          const v = earnings.get(st._a[0]);
-          return v === undefined ? null : { amount: v };
-        }
-        return null;
-      };
-      st.all = async () => {
-        let rows = [...listings.values()];
-        const where = sql.split(/WHERE/i)[1] ?? '';
-        let i = 0;
-        for (const cond of where.split(/AND/i).map(s => s.trim()).filter(Boolean)) {
-          if (/^id = \?/i.test(cond)) { const v = st._a[i++]; rows = rows.filter(r => r.id === v); }
-          else if (/^client = \?/i.test(cond)) { const v = st._a[i++]; rows = rows.filter(r => r.client === v); }
-          else if (/^category = \?/i.test(cond)) { const v = st._a[i++]; rows = rows.filter(r => r.category === v); }
-          else if (/^tier_idx = \?/i.test(cond)) { const v = st._a[i++]; rows = rows.filter(r => r.tier_idx === v); }
-          else if (/^quality = \?/i.test(cond)) { const v = st._a[i++]; rows = rows.filter(r => r.quality === v); }
-        }
-        rows.sort((a, b) => b.created - a.created);
-        const lim = st._a[st._a.length - 1];
-        if (typeof lim === 'number') rows = rows.slice(0, lim);
-        return { results: rows };
-      };
-      st.run = async () => {
-        // 注意：判断顺序必须在前面，且用 ^ 锚定——INSERT 语句里有 created 列名，/CREATE/i 会误匹配
-        if (/^INSERT INTO earnings/i.test(sql)) {
-          earnings.set(st._a[0], (earnings.get(st._a[0]) ?? 0) + st._a[1]);
-          return { changes: 1 };
-        }
-        if (/^INSERT INTO listings/i.test(sql)) {
-          const a = st._a;
-          listings.set(a[0], {
-            id: a[0], client: a[1], seller: a[2], tier: a[3], kind: a[4],
-            category: a[5], tier_idx: a[6], quality: a[7], item_name: a[8],
-            item_json: a[9], qty: a[10], price: a[11], created: a[12],
-          });
-          return { changes: 1 };
-        }
-        if (/^CREATE/i.test(sql)) return { changes: 0 };
-        if (/^DELETE FROM listings/i.test(sql)) return { changes: listings.delete(st._a[0]) ? 1 : 0 };
-        if (/^DELETE FROM earnings/i.test(sql)) {
-          if (earnings.get(st._a[0]) !== st._a[1]) return { changes: 0 };
-          earnings.delete(st._a[0]);
-          return { changes: 1 };
-        }
-        return { changes: 0 };
-      };
-      return st;
-    },
-    async batch(sts) { const o = []; for (const s of sts) o.push(await s.run()); return o; },
-  };
-}
 
 const env = { MARKET_DB: fakeD1() };
 const post = (p, b) => new Request('https://t.local' + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
@@ -200,6 +137,75 @@ r = await worker.fetch(get('/market/mine?client=welfare'), env);
 check('0 元单不产生货款', (await r.json()).pending === 0);
 r = await worker.fetch(post('/market/list', { ...福利券, price: 3000 }), env);
 check('密钥通道不影响正常定价（3000 可挂）', r.status === 200);
+
+// ════════ 玩家排行榜 ════════
+console.log('\n=== 7. 玩家排行榜：上传与顶掉 ===');
+r = await call(get('/rank/top'));
+j = await r.json();
+check('空榜 → 三样都是空的', j.total === 0 && j.list.length === 0 && j.me === null, JSON.stringify(j));
+
+r = await call(post('/rank/submit', { name: '林千尺', lv: 9, title: '无', job: '无' }));
+check('Lv.9 上传 → 400（Lv.1 不上榜）', r.status === 400, await r.clone().text());
+
+r = await call(post('/rank/submit', { name: '林千尺', lv: 27, title: '「无距之刃」', job: '次元行者' }));
+j = await r.json();
+check('Lv.27 上传 → 第 1 名', r.status === 200 && j.rank === 1 && j.total === 1, JSON.stringify(j));
+
+r = await call(post('/rank/submit', { name: '林千尺', lv: 20, title: '「新称号」', job: '次元行者' }));
+j = await r.json();
+check('同名换新存档（等级更低）照样顶掉，不新增行', j.total === 1, JSON.stringify(j));
+j = await (await call(get('/rank/top'))).json();
+check('顶掉后榜单里就一条且是新数据', j.list.length === 1 && j.list[0].lv === 20 && j.list[0].title === '「新称号」');
+
+console.log('=== 8. 玩家排行榜：排序与名次 ===');
+for (let i = 1; i <= 22; i++) {
+  await call(post('/rank/submit', { name: '契约者' + String(i).padStart(2, '0'), lv: 120 - i, title: '无称号', job: '无职业' }));
+}
+j = await (await call(get('/rank/top'))).json();
+check('一次只出前 20 名，total 是全服人数', j.list.length === 20 && j.total === 23, `list=${j.list.length} total=${j.total}`);
+check('按等级降序', j.list[0].lv === 119 && j.list[19].lv === 100, `${j.list[0].lv}/${j.list[19].lv}`);
+
+j = await (await call(get('/rank/top?name=' + encodeURIComponent('契约者05')))).json();
+check('我在前 20 → me.rank 正确且不下发 near', j.me.rank === 5 && j.near.length === 0, JSON.stringify(j.me));
+
+j = await (await call(get('/rank/top?name=' + encodeURIComponent('契约者21')))).json();
+check('我第 21 名 → near 只给 #21/#22（#20 不重复）', j.me.rank === 21 && JSON.stringify(j.near.map(n => n.rank)) === '[21,22]', JSON.stringify(j.near));
+
+j = await (await call(get('/rank/top?name=' + encodeURIComponent('查无此人')))).json();
+check('没上传过 → me 为 null，榜单照常', j.me === null && j.list.length === 20);
+
+console.log('=== 9. 玩家排行榜：运营清理通道 ===');
+r = await call(post('/rank/admin/list', { key: 'smoke-admin' }));
+check('没配 RANK_ADMIN_KEY 时一律 403', r.status === 403, String(r.status));
+
+const adminEnv = { MARKET_DB: env.MARKET_DB, RANK_ADMIN_KEY: 'smoke-admin' };
+const admin = (p, b) => worker.fetch(post(p, b), adminEnv);
+r = await admin('/rank/admin/list', { key: '错的' });
+check('密钥不对 → 403', r.status === 403);
+
+r = await admin('/rank/admin/list', { key: 'smoke-admin' });
+j = await r.json();
+check('list 能看到全表', j.total === 23 && j.rows.length === 20, JSON.stringify({ total: j.total, rows: j.rows.length }));
+
+r = await admin('/rank/admin/purge', { key: 'smoke-admin' });
+check('purge 不给条件 → 400（防手滑清库）', r.status === 400, await r.clone().text());
+
+r = await admin('/rank/admin/delete', { key: 'smoke-admin', names: ['契约者01', '契约者02'] });
+check('delete 定向删两条', (await r.json()).deleted === 2);
+check('删完剩 21 条（23-2）', (await (await call(get('/rank/top'))).json()).total === 21);
+
+// 此时在场：契约者03..22（Lv.117..98）+ 林千尺（前面已改成 Lv.20），共 21 条
+// belowLv:100 命中的是 契约者21(Lv.99)、契约者22(Lv.98)、林千尺(Lv.20) —— 3 条
+r = await admin('/rank/admin/purge', { key: 'smoke-admin', belowLv: 100 });
+j = await r.json();
+check('purge by belowLv 清掉 3 条低等级', j.deleted === 3, JSON.stringify(j));
+check('purge 后剩 18 条', (await (await call(get('/rank/top'))).json()).total === 18);
+
+r = await admin('/rank/admin/clear', { key: 'smoke-admin', confirm: 'clear' });
+check('clear 确认字不对 → 400', r.status === 400);
+r = await admin('/rank/admin/clear', { key: 'smoke-admin', confirm: 'CLEAR' });
+check('clear 成功清空 18 条', (await r.json()).deleted === 18);
+check('清空后榜单为空', (await (await call(get('/rank/top'))).json()).total === 0);
 
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
 process.exit(fail === 0 ? 0 : 1);
