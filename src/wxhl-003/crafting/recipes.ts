@@ -50,6 +50,7 @@ export const 配方Schema = z.object({
   批量上限: z.coerce.number().prefault(1),
   装备基础: z.string().prefault(''), // 武器=WEAPON_TABLE 键；防具=光谱；消耗品=''
   成品名: z.string().prefault(''), // 图纸指定成品名；空则用「核心材料名+类型词」
+  描述: z.string().prefault(''), // 图纸自带的风味文案（AI 定制时写入，玩家可编辑）
   效果: z.array(EffectEntrySchema).prefault([]), // 金/紫图纸配方的特效（白/蓝为空）
 });
 export type 配方 = z.infer<typeof 配方Schema>;

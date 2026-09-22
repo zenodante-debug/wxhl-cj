@@ -45,12 +45,33 @@ describe('sanitizeDesign · AI 结果硬校验', () => {
     const r = sanitizeDesign(rawAI({ 品质: '银色' }), 目标);
     expect(r.ok).toBe(false);
   });
-  it('品质/成品类型与目标不符 → 强制回到目标值', () => {
-    const r = sanitizeDesign(rawAI({ 品质: '紫色', 阶位: 5 }), 目标);
+  it('品质/成品类型/阶位与目标不符 → 强制回到目标值', () => {
+    const r = sanitizeDesign(rawAI({ 品质: '紫色', 阶位: 5, 成品类型: '消耗品' }), 目标);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.数据.配方.品质).toBe('金色');
     expect(r.数据.配方.阶位).toBe(3);
+    expect(r.数据.配方.成品类型).toBe('装备'); // 目标说装备，AI 说消耗品 → 以目标为准
+    expect(r.数据.配方.装备子类).toBe('武器');
+  });
+  it('被子强制回目标值的字段同时进 clamped（成功路径只回传 clamped）', () => {
+    const r = sanitizeDesign(rawAI({ 品质: '紫色', 阶位: 5 }), 目标);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.clamped.join()).toContain('品质被强制回到目标值');
+    expect(r.clamped.join()).toContain('阶位被强制回到目标值');
+  });
+  it('AI 的描述写入 配方.描述（风味文案有落点）', () => {
+    const r = sanitizeDesign(rawAI(), 目标);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.数据.配方.描述).toBe('以魔狼之牙锻造的利刃');
+  });
+  it('AI 未给描述 → 落空串（不报错）', () => {
+    const r = sanitizeDesign(rawAI({ 描述: undefined }), 目标);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.数据.配方.描述).toBe('');
   });
   it('缺材料 → 拒绝', () => {
     const r = sanitizeDesign(rawAI({ 材料: [] }), 目标);
@@ -104,5 +125,55 @@ describe('sanitizeDesign · 装备基础参照校验', () => {
     if (!r.ok) return;
     expect(r.数据.配方.装备基础).toBe('');
     expect(r.数据.配方.装备子类).toBe('');
+  });
+});
+
+// 契约：对任何输入都返回 ok:false + 理由，绝不抛错（两个异步入口的 try/catch 只兜 AI 调用）
+describe('sanitizeDesign · no-throw 契约', () => {
+  /** 调用并断言不抛；返回值用于继续断言 */
+  function 不抛(fn: () => ReturnType<typeof sanitizeDesign>) {
+    let out: ReturnType<typeof sanitizeDesign> | undefined;
+    expect(() => {
+      out = fn();
+    }).not.toThrow();
+    return out!;
+  }
+
+  it('AI 编造材料类别 → 拒绝（不抛 ZodError），理由指名该字段', () => {
+    const r = 不抛(() => sanitizeDesign(rawAI({ 材料: [{ 类别: '禁忌素材', 数量: 1, 核心: true }] }), 目标));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reasons.length).toBeGreaterThan(0);
+    expect(r.reasons.join()).toContain('材料');
+    expect(r.reasons.join()).toContain('禁忌素材');
+  });
+  it('AI 编造效果类型 → 拒绝（不抛 ZodError），理由指名该字段', () => {
+    const r = 不抛(() => sanitizeDesign(rawAI({ 效果: [{ 类型: '爆发', 描述: '强力一击' }] }), 目标));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reasons.length).toBeGreaterThan(0);
+    expect(r.reasons.join()).toContain('效果');
+  });
+  it('材料项不是对象 → 不抛错，按「任意」类目兜底', () => {
+    const r = 不抛(() => sanitizeDesign(rawAI({ 材料: ['精铁'] }), 目标));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.数据.配方.材料).toEqual([{ 类别: '任意', 数量: 1, 核心: false }]);
+  });
+  it('效果不是数组 → 当作无效果，照常成功', () => {
+    const r = 不抛(() => sanitizeDesign(rawAI({ 效果: '撕咬' }), 目标));
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.数据.配方.效果).toEqual([]);
+  });
+  it('阶位 0 → 拒绝（EFFECT_CAP[0] 是零哨兵行，不拦住会把数值静默钳成 0）', () => {
+    const r = 不抛(() => sanitizeDesign(rawAI(), { ...目标, 阶位: 0 }));
+    expect(r.ok).toBe(false);
+    if (r.ok) return;
+    expect(r.reasons.join()).toContain('非法阶位');
+  });
+  it('阶位越界（6）→ 拒绝', () => {
+    const r = 不抛(() => sanitizeDesign(rawAI(), { ...目标, 阶位: 6 }));
+    expect(r.ok).toBe(false);
   });
 });

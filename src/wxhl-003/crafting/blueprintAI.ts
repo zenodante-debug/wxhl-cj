@@ -4,9 +4,11 @@
 // AI 调用经 store.ts 的 aiGenerate（复用终端设置里的 API 配置）
 // 装备基础参照校验：AI 编造的武器名/防具光谱会流进 buildEquip 产出坏物品，
 //   故必须落在 equipTables 的真实表里（WEAPON_TABLE 键 / 防具光谱），否则整体拒绝
+// no-throw 契约：sanitizeDesign 对任何输入都只返回 ok:false + 理由（safeParse + 阶位守卫），
+//   不用异常当拒绝信号——两个异步入口的 try/catch 只兜 AI 调用本身
 // ================================================================
 import { checkEffects, type EffectEntry } from './effectRules';
-import { ARMOR_NAME, WEAPON_TABLE } from './equipTables';
+import { ARMOR_NAME, Q_ORDER, WEAPON_TABLE, type Quality } from './equipTables';
 import { BlueprintDataSchema, 配方Schema, type 图纸数据 } from './recipes';
 import { extractJSON, getActiveCfg, useForumStore, aiGenerate } from '../store';
 
@@ -14,8 +16,8 @@ export interface DesignTarget {
   名称: string;
   成品类型: '装备' | '消耗品';
   子类: string; // 武器=WEAPON_TABLE 键 / 防具=光谱 / 消耗品=''
-  品质: '金色' | '紫色';
-  阶位: number;
+  品质: Quality; // AI 定制只服务金/紫（见 generateBlueprint 入口守卫）；补全沿用图纸原品质（白/蓝不可被静默升格）
+  阶位: number; // 1~5，0 与越界一律拒绝（EFFECT_CAP[0] 是零哨兵行）
   核心材料: string;
   行业: string;
 }
@@ -110,17 +112,53 @@ ${RULES}
 【输出】只输出 JSON，字段同现有图纸结构：名称、描述、材料、效果。缺失的字段补上，已有的合法字段保持原样。`;
 }
 
-/** 纯函数硬校验：AI 返回的原始对象 → 合法图纸数据（或拒绝理由） */
+/** zod issue 的最小结构（zod 4 的 issue 只带 path/values，不带原始取值，需自己沿 path 取回） */
+type 解析问题 = { path: readonly PropertyKey[]; message: string; values?: readonly unknown[] };
+
+/** 沿 zod 的 path 从被校验对象里取回非法取值，供理由展示 */
+function 路径取值(root: unknown, path: readonly PropertyKey[]): unknown {
+  return path.reduce<any>((cur, k) => (cur == null ? undefined : cur[k]), root);
+}
+
+/** zod 错误 → 可读中文理由（带字段路径、允许集合、实收值），把 AI 的非法字段变成具体拒绝理由 */
+function 解析理由(root: unknown, issues: readonly 解析问题[]): string[] {
+  return issues.map(i => {
+    const 字段 = i.path.map(String).join('.') || '(根)';
+    const 实收 = 路径取值(root, i.path);
+    const 实收文 = 实收 === undefined ? '' : `，实收「${typeof 实收 === 'object' ? JSON.stringify(实收) : String(实收)}」`;
+    const 允许 = i.values ? `，允许：${i.values.map(String).join('/')}` : '';
+    return `字段「${字段}」非法：${i.message}${允许}${实收文}`;
+  });
+}
+
+/** 纯函数硬校验：AI 返回的原始对象 → 合法图纸数据（或拒绝理由）
+ *  契约：任何输入都不抛错（含 AI 编造的材料类别/效果类型、非法阶位），只返回 ok:false + 理由 */
 export function sanitizeDesign(
   raw: unknown,
   目标: DesignTarget,
 ): { ok: true; 数据: 图纸数据; clamped: string[] } | { ok: false; reasons: string[] } {
   const o = (raw ?? {}) as Record<string, any>;
   const reasons: string[] = [];
+  const clamped: string[] = [];
+
+  // 阶位守卫：EFFECT_CAP[0] 是「未使用」零哨兵行，若不拦住，descaleCap 会把一切效果数值静默钳成 0
+  if (!Number.isInteger(目标.阶位) || 目标.阶位 < 1 || 目标.阶位 > 5) {
+    return { ok: false, reasons: [`非法阶位：${目标.阶位}（图纸阶位只能是 1~5）`] };
+  }
 
   const 品质 = String(o.品质 ?? 目标.品质);
   if (品质 === '银色') return { ok: false, reasons: ['银色为副本唯一剧情物品，不可制作'] };
-  if (o.品质 && o.品质 !== 目标.品质) reasons.push(`品质被强制回到目标值「${目标.品质}」`);
+  // 软修正必须同时进 clamped：成功路径只回传 clamped，只进 reasons 玩家看不到
+  if (o.品质 && o.品质 !== 目标.品质) {
+    const 提示 = `品质被强制回到目标值「${目标.品质}」`;
+    reasons.push(提示);
+    clamped.push(提示);
+  }
+  if (o.阶位 !== undefined && Number(o.阶位) !== 目标.阶位) {
+    const 提示 = `阶位被强制回到目标值「${目标.阶位}阶」`;
+    reasons.push(提示);
+    clamped.push(提示);
+  }
 
   const 材料 = Array.isArray(o.材料) ? o.材料 : [];
   if (材料.length === 0) return { ok: false, reasons: [...reasons, '图纸缺少材料清单'] };
@@ -145,8 +183,9 @@ export function sanitizeDesign(
   }
   // 消耗品：装备基础/装备子类 恒为空串（配方 schema 也只接受空串）
 
-  const 配方 = 配方Schema.parse({
-    名称: String(o.名称 ?? 目标.名称),
+  const 名称 = String(o.名称 ?? 目标.名称);
+  const 配方输入 = {
+    名称,
     来源: '图纸',
     行业: 目标.行业,
     成品类型: 目标.成品类型,
@@ -161,11 +200,19 @@ export function sanitizeDesign(
     })),
     技能要求: { 分类: '高级', 等级: 目标.品质 === '金色' ? 1 : 5 },
     效果: 效果检查.效果,
-    成品名: String(o.名称 ?? 目标.名称),
-  });
+    成品名: 名称,
+    描述: typeof o.描述 === 'string' ? o.描述 : '',
+  };
 
-  const 数据 = BlueprintDataSchema.parse({ 配方, 制作者: 'AI', 补全: false, 版本: 1 });
-  return { ok: true, 数据, clamped: 效果检查.clamped };
+  // AI 最可能的失败模式（编造材料类别/效果类型）只能在这一层拦住——用 safeParse 换成可读理由，绝不抛
+  const 配方解析 = 配方Schema.safeParse(配方输入);
+  if (!配方解析.success) return { ok: false, reasons: [...reasons, ...解析理由(配方输入, 配方解析.error.issues)] };
+
+  const 数据输入 = { 配方: 配方解析.data, 制作者: 'AI', 补全: false, 版本: 1 };
+  const 数据解析 = BlueprintDataSchema.safeParse(数据输入);
+  if (!数据解析.success) return { ok: false, reasons: [...reasons, ...解析理由(数据输入, 数据解析.error.issues)] };
+
+  return { ok: true, 数据: 数据解析.data, clamped: [...clamped, ...效果检查.clamped] };
 }
 
 function activeCfg() {
@@ -175,6 +222,10 @@ function activeCfg() {
 export async function generateBlueprint(
   目标: DesignTarget,
 ): Promise<{ ok: true; 数据: 图纸数据; clamped: string[] } | { ok: false; reasons: string[] }> {
+  // 定制（从零生成）只服务金/紫图纸——世界书规则 4：白/蓝走模板配方，AI 定制不做白/蓝
+  if (目标.品质 !== '金色' && 目标.品质 !== '紫色') {
+    return { ok: false, reasons: [`AI 定制只支持金色/紫色图纸（收到「${目标.品质}」）`] };
+  }
   const cfg = activeCfg();
   if (!cfg.url || !cfg.apiKey) return { ok: false, reasons: ['未配置 API——请到「终端设置」配置后再定制图纸'] };
   try {
@@ -195,7 +246,8 @@ export async function completeBlueprint(
     名称: 现有.配方.名称,
     成品类型: 现有.配方.成品类型,
     子类: 现有.配方.装备基础,
-    品质: 现有.配方.品质 === '紫色' ? '紫色' : '金色',
+    // 沿用图纸原品质：白/蓝映射成金色会静默升格（技能要求、定价全跟着变），只有不在允许集合内才回落金色
+    品质: Q_ORDER.includes(现有.配方.品质) ? 现有.配方.品质 : '金色',
     阶位,
     核心材料: 现有.配方.材料.find(m => m.核心)?.类别 ?? '任意',
     行业: 现有.配方.行业,
