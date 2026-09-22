@@ -12,7 +12,7 @@ import {
   autoPick, executeCraft, validateCraft, type CraftInput, type CraftOutcome,
 } from './craft';
 import {
-  STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES, blueprintItemName,
+  STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES, blueprintItemName, 道具基准价,
   type MaterialCategory, type 材料档案条目, type 配方, type 配方库, type 图纸数据,
 } from './recipes';
 import { ARMOR_NAME, WEAPON_TABLE, type Attr } from './equipTables';
@@ -64,21 +64,6 @@ function loadChatState(): { 材料档案: Record<string, 材料档案条目>; �
     return { 材料档案: {}, 配方库: {} };
   }
 }
-
-/** 道具一阶单价表（UP/件）：AI 定制「道具」图纸的定价基数
- *  （spec §7.1：道具图纸 = 成品一阶单价 × 20 × 阶位系数；×20 在 blueprint.ts 的 GOODS_MULT 里）。
- *  取值抄自设计文档 §2 世界书物价表；未列名的新奇道具走 DEFAULT 兜底（均为可调初值）。 */
-const GOODS_UNIT_PRICE: Record<string, number> = {
-  基础治疗药剂: 15, 强效治疗药剂: 40, 急救包: 80,
-  基础精神药剂: 20, 强效精神药剂: 45, 冥想熏香: 70,
-  净化药剂: 25, 万能解毒剂: 60, 兴奋剂: 35,
-  普通弹药20发: 10, 穿甲弹药20发: 25, 元素弹药20发: 30,
-};
-/** 未列名道具的兜底一阶单价（≈ 世界书道具价中位，可调） */
-const DEFAULT_GOODS_UNIT_PRICE = 25;
-
-/** 内置标准道具配方的成品名集合（旧 GOODS_BASE 的键；buildGoods 的道具数值也从这批配方取） */
-const 标准道具名 = new Set(STANDARD_GOODS_RECIPES.map(r => r.名称));
 
 /** 图纸效果逐条摘要（确认弹窗与图纸物品「描述」共用；数值 0 视为无该效果故省略） */
 function 效果行(数据: 图纸数据): string[] {
@@ -164,15 +149,6 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
   /** 背包里未上传的图纸（Task 7 的「背包图纸」区消费） */
   const 背包图纸 = computed(() => collectBlueprints(bag.value));
 
-  /** 道具图纸的成品名必须命中内置标准道具配方（craft.ts 的 buildGoods 只从该批配方取数值/效果）：
-   *  AI 自创的道具名会产出「只有风味描述、没有数值也没有效果条目」的哑弹，
-   *  而这张图纸最多要花 12,500 UP（25 一阶单价 × 20 × 25 五阶系数）才买得到。
-   *  用 Set 而非对象键：成品名由 AI 生成，`constructor`/`toString` 之类会让真值判定误报。 */
-  function 道具名理由(名称: string): string | null {
-    if (标准道具名.has(名称)) return null;
-    return `道具图纸仅支持已有配方（${[...标准道具名].join('/')}）`;
-  }
-
   /** 同名图纸/配方查重：命中返回给玩家看的理由，无命中返回 null（调用方负责 toastr + lastError）。
    *  查的是「实际会写进背包的图纸物品名」——AI 可能自行改成品名，故拿到生成结果的 r.名称 之后要再查一次。
    *  用 hasOwn：图纸名由 AI 生成，`constructor`/`toString` 之类会让真值判定误报。 */
@@ -243,7 +219,8 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     子类型: string;
     副属性: Attr;
     数量: number;
-    核心材料名: string;
+    /** 玩家选定的核心材料物品名（v2.1：配方可要求多种核心材料，故为多件） */
+    核心材料名: string[];
     越阶材料: boolean;
     劣质材料: boolean;
   }): Promise<CraftOutcome | null> {
@@ -254,14 +231,22 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
 
     const 制作者 = assembleMaker(c, args.配方.行业);
 
-    // 核心材料 = 玩家选定；辅料 = autoPick 自动拣选（排除核心物品）
-    // v2.1：CraftInput.核心材料 已是列表（配方可要求多种核心材料）。多选交互属 Task 4，
-    // 这里先按现有单件入参包成单元素列表，行为与 v1 逐字不变。
+    // 核心材料 = 玩家选定的多件（配方可要求多种核心材料）；辅料 = autoPick 自动拣选（排除核心物品）
     const 核心需求 = args.配方.材料.find(m => m.核心);
-    const 核心材料 = [{ 物品名: args.核心材料名, 数量: (核心需求?.数量 ?? 1) * args.数量 }];
+    const 核心材料 = args.核心材料名.map(物品名 => ({
+      物品名, 数量: (核心需求?.数量 ?? 1) * args.数量,
+    }));
+    // 配方要核心材料却没选：单件时代靠「物品名='' → 数量不足」隐式拦住，多选下空列表不进
+    // validateCraft 的数量核对（会放行一次不耗核心材料的制作），故显式拦一道
+    if (核心需求 && 核心材料.length === 0) {
+      const msg = '请先选择核心材料';
+      toastr.error(msg);
+      lastError.value = msg;
+      return null;
+    }
     const 辅料: { 物品名: string; 数量: number }[] = [];
     for (const req of args.配方.材料.filter(m => !m.核心)) {
-      const picks = autoPick(bag.value, codex.value, req.类别, req.数量 * args.数量, [args.核心材料名]);
+      const picks = autoPick(bag.value, codex.value, req.类别, req.数量 * args.数量, args.核心材料名);
       if (!picks) {
         const msg = `辅料不足：需要 ${req.类别}×${req.数量 * args.数量}`;
         toastr.error(msg);
@@ -281,9 +266,13 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
       设施: facilityInfo(), 制作者,
     };
 
-    // 紫配方的高阶材料校验（spec §6.1）：从材料档案查玩家实际投入的核心材料的阶位；
+    // 紫配方的高阶材料校验（spec §6.1）：核心材料档位取**玩家实际投入的几件里最高的一件**
+    // （v2.1 多核心：只要有一件够阶即满足）。一件没选时不给值，validateCraft 对紫配方 fail-closed；
     // 未归档材料由 codexOf 启发式归档为 1 阶 → 白材料做紫装会被 validateCraft 拦下
-    const errs = validateCraft(input, bag.value, codexOf(args.核心材料名).阶位);
+    const 核心档位 = args.核心材料名.length
+      ? Math.max(...args.核心材料名.map(n => Number(codexOf(n).阶位)))
+      : undefined;
+    const errs = validateCraft(input, bag.value, 核心档位);
     if (errs.length > 0) {
       toastr.error(errs[0]);
       lastError.value = errs[0];
@@ -322,15 +311,18 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
 
   // ---------------- 图纸（v2）：AI 定制 / 补全 / 上传学习 / 删除配方 ----------------
 
-  /** AI 定制图纸：生成 → 标价 → 玩家确认 → 扣 UP → 图纸物品入包（一次 commit 写 背包 + 经济.UP） */
+  /** AI 定制图纸：生成 → 标价 → 玩家确认 → 扣 UP → 图纸物品入包（一次 commit 写 背包 + 经济.UP）
+   *  入参即 DesignTarget（成品类型/装备子类/种类/品质/阶位/核心材料[]/行业/设计要求/名称），
+   *  原样透传给 generateBlueprint——提示词、留痕与硬校验都以它为准，store 这层不改写任何字段。 */
   async function designBlueprint(目标: DesignTarget): Promise<boolean> {
     if (designing.value) return false;
     // 早失败：先确认存档可读、顺手刷新 UP，再去烧 token
     if (!syncFromMvu()) return false;
-    // 两道「扣款前早退」：都不写任何变量、也不烧 AI token。查的是**目标名**——AI 若自行改成品名，
-    // 拿到生成结果后还会按最终名再收口一次（见下面 r.名称 处的两处复查）。
-    const 早退 = (目标.成品类型 === '道具' ? 道具名理由(目标.名称) : null)
-      ?? 同名理由(目标.名称, bag.value);
+    // 烧 token 前的早退只剩**同名**一道（配方库 + 背包两条路径）。v2 的「道具成品名必须在标准道具表内」
+    // 白名单已删除：自定义道具正是 v2.1 的目的，而成品能否成立由 sanitizeDesign 按 道具类型 硬校验
+    // （非法枚举一律拒，见 blueprintAI），这里再提前拦一道只会把 AI 自创名误杀。
+    // 查的是**目标名**；AI 若自行改成品名，拿到生成结果后还会按最终名再收口一次（见下面 r.名称 处的复查）。
+    const 早退 = 同名理由(目标.名称, bag.value);
     if (早退) {
       lastError.value = 早退;
       toastr.error(早退);
@@ -348,30 +340,15 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
       const 数据 = gen.数据;
       const r = 数据.配方;
 
-      // 复查其一：道具的成品名（AI 可能改过名）。buildGoods 只认内置标准道具配方，
-      // 名字落不进去就是哑弹——宁可拒掉这次定制（只亏 token）也不让玩家花钱买到废纸。
-      if (r.成品类型 === '道具') {
-        const 名理由 = 道具名理由(r.名称);
-        if (名理由) {
-          const msg = r.名称 === 目标.名称 ? 名理由 : `AI 返回的成品名「${r.名称}」不在配方表内——${名理由}`;
-          lastError.value = msg;
-          toastr.error(msg);
-          return false;
-        }
-      }
-
-      // 定价：装备按成品一阶中值×2，道具按道具一阶单价×20，阶位系数由 blueprintPrice 内部乘
-      // 用 sanitizeDesign 收口后的 r（成品类型/装备子类/阶位/品质已归一到目标值），免去手写映射；
-      // 道具单价按**实际产出的成品名** r.名称 查表——buildGoods 就是拿 r.名称 查内置标准道具配方的，
-      // 上面的复查又已保证它命中该表，故这里「按成品名计价」与「按成品名产装」是同一把尺子；
-      // 目标名只作防御性兜底，两者都查不到（标准配方表里 5 个未列价的道具）才走 DEFAULT 初值。
+      // 定价：装备按成品一阶中值×2，道具按 `道具基准价(道具类型, 道具固定值)`×20，阶位系数由 blueprintPrice 内部乘。
+      // 用 sanitizeDesign 收口后的 r（成品类型/装备子类/阶位/品质已归一到目标值，道具类型/固定值已钳制），
+      // 免去手写映射。道具价**只认结构化字段**——v2 的按成品名查单价表已废除：自创道具名无从查表，
+      // 且按名字定价会让「同数值不同名」的道具价差出十几倍（口径见 recipes.ts 的 道具基准价）。
       let 价: number;
       try {
         价 = blueprintPrice(
           r.成品类型, r.装备子类, r.阶位, r.品质,
-          r.成品类型 === '道具'
-            ? (GOODS_UNIT_PRICE[r.名称] ?? GOODS_UNIT_PRICE[目标.名称] ?? DEFAULT_GOODS_UNIT_PRICE)
-            : undefined,
+          r.成品类型 === '道具' ? 道具基准价(r.道具类型, r.道具固定值) : undefined,
         );
       } catch (e: any) {
         const msg = `图纸定价失败：${e?.message ?? e}`;
@@ -492,12 +469,14 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     }
   }
 
-  /** 回写图纸的「装备基础」（武器类型 / 防具光谱）：残缺图纸的 装备基础 为空时，
-   *  completeBlueprint 会因装备基础校验不过而拒绝，需要先补这一格——UI 不该自备 MVU 管道。
+  /** 回写图纸的「参照模板」（武器类型键 / 防具光谱）：残缺图纸的 参照模板 为空时，
+   *  completeBlueprint 会因其校验不过而拒绝，需要先补这一格——UI 不该自备 MVU 管道。
    *  边界不变量在边界上收口：该值会被 craft.ts 的 buildEquip 直接查表消费（按 装备子类 分支、
-   *  按 装备基础 查 weaponStats/armorStats），故既要求它是真实表里的键，也要求它与该图纸的
-   *  装备子类 同类——跨类的坏图纸会一路留到制作时才抛错。 */
-  async function setBpBase(物品名: string, 装备基础: string): Promise<boolean> {
+   *  按 参照模板 查 weaponStats/armorStats），故既要求它是真实表里的键，也要求它与该图纸的
+   *  装备子类 同类——跨类的坏图纸会一路留到制作时才抛错。
+   *  v2.1 改名：本动作写的是 参照模板（数值来源），旧名 setBpBase 写的是 装备基础——
+   *  后者已退化为自由文本种类名（只参与显示/命名），UI 下拉与这里必须跟着切到 参照模板。 */
+  async function setBpTemplate(物品名: string, 参照模板: string): Promise<boolean> {
     // 与 doCraft/designBlueprint/completeBp/uploadBp 一致：入口先按存档刷新，写入基底取新读值
     if (!syncFromMvu()) return false;
     const rr = readContractor();
@@ -513,31 +492,31 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     // 校验依赖图纸自身的 装备子类，故只能放在读出数据之后（错误信息也只列该子类对应的合法值）
     const 子类 = 数据.配方.装备子类;
     let 合法 = false;
-    let 说明 = `该图纸的装备子类为「${子类 || '空'}」，无法指定装备基础（只有武器/防具图纸需要这一栏）`;
+    let 说明 = `该图纸的装备子类为「${子类 || '空'}」，无法指定参照模板（只有武器/防具图纸需要这一栏）`;
     if (子类 === '武器') {
-      合法 = Object.hasOwn(WEAPON_TABLE, 装备基础);
-      说明 = `该图纸是武器，装备基础须为武器类型（${Object.keys(WEAPON_TABLE).join('/')}）`;
+      合法 = Object.hasOwn(WEAPON_TABLE, 参照模板);
+      说明 = `该图纸是武器，参照模板须为武器类型（${Object.keys(WEAPON_TABLE).join('/')}）`;
     } else if (子类 === '防具') {
-      合法 = Object.hasOwn(ARMOR_NAME, 装备基础);
-      说明 = `该图纸是防具，装备基础须为光谱之一（${Object.keys(ARMOR_NAME).join('/')}）`;
+      合法 = Object.hasOwn(ARMOR_NAME, 参照模板);
+      说明 = `该图纸是防具，参照模板须为光谱之一（${Object.keys(ARMOR_NAME).join('/')}）`;
     }
     if (!合法) {
       lastError.value = 说明;
       toastr.error(说明);
       return false;
     }
-    const newBag = writeBlueprint(当前背包, 物品名, { ...数据, 配方: { ...数据.配方, 装备基础 } });
+    const newBag = writeBlueprint(当前背包, 物品名, { ...数据, 配方: { ...数据.配方, 参照模板 } });
     // 只写 背包（不碰 UP）；一次 commit
     _.set(rr.mvu, ['stat_data', '契约者', '背包'], newBag);
     await commit(rr.mvu, rr.mid, [[['stat_data', '契约者', '背包'], newBag]]);
     syncFromMvu();
-    toastr.success(`图纸「${物品名}」装备基础已设为「${装备基础}」`);
+    toastr.success(`图纸「${物品名}」参照模板已设为「${参照模板}」`);
     return true;
   }
 
   /** 丢弃背包里的一张图纸物品（图纸转卖属 spec §5.2 的 v3 范围，市场不收；同名配方已掌握时也传不上去，
    *  没有这个出口玩家就只能让它永久占位）。丢弃整条物品：数量 >1 时一并丢，免得卡片留在原地像没生效。
-   *  与 setBpBase 同形：入口 syncFromMvu → 新读背包为基底 → 一次 commit → syncFromMvu，只写 契约者.背包。
+   *  与 setBpTemplate 同形：入口 syncFromMvu → 新读背包为基底 → 一次 commit → syncFromMvu，只写 契约者.背包。
    *  入参仍按图纸收口（readBlueprint），不让这个动作变成通用的删物品后门。 */
   async function discardBp(物品名: string): Promise<boolean> {
     if (!syncFromMvu()) return false;
@@ -625,6 +604,6 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
   return {
     codex, 配方库, playerName, playerTier, playerUP, bag, lastOutcome, lastError, designing, completing, uploading,
     allRecipes, 背包图纸, syncFromMvu, facilityInfo, matchMaterials, setCodex, doCraft,
-    designBlueprint, completeBp, setBpBase, discardBp, uploadBp, deleteRecipe,
+    designBlueprint, completeBp, setBpTemplate, discardBp, uploadBp, deleteRecipe,
   };
 });
