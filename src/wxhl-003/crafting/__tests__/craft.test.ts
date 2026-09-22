@@ -340,6 +340,11 @@ describe('金紫制作 · 图纸与降档', () => {
     const input = makeInput({ 配方: { ...锻造武器白, 技能要求: { 分类: '高级', 等级: 1 } } });
     expect(validateCraft(input, bag)).toEqual([]);
   });
+  it('「银色」分类的制作者：高于高级 → 金图纸通过（主卡 schema 的合法分类值）', () => {
+    const i = 金输入(true, 1);
+    i.制作者.技能 = { ...i.制作者.技能!, 分类: '银色' };
+    expect(validateCraft(i, bag)).toEqual([]);
+  });
   // spec §6.1：紫 = 高级技能 Lv.5 + 职业 + 高阶材料（核心材料档案阶位 ≥ 配方阶位）
   it('紫色配方 + 核心材料阶位 3 = 配方阶位 3 → 可制作', () => {
     expect(validateCraft(紫输入(), bag, 3)).toEqual([]);
