@@ -417,6 +417,14 @@ describe('v2.1 AI 定制', () => {
     expect(坏.数据.配方.关联属性).toBe('PER');
     expect(坏.clamped.join()).toContain('关联属性');
   });
+  it('道具：未给关联属性 → 落 PER 且留痕（与「未给道具类型」对称，不再静默兜底）', () => {
+    const t: DesignTarget = { ...目标, 成品类型: '道具', 装备子类: '', 品质: '金色' };
+    const r = sanitizeDesign(rawAI({ 道具类型: '爆炸物', 道具固定值: 30, 关联属性: undefined }), t);
+    expect(r.ok).toBe(true);
+    if (!r.ok) return;
+    expect(r.数据.配方.关联属性).toBe('PER'); // 兜底值仍是 PER（口径不变）
+    expect(r.clamped.join()).toContain('未给关联属性'); // 但缺省这件事必须留痕
+  });
 
   // ---- 提示词：数值来源表与自由种类名都要说清楚 ----
   it('装备提示词：给出武器模板清单并说明「种类」只是风味名', () => {
@@ -430,6 +438,8 @@ describe('v2.1 AI 定制', () => {
     expect(p).toContain('道具类型');
     expect(p).toContain('恢复HP');
     expect(p).toContain('120'); // 金上限
+    // 爆炸物口径必须与 buildGoods 一致：固定值是**附加**固定伤害，骰数由品质决定（旧文案写的「每阶骰数基准」是反向语义）
+    expect(p).toContain('附加固定伤害');
   });
 });
 
