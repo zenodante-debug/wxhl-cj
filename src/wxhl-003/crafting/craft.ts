@@ -94,7 +94,10 @@ export interface CraftOutcome {
   摘要: string[];
 }
 
-export function validateCraft(input: CraftInput, bag: Bag): string[] {
+/** 前置校验。`核心材料档位` = 玩家实际投入的那件核心材料在材料档案里的阶位（由调用方从 codex 查出）：
+ *  validateCraft 是纯函数、签名里没有材料档案，spec §6.1 的「紫需高阶材料」只能靠调用方喂入。
+ *  该参数仅紫色配方会读；白/蓝/金传不传都一样。未传（纯函数调用方无档案）按**不满足**处理——fail-closed。 */
+export function validateCraft(input: CraftInput, bag: Bag, 核心材料档位?: number): string[] {
   const errs: string[] = [];
   const sk = input.制作者.技能;
   // 金/紫（v2 图纸系统）：需高级技能 + 对应生活系职业；缺图纸**不阻断**——由 executeCraft 走「降档 + DC+5」
@@ -103,6 +106,10 @@ export function validateCraft(input: CraftInput, bag: Bag): string[] {
     if (input.配方.品质 === '金色' && sk.等级 < 1) errs.push('金色图纸需高级技能 Lv.1');
     if (input.配方.品质 === '紫色' && sk.等级 < 5) errs.push('紫色图纸需高级技能 Lv.5');
     if (!input.制作者.职业名 || input.制作者.职业名 === '无') errs.push('金/紫品质需对应生活系职业');
+    // spec §6.1：紫 = 高级技能 Lv.5 + 职业 + **高阶材料**（至少一件核心材料的档案阶位 ≥ 配方阶位）
+    if (input.配方.品质 === '紫色' && !(核心材料档位 !== undefined && 核心材料档位 >= input.配方.阶位)) {
+      errs.push(`紫色配方需高阶材料：核心材料阶位${核心材料档位 === undefined ? '未知' : 核心材料档位} < 配方阶位${input.配方.阶位}`);
+    }
   }
   if (input.阶位 > input.制作者.阶位上限) errs.push(`成品阶位超过契约者阶位上限（${input.制作者.阶位上限}）`);
   if (!sk) {

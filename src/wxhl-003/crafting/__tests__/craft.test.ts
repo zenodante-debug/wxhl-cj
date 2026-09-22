@@ -235,6 +235,13 @@ function 金输入(图纸持有: boolean, 技能等级 = 1, 职业名 = '锻造�
   });
 }
 
+/** 紫配方输入：借金输入的匠人，把技能抬到 Lv.5（紫的技能门槛） */
+function 紫输入(图纸持有 = true, 技能等级 = 5): CraftInput {
+  const i = 金输入(图纸持有, 技能等级, '锻造师');
+  i.配方 = { ...金配方, 品质: '紫色', 技能要求: { 分类: '高级', 等级: 5 } };
+  return i;
+}
+
 describe('金紫制作 · 图纸与降档', () => {
   it('图纸在手 + 高级技能 + 职业 → 可制作', () => {
     expect(validateCraft(金输入(true), bag)).toEqual([]);
@@ -243,12 +250,25 @@ describe('金紫制作 · 图纸与降档', () => {
     expect(validateCraft(金输入(false), bag)).toEqual([]);
   });
   it('技能等级不足（金需 Lv.1，紫需 Lv.5）→ 阻断', () => {
-    const 紫输入 = 金输入(true, 3, '锻造师');
-    紫输入.配方 = { ...金配方, 品质: '紫色', 技能要求: { 分类: '高级', 等级: 5 } };
-    expect(validateCraft(紫输入, bag)[0]).toContain('Lv.5');
+    expect(validateCraft(紫输入(true, 3), bag, 3)[0]).toContain('Lv.5');
   });
   it('无对应职业 → 阻断', () => {
     expect(validateCraft(金输入(true, 1, '无'), bag)[0]).toContain('职业');
+  });
+  // spec §6.1：紫 = 高级技能 Lv.5 + 职业 + 高阶材料（核心材料档案阶位 ≥ 配方阶位）
+  it('紫色配方 + 核心材料阶位 3 = 配方阶位 3 → 可制作', () => {
+    expect(validateCraft(紫输入(), bag, 3)).toEqual([]);
+  });
+  it('紫色配方 + 核心材料阶位 1 < 配方阶位 3 → 阻断（理由含「高阶材料」）', () => {
+    const errs = validateCraft(紫输入(), bag, 1);
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toContain('高阶材料');
+  });
+  it('紫色配方 + 未传核心材料档位（调用方无材料档案）→ 按不满足处理（fail-closed）', () => {
+    expect(validateCraft(紫输入(), bag)).toEqual([expect.stringContaining('高阶材料')]);
+  });
+  it('金色配方无高阶材料要求：核心材料阶位 1 也通过', () => {
+    expect(validateCraft(金输入(true), bag, 1)).toEqual([]);
   });
   it('图纸在手：DC 无缺图纸修正，成品带效果、用配方指定名与风味描述', () => {
     const out = executeCraft(金输入(true), 15, () => 0.5); // 15+45+1=61 ≥ DC48+5 → 精制

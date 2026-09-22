@@ -187,7 +187,9 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
       设施: facilityInfo(), 制作者,
     };
 
-    const errs = validateCraft(input, bag.value);
+    // 紫配方的高阶材料校验（spec §6.1）：从材料档案查玩家实际投入的核心材料的阶位；
+    // 未归档材料由 codexOf 启发式归档为 1 阶 → 白材料做紫装会被 validateCraft 拦下
+    const errs = validateCraft(input, bag.value, codexOf(args.核心材料名).阶位);
     if (errs.length > 0) {
       toastr.error(errs[0]);
       lastError.value = errs[0];
