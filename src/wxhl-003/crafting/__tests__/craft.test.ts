@@ -91,6 +91,26 @@ describe('autoPick · 辅料自动拣选', () => {
     expect(autoPick(bag, codex, '任意', 3, ['精铁'])?.length).toBeGreaterThan(0);
     expect(autoPick(bag, codex, '金属', 99, [])).toBeNull();
   });
+  it('图纸不作为自动拣选的辅料（任意类别 + 启发式归档都不该放行它）', () => {
+    // 图纸·狼王牙刃 会被启发式按「牙」字归入怪物素材，而模板配方辅料需求是「任意」——
+    // 修复前：键序在精铁之前，先烧掉 3 张图纸再补 1 精铁
+    const 图Bag: Bag = {
+      '图纸·狼王牙刃': { 名称: '图纸·狼王牙刃', 描述: '图纸', 数量: 3 },
+      精铁: { 名称: '精铁', 描述: '好铁', 数量: 5 },
+    };
+    const 图Codex = { '图纸·狼王牙刃': { 类别: '怪物素材' as const, 品质: '金色' as const, 阶位: 3 } };
+    expect(autoPick(图Bag, 图Codex, '任意', 4, [])).toEqual([{ 物品名: '精铁', 数量: 4 }]);
+  });
+  it('图纸可被显式指定为核心材料（不经 autoPick，不受排除影响）', () => {
+    const 图Bag: Bag = {
+      '图纸·狼王牙刃': { 名称: '图纸·狼王牙刃', 描述: '图纸', 数量: 3 },
+      兽骨: { 名称: '兽骨', 描述: '', 数量: 3 },
+    };
+    const input = makeInput({ 核心材料: { 物品名: '图纸·狼王牙刃', 数量: 3 } });
+    expect(validateCraft(input, 图Bag)).toEqual([]);
+    const out = executeCraft(input, 3, () => 0.5);
+    expect((out.新增[0] as any).名称).toBe('图纸·狼王牙刃短剑'); // 核心材料名原样参与命名
+  });
 });
 
 describe('validateCraft · 前置校验', () => {

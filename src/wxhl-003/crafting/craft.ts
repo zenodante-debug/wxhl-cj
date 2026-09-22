@@ -7,7 +7,7 @@ import {
   ARMOR_NAME, TIER_COEF, TIER_NAMES, armorStats, attrBonus, nextQuality,
   weaponStats, wearThreshold, type ArmorSpectrum, type Attr, type Quality,
 } from './equipTables';
-import { GOODS_BASE, INDUSTRY_ATTR, type MaterialCategory, type 材料档案条目, type 配方 } from './recipes';
+import { GOODS_BASE, INDUSTRY_ATTR, isBlueprintName, type MaterialCategory, type 材料档案条目, type 配方 } from './recipes';
 
 export type CraftResult = '大失败' | '失败' | '成功' | '精制' | '杰作';
 
@@ -37,7 +37,7 @@ export function fluctuate(基准: number, rand: () => number): number {
   return Math.round(基准 * (0.8 + rand() * 0.2));
 }
 
-/** 按类别从背包拣材料（排除指定物品），不足返回 null */
+/** 按类别从背包拣材料（排除指定物品与图纸），不足返回 null */
 export function autoPick(
   bag: Bag,
   codex: Record<string, 材料档案条目>,
@@ -50,6 +50,11 @@ export function autoPick(
   for (const [name, item] of Object.entries(bag)) {
     if (left <= 0) break;
     if (exclude.includes(name)) continue;
+    // 图纸是生产资料、不是材料，绝不能被自动拣选烧掉：类别「任意」会放行任何条目，
+    // 且 codexOf 的启发式还会把「图纸·狼王牙刃」按「牙」字归入怪物素材（玩家 4500 UP 买的东西一次无关制作就没了）。
+    // 排除放在函数内而非交给调用方：autoPick 是 exported 纯函数，调用方不该承担「记得排除图纸」的义务。
+    // 玩家显式指定为核心材料（input.核心材料）不经此路径，不受影响。
+    if (isBlueprintName(name)) continue;
     if (类别 !== '任意' && codex[name]?.类别 !== 类别) continue;
     const take = Math.min(Number(item.数量), left);
     if (take > 0) {
