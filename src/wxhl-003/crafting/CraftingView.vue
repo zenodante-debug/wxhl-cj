@@ -26,31 +26,39 @@
           <span class="cc-tag">定价随成品/品质/阶位</span>
         </div>
         <div class="crf-form">
-          <label>名称<input v-model="定制.名称" type="text" placeholder="如：狼王牙刃" /></label>
           <label>成品类型
             <select v-model="定制.成品类型">
               <option value="装备">装备</option>
               <option value="道具">道具</option>
             </select>
           </label>
+          <label class="crf-col">设计要求
+            <textarea
+              v-model="定制.设计要求"
+              rows="3"
+              maxlength="500"
+              placeholder="想让 AI 做成什么？如「一把会飞的连射炮，打起来像下雨」。这是 AI 的主要依据，越具体越好"
+            ></textarea>
+          </label>
+          <label>成品名称<input v-model="定制.名称" type="text" placeholder="可留空——由 AI 按设计要求起名" /></label>
           <template v-if="定制.成品类型 === '装备'">
-            <label>类别
-              <select v-model="定制.装备类">
+            <label>子类
+              <select v-model="定制.子类">
                 <option value="武器">武器</option>
                 <option value="防具">防具</option>
+                <option value="饰品">饰品</option>
               </select>
             </label>
-            <label v-if="定制.装备类 === '武器'">武器类型
-              <select v-model="定制.武器类">
-                <option v-for="w in weaponTypes" :key="w" :value="w">{{ w }}</option>
+            <label>种类<input v-model="定制.种类" type="text" placeholder="自由文本，如 浮游炮 / 指环 / 玄铁长枪" /></label>
+            <label v-if="定制.子类 !== '饰品'">数值参照
+              <select v-model="定制.数值参照">
+                <option value="">留空——由 AI 选</option>
+                <option v-for="o in 模板选项(定制.子类)" :key="o" :value="o">{{ o }}</option>
               </select>
             </label>
-            <label v-else>防具光谱
-              <select v-model="定制.防具类">
-                <option v-for="s in armorTypes" :key="s" :value="s">{{ s }}</option>
-              </select>
-            </label>
+            <div v-else class="crf-tip">饰品不走数值参照：只加主/副属性加成，数值由阶位与品质决定</div>
           </template>
+          <div v-else class="crf-tip">道具没有额外字段：类型与固定值由 AI 按设计要求产出，生成后在确认框里展示</div>
           <label>品质
             <select v-model="定制.品质">
               <option value="金色">金色</option>
@@ -62,7 +70,14 @@
               <option v-for="t in 定制阶位上限" :key="t" :value="t">{{ t }}阶</option>
             </select>
           </label>
-          <label>核心材料<input v-model="定制.核心材料" type="text" placeholder="背包里的物品名" /></label>
+          <div class="crf-multi">
+            <div class="cm-title">核心材料（可多选——AI 依它定材料类别与成品名）</div>
+            <div v-if="!设计核心候选.length" class="crf-empty">背包里没有可当核心材料的物品</div>
+            <label v-for="n in 设计核心候选" :key="n" class="crf-check">
+              <input type="checkbox" :checked="定制.核心材料.includes(n)" @change="toggle定制核心(n)" />
+              {{ n }}（×{{ store.bag[n]?.数量 }}）
+            </label>
+          </div>
           <label>行业
             <select v-model="定制.行业">
               <option v-for="h in 行业列表" :key="h" :value="h">{{ h }}</option>
@@ -86,6 +101,7 @@
             <span class="cc-tag">{{ r.品质 }} · {{ r.行业 }}</span>
           </div>
           <div class="cc-line">材料：{{ 材料文本(r) }}</div>
+          <div v-if="数值摘要(r)" class="cc-line">数值：{{ 数值摘要(r) }}</div>
           <div class="cc-line">要求：{{ r.技能要求.分类 }}技能 Lv.{{ r.技能要求.等级 }}<template v-if="r.批量上限 > 1"> · 可批量×{{ r.批量上限 }}</template></div>
         </div>
       </div>
@@ -103,6 +119,7 @@
             <span class="cc-tag">{{ r.品质 }} · {{ r.阶位 }}阶 · {{ r.行业 }}</span>
           </div>
           <div class="cc-line">材料：{{ 材料文本(r) }}</div>
+          <div v-if="数值摘要(r)" class="cc-line">数值：{{ 数值摘要(r) }}</div>
           <div v-for="(e, i) in r.效果" :key="i" class="cc-line">效果：{{ 效果文本(e) }}</div>
           <div v-if="r.描述" class="cc-line crf-desc">{{ r.描述 }}</div>
           <button class="crf-del" @click.stop="store.deleteRecipe(r.名称)">删除</button>
@@ -123,17 +140,17 @@
           </div>
           <div class="cc-line">配方：{{ 成品摘要(bp.数据.配方) }}</div>
           <div v-if="bp.数据.配方.描述" class="cc-line crf-desc">{{ bp.数据.配方.描述 }}</div>
-          <label v-if="bp.数据.配方.成品类型 === '装备'" class="crf-bp-base">装备基础
+          <label v-if="可改参照模板(bp.数据.配方)" class="crf-bp-base">数值参照
             <select
-              :value="写回暂存[bp.物品名] ?? bp.数据.配方.装备基础"
+              :value="写回暂存[bp.物品名] ?? bp.数据.配方.参照模板"
               :disabled="写回中 !== '' || 丢弃中 !== '' || store.completing"
-              @change="改装备基础(bp.物品名, $event.target as HTMLSelectElement)"
+              @change="改参照模板(bp.物品名, $event.target as HTMLSelectElement)"
             >
               <option value="" disabled>未指定（请选择）</option>
-              <option v-for="o in 基础选项(bp.数据.配方.装备子类)" :key="o" :value="o">{{ o }}</option>
+              <option v-for="o in 模板选项(bp.数据.配方.装备子类)" :key="o" :value="o">{{ o }}</option>
             </select>
           </label>
-          <div v-if="装备基础提示(bp.数据.配方)" class="crf-warn">{{ 装备基础提示(bp.数据.配方) }}</div>
+          <div v-if="参照模板提示(bp.数据.配方)" class="crf-warn">{{ 参照模板提示(bp.数据.配方) }}</div>
           <div class="crf-bp-btns">
             <button class="crf-mini" :disabled="store.completing || store.uploading || 写回中 !== '' || 丢弃中 !== ''" @click="补全(bp.物品名)">
               {{ 补全目标 === bp.物品名 ? '补全中…' : '补全词条' }}
@@ -155,7 +172,8 @@
         <div class="crf-card">
           <div class="cc-head"><span class="cc-name">{{ form.配方.名称 }}</span><span class="cc-tag">{{ 设施标签 }}</span></div>
           <div class="cc-line">成品类型：{{ form.配方.成品类型 }}{{ form.配方.装备子类 ? ' · ' + form.配方.装备子类 : '' }}</div>
-          <div v-if="form.配方.装备基础" class="cc-line">装备基础：{{ form.配方.装备基础 }}（图纸指定，无需再选）</div>
+          <div v-if="form.配方.成品类型 === '装备' && form.配方.装备基础" class="cc-line">种类：{{ form.配方.装备基础 }}（自由文本名，数值见下）</div>
+          <div v-if="数值来源文本" class="cc-line crf-owned">{{ 数值来源文本 }}</div>
           <div v-if="form.配方.来源 === '图纸'" class="cc-line crf-owned">图纸状态：已掌握</div>
         </div>
 
@@ -165,12 +183,12 @@
               <option v-for="t in 5" :key="t" :value="t">{{ t }}阶</option>
             </select>
           </label>
-          <label v-if="form.配方.装备子类 === '武器' && !form.配方.装备基础">武器类型
+          <label v-if="form.配方.装备子类 === '武器' && !form.配方.参照模板">武器类型
             <select v-model="form.子类型">
               <option v-for="w in weaponTypes" :key="w" :value="w">{{ w }}</option>
             </select>
           </label>
-          <label v-if="form.配方.装备子类 === '防具' && !form.配方.装备基础">防具类型
+          <label v-if="form.配方.装备子类 === '防具' && !form.配方.参照模板">防具类型
             <select v-model="form.子类型">
               <option v-for="s in armorTypes" :key="s" :value="s">{{ s }}</option>
             </select>
@@ -183,20 +201,32 @@
           <label v-if="form.配方.批量上限 > 1">数量
             <input v-model.number="form.数量" type="number" min="1" :max="form.配方.批量上限" />
           </label>
-          <label>核心材料（{{ 核心类别 }}）
-            <select v-model="form.核心材料名">
-              <option v-for="n in coreCandidates" :key="n" :value="n">{{ n }}（×{{ store.bag[n]?.数量 }}）</option>
-            </select>
-          </label>
-          <div v-if="form.核心材料名" class="cc-line crf-codex">
-            归类不对？直接改：
-            <select :value="store.codex[form.核心材料名]?.类别 ?? '未分类'" @change="store.setCodex(form.核心材料名, { 类别: ($event.target as HTMLSelectElement).value as any })">
+          <div class="crf-multi">
+            <div class="cm-title">核心材料（需 {{ 核心需求文本 }}，可多选）</div>
+            <div v-if="!coreCandidates.length" class="crf-empty">背包里没有「{{ 核心需求文本 }}」类材料</div>
+            <label v-for="n in coreCandidates" :key="n" class="crf-check">
+              <input type="checkbox" :checked="form.核心材料.includes(n)" @change="toggle核心材料(n)" />
+              {{ n }}（×{{ store.bag[n]?.数量 }} · {{ store.codex[n]?.类别 ?? '未分类' }}）
+            </label>
+            <div
+              v-if="核心需求.length && form.核心材料.length"
+              class="crf-tip"
+              :class="核心自检.未覆盖.length || 核心自检.多余.length ? 'bad' : 'ok'"
+            >
+              <template v-if="核心自检.未覆盖.length">还差：{{ 核心自检.未覆盖.join('、') }}</template>
+              <template v-else-if="核心自检.多余.length">这几件对不上核心需求：{{ 核心自检.多余.join('、') }}</template>
+              <template v-else>核心需求已齐（按档案类别认领，归类不对可在下面改）</template>
+            </div>
+          </div>
+          <div v-for="n in form.核心材料" :key="n" class="cc-line crf-codex">
+            {{ n }} 归类不对？直接改：
+            <select :value="store.codex[n]?.类别 ?? '未分类'" @change="store.setCodex(n, { 类别: ($event.target as HTMLSelectElement).value as any })">
               <option v-for="c in CATS" :key="c" :value="c">{{ c }}</option>
             </select>
-            <select :value="store.codex[form.核心材料名]?.品质 ?? '白色'" @change="store.setCodex(form.核心材料名, { 品质: ($event.target as HTMLSelectElement).value as any })">
+            <select :value="store.codex[n]?.品质 ?? '白色'" @change="store.setCodex(n, { 品质: ($event.target as HTMLSelectElement).value as any })">
               <option v-for="q in QUALS" :key="q" :value="q">{{ q }}</option>
             </select>
-            <select :value="store.codex[form.核心材料名]?.阶位 ?? 1" @change="store.setCodex(form.核心材料名, { 阶位: Number(($event.target as HTMLSelectElement).value) })">
+            <select :value="store.codex[n]?.阶位 ?? 1" @change="store.setCodex(n, { 阶位: Number(($event.target as HTMLSelectElement).value) })">
               <option v-for="t in 5" :key="t" :value="t">{{ t }}阶</option>
             </select>
           </div>
@@ -206,7 +236,7 @@
 
         <div class="crf-dc">DC 预览：{{ dcPreview }}（D20+基础属性+技能Lv ≥ DC）</div>
         <div class="crf-dc" :class="难度提示.类">{{ 难度提示.文 }}</div>
-        <button class="crf-go" :disabled="!form.核心材料名" @click="go">开工</button>
+        <button class="crf-go" :disabled="核心需求.length > 0 && !form.核心材料.length" @click="go">开工</button>
 
         <div v-if="store.lastOutcome" class="crf-result" :class="'r-' + store.lastOutcome.结果">
           <div class="cr-title">制作{{ store.lastOutcome.结果 }}</div>
@@ -248,9 +278,13 @@
 <script setup lang="ts">
 import { computed, onMounted, reactive, ref, watchEffect } from 'vue';
 import { 归一位阶 } from '../dice';
+import type { DesignTarget } from './blueprintAI';
 import { computeDC, 难度分档 } from './craft';
-import { WEAPON_TABLE, type ArmorSpectrum, type Attr, type Quality } from './equipTables';
-import { INDUSTRY_ATTR, 材料类别, 行业列表, isBlueprintName, type 配方, type 行业 } from './recipes';
+import { armorStats, weaponStats, WEAPON_TABLE, type ArmorSpectrum, type Attr, type Quality } from './equipTables';
+import {
+  INDUSTRY_ATTR, 材料类别, 行业列表, isBlueprintName,
+  type MaterialCategory, type 配方, type 行业,
+} from './recipes';
 import { makerFor, useCraftingStore } from './store';
 
 const emit = defineEmits<{ close: []; 'goto-market': [name: string] }>();
@@ -275,14 +309,38 @@ const form = reactive({
   子类型: '',
   副属性: 'AGI' as Attr,
   数量: 1,
-  核心材料名: '',
+  /** 玩家选定的核心材料物品名（v2.1 多选：store 按档案类别把每件认领到配方的核心需求，扣该需求的数量） */
+  核心材料: [] as string[],
   越阶材料: false,
   劣质材料: false,
 });
 
 const 设施标签 = computed(() => store.facilityInfo().标签);
-const 核心类别 = computed(() => form.配方?.材料.find(m => m.核心)?.类别 ?? '任意');
-const coreCandidates = computed(() => store.matchMaterials(核心类别.value));
+/** 配方的核心材料需求（图纸可多核心：类别 + 数量）——不摊给玩家看，多选就无从下手 */
+const 核心需求 = computed(() => form.配方?.材料.filter(m => m.核心) ?? []);
+const 核心需求文本 = computed(() => 核心需求.value.map(m => `${m.类别}×${m.数量}`).join(' + ') || '任意');
+/** 核心材料候选：按核心类别从背包里拣（多核心取并集；配方没有核心需求时按「任意」列全部） */
+const coreCandidates = computed(() => {
+  const 类别列表: MaterialCategory[] = 核心需求.value.map(m => m.类别);
+  const 全部 = (类别列表.length ? 类别列表 : ['任意' as MaterialCategory])
+    .flatMap(c => store.matchMaterials(c));
+  return [...new Set(全部)];
+});
+/** 核心需求覆盖自检（**只读预览**，口径与 store.doCraft 的 分配核心材料 逐点一致：按档案类别认领、
+ *  同类别按选择顺序、需求里的「任意」兜底、对不上任何需求的多余材料同样会被拒）——
+ *  玩家在点「开工」前就能看见哪条需求还没着落，而不是点下去才被 store 拒。 */
+const 核心自检 = computed(() => {
+  const 待配 = [...核心需求.value];
+  const 多余: string[] = [];
+  for (const n of form.核心材料) {
+    const 类别 = store.codex[n]?.类别;
+    let i = 待配.findIndex(r => r.类别 === 类别);
+    if (i === -1) i = 待配.findIndex(r => r.类别 === '任意');
+    if (i === -1) 多余.push(n);
+    else 待配.splice(i, 1);
+  }
+  return { 未覆盖: 待配.map(r => `${r.类别}×${r.数量}`), 多余 };
+});
 const dcPreview = computed(() => {
   if (!form.配方) return '-';
   const 修正 = [
@@ -319,6 +377,43 @@ const 难度提示 = computed(() => {
   return { 类: 'bad', 文: `${前缀}掷满 d20 也不够，仅自然 20 可成（杰作）` };
 });
 
+// ---- v2.1：制作页必须摊开「成品数值从哪来」（AI 图纸的 种类 是自创名，数值其实取自 参照模板）----
+
+/** 表内取武器数值（非法模板返回 null 由调用方给可读文案——不在此抛错，与 buildEquip 的抛错点分开） */
+function 武器数值(模板: string, 阶位: number, 品质: Quality) {
+  return Object.hasOwn(WEAPON_TABLE, 模板) ? weaponStats(模板, 阶位, 品质) : null;
+}
+/** 表内取防具数值（同上：非法光谱返回 null） */
+function 防具数值(光谱: string, 阶位: number, 品质: Quality) {
+  return armorTypes.includes(光谱 as ArmorSpectrum) ? armorStats(光谱 as ArmorSpectrum, 阶位, 品质) : null;
+}
+
+/** 「这些数字是哪来的」一行：装备看 参照模板（含按当前阶位/品质算出的具体数值）、道具看结构化字段。
+ *  与 buildEquip/buildGoods 同口径：参照模板优先，为空才回落制作时选的子类型（模板/标准配方走那条路）。 */
+const 数值来源文本 = computed(() => {
+  const r = form.配方;
+  if (!r) return '';
+  if (r.成品类型 === '道具') {
+    return `道具数值：${r.道具类型}${r.道具固定值 ? ` · 固定值 ${r.道具固定值}` : ''}（吃 ${r.关联属性} 修正）`;
+  }
+  if (r.装备子类 === '饰品') return '饰品数值：只加主/副属性加成，无伤害骰/防御/负重';
+  const 模板 = r.参照模板 || form.子类型;
+  if (!模板) return '未指定数值参照——请在下面选一个武器/防具类型';
+  if (r.装备子类 === '武器') {
+    const w = 武器数值(模板, form.阶位, r.品质);
+    return w
+      ? `数值参照【${模板}】→ 伤害骰 ${w.伤害骰} / 倍率 ${w.倍率} / 负重 ${w.负重}kg`
+      : `数值参照【${模板}】不在武器表内，制作会失败`;
+  }
+  if (r.装备子类 === '防具') {
+    const a = 防具数值(模板, form.阶位, r.品质);
+    return a
+      ? `数值参照【${模板}】→ 装备防御 ${a.装备防御} / 闪避 ${a.装备闪避} / 负重 ${a.负重}kg`
+      : `数值参照【${模板}】不在防具表内，制作会失败`;
+  }
+  return '';
+});
+
 // ---------------- v2：折叠区 / AI 定制 / 背包图纸 ----------------
 
 /** 三个折叠区的展开状态（默认都展开：v2 的新流程不能被藏在折叠里） */
@@ -349,28 +444,51 @@ function 效果文本(e: 配方['效果'][number]): string {
   return `【${e.类型}】${e.描述}${数值 ? `（${数值}）` : ''}`;
 }
 
-/** 图纸配方机械要点一行（成品类型 · 装备基础 · 材料清单），风味文案由卡片单独一行展示 */
-function 成品摘要(r: 配方): string {
-  const 类型 = r.成品类型 === '装备'
-    ? `装备·${r.装备子类 || '?'}${r.装备基础 ? `（${r.装备基础}）` : ''}`
-    : '道具';
-  return `${类型} ｜ ${材料文本(r)}`;
+/** 成品数值要点（v2.1 的「名字与数值分家」）：装备 = 自由的种类名 + 数值来源的参照模板；
+ *  道具 = AI 产出的结构化类型与固定值。制作页与配方卡共用这一行——两处都不能只显示名字，
+ *  否则玩家看不出「浮游炮」的数值其实来自「突击步枪」。 */
+function 数值摘要(r: 配方): string {
+  if (r.成品类型 === '道具') return `${r.道具类型}${r.道具固定值 ? `·固定值 ${r.道具固定值}` : ''}`;
+  const 种类 = r.装备基础 ? `种类：${r.装备基础}` : '';
+  const 参照 = r.装备子类 === '饰品' ? '饰品（只加属性）' : r.参照模板 ? `数值参照：${r.参照模板}` : '';
+  return [种类, 参照].filter(Boolean).join(' · ');
 }
 
-// ---- AI 定制图纸表单（成品类型=道具时隐藏子类：图纸 schema 里道具的 装备子类/装备基础 恒为空串）----
+/** 图纸配方机械要点一行（成品类型 · 数值 · 材料清单），风味文案由卡片单独一行展示 */
+function 成品摘要(r: 配方): string {
+  const 类型 = r.成品类型 === '装备' ? `装备·${r.装备子类 || '?'}` : '道具';
+  return [类型, 数值摘要(r), 材料文本(r)].filter(Boolean).join(' ｜ ');
+}
+
+// ---- AI 定制图纸表单（成品类型=道具时隐藏装备字段：图纸 schema 里道具的 装备子类/装备基础/参照模板 恒为空串）----
 const 定制 = reactive({
-  名称: '',
   成品类型: '装备' as '装备' | '道具',
-  装备类: '武器' as '武器' | '防具',
-  武器类: weaponTypes[2],
-  防具类: '轻装' as ArmorSpectrum,
+  /** 玩家给 AI 的成品要求（v2.1 新增）：buildDesignPrompt 把它原样写进提示词，是 AI 的主要依据 */
+  设计要求: '',
+  名称: '',
+  子类: '武器' as '武器' | '防具' | '饰品',
+  /** 自由文本种类名（如「浮游炮」）：只参与显示与命名，数值另走下面的「数值参照」 */
+  种类: '',
+  数值参照: '',
   品质: '金色' as '金色' | '紫色',
   阶位: 1,
-  核心材料: '',
+  核心材料: [] as string[],
   行业: '锻造' as 行业,
 });
-const 定制子类 = computed(() => (定制.装备类 === '武器' ? 定制.武器类 : 定制.防具类));
-const 定制可提交 = computed(() => 定制.名称.trim() !== '' && 定制.核心材料.trim() !== '');
+/** 设计要求是 AI 的主输入（成品名/数值参照都可留空：前者由 AI 起名、后者留空即由 AI 挑模板），
+ *  故这里要求它非空——空着提交等于让 AI 凭空造一件，提示词里只会得到「（无）」。 */
+const 定制可提交 = computed(() => 定制.设计要求.trim() !== '' && 定制.核心材料.length > 0);
+
+/** 设计表单的核心材料候选：背包里可当材料的物品，**排除图纸**——图纸是生产资料，被当核心材料烧掉不可逆
+ *  （与 craft.ts 的 autoPick 排除同源）。这里不猜类别：AI 依物品名自己判断材料类别。 */
+const 设计核心候选 = computed(() =>
+  Object.keys(store.bag).filter(n => !isBlueprintName(n) && Number(store.bag[n]?.数量 ?? 0) > 0),
+);
+function toggle定制核心(name: string): void {
+  const i = 定制.核心材料.indexOf(name);
+  if (i === -1) 定制.核心材料.push(name);
+  else 定制.核心材料.splice(i, 1);
+}
 
 /** 玩家自身阶位（1~5）：playerTier 是「一阶」这类字符串，归一位阶 返回 **0 基**下标故 +1；
  *  认不出（超脱/空/六阶…）保守取 1——与 assembleMaker 的兜底同源。 */
@@ -386,27 +504,29 @@ watchEffect(() => {
 
 async function 提交定制(): Promise<void> {
   if (!定制可提交.value) {
-    toastr.warning('请先填写图纸名称与核心材料');
+    toastr.warning('请先写设计要求（AI 的主要依据），并勾选至少一件核心材料');
     return;
   }
-  const ok = await store.designBlueprint({
-    名称: 定制.名称.trim(),
+  // 「数值参照」是玩家给 AI 的**倾向**，不是保证：DesignTarget 没有 参照模板 字段（定制路径要 AI 自己挑、
+  // 补全路径要沿用存档值，两者语义相反不能共用一个入参，见 blueprintAI），buildDesignPrompt 也只把
+  // 设计要求 原样写进提示词——故这里把它并进设计要求转达，生成后玩家仍可在「背包图纸」改这一栏。
+  const 数值倾向 = 定制.成品类型 === '装备' && 定制.数值参照
+    ? `数值参照希望用「${定制.数值参照}」，种类名只是风味名。`
+    : '';
+  const 目标: DesignTarget = {
     成品类型: 定制.成品类型,
-    子类: 定制.成品类型 === '装备' ? 定制子类.value : '',
+    装备子类: 定制.成品类型 === '装备' ? 定制.子类 : '',
+    种类: 定制.成品类型 === '装备' ? 定制.种类.trim() : '',
     品质: 定制.品质,
     阶位: 定制.阶位,
-    核心材料: 定制.核心材料.trim(),
+    核心材料: [...定制.核心材料],
     行业: 定制.行业,
-  });
+    设计要求: [定制.设计要求.trim(), 数值倾向].filter(Boolean).join('\n'),
+    名称: 定制.名称.trim(),
+  };
+  const ok = await store.designBlueprint(目标);
   // 成功才清名称：图纸要付费，避免连点重复买同一张；其余参数保留，方便照同一套再改
   if (ok) 定制.名称 = '';
-}
-
-/** 核心材料默认填背包第一件可当材料的物品名（图纸是生产资料，不做默认值——与 autoPick 的排除同源） */
-function 定核心材料默认(): void {
-  if (定制.核心材料.trim() !== '') return;
-  const 首个 = Object.keys(store.bag).find(n => !isBlueprintName(n));
-  if (首个) 定制.核心材料 = 首个;
 }
 
 // ---- 背包图纸：补全 / 上传学习（store 侧 completing/uploading 是全局守卫，这里只做按钮文案与置灰）----
@@ -429,17 +549,27 @@ function 已掌握(名称: string): boolean {
   return Object.hasOwn(store.配方库, 名称);
 }
 
-/** 装备基础候选：按图纸的 装备子类 给对应表（写错会让 buildEquip 抛出，故选不出错值） */
-function 基础选项(子类: string): readonly string[] {
+/** 数值参照候选（参照模板）：按图纸的 装备子类 给对应表（武器=9 种武器名 / 防具=5 光谱 / 饰品=无）。
+ *  v2.1：这一栏承载的是**数值来源**，与自由的「种类」名是两个字段——写错会让 buildEquip 抛错或取错数值，
+ *  故选不出错值。 */
+function 模板选项(子类: string): readonly string[] {
   return 子类 === '武器' ? weaponTypes : 子类 === '防具' ? armorTypes : [];
 }
 
-/** 装备图纸的 装备基础 体检（非空且与子类同类才算合格）：不合规时补全必被拒、制作时 buildEquip 会抛错 */
-function 装备基础提示(r: 配方): string {
+/** 这张图纸有没有「数值参照」可改：只有武器/防具图纸有这一栏（饰品走 attrBonus、道具走结构化字段） */
+function 可改参照模板(r: 配方): boolean {
+  return r.成品类型 === '装备' && (r.装备子类 === '武器' || r.装备子类 === '防具');
+}
+
+/** 装备图纸的 参照模板 体检（非空且与子类同类才算合格）：不合规时补全必被拒、制作时 buildEquip 会取错数值。
+ *  v2.1：体检对象从 `装备基础` 换成 `参照模板`——前者已退化为**自由文本种类名**（AI 写的「浮游炮」必然
+ *  不在武器表里，拿它体检等于给每张 AI 武器图纸发一条假警报），后者才是真表键。饰品不走这一栏，故免检。 */
+function 参照模板提示(r: 配方): string {
   if (r.成品类型 !== '装备') return '';
-  if (!r.装备子类) return '图纸缺少装备子类（武器/防具），无法指定装备基础';
-  if (!r.装备基础) return '未指定装备基础，AI 补全会被拒绝';
-  if (!基础选项(r.装备子类).includes(r.装备基础)) return `装备基础「${r.装备基础}」与子类「${r.装备子类}」不符，制作会失败`;
+  if (r.装备子类 === '饰品') return '';
+  if (!r.装备子类) return '图纸缺少装备子类（武器/防具），无法指定数值参照';
+  if (!r.参照模板) return '未指定数值参照，AI 补全会被拒绝';
+  if (!模板选项(r.装备子类).includes(r.参照模板)) return `数值参照「${r.参照模板}」与子类「${r.装备子类}」不符，制作会失败`;
   return '';
 }
 
@@ -453,19 +583,20 @@ async function 补全(物品名: string): Promise<void> {
   }
 }
 
-/** 装备基础下拉：换值即写回。落档（入参校验 / 新读背包为基底 / commit / 回读）全在
- *  store.setBpBase 里，视图只管 UI 状态与禁用——UI 不自备 MVU 管道。
- *  来由：补全（completeBlueprint）把 现有.配方.装备基础 当 DesignTarget.子类，为空或非法一律拒绝，
+/** 数值参照下拉：换值即写回。落档（入参校验 / 新读背包为基底 / commit / 回读）全在
+ *  store.setBpTemplate 里，视图只管 UI 状态与禁用——UI 不自备 MVU 管道。
+ *  来由：补全（completeBlueprint）要求图纸的 参照模板 已就位（AI 只负责给装备挑模板，残缺图纸得由玩家先定），
  *  而 AI 无权提供该字段、completeBp 也没有它的参数位，故必须先由玩家选定并落档。
+ *  v2.1 改名：本动作写的是 `配方.参照模板`（数值来源），旧名 setBpBase 写的是 `装备基础`。
  *  本函数不做手工 DOM 回退：`写回暂存` 撤掉后，:value 的强刷机制自会把控件刷回存档真值。 */
-async function 改装备基础(物品名: string, el: HTMLSelectElement): Promise<void> {
+async function 改参照模板(物品名: string, el: HTMLSelectElement): Promise<void> {
   if (写回中.value !== '') return;
   const 选中 = el.value; // 先取：await 期间控件可能被别处重渲染
   写回暂存.value = { ...写回暂存.value, [物品名]: 选中 };
   写回中.value = 物品名;
   try {
     // 失败时 store 已 toastr + 写 lastError（顶部错误条会显示），视图不重复播报
-    await store.setBpBase(物品名, 选中);
+    await store.setBpTemplate(物品名, 选中);
   } finally {
     const 下一份 = { ...写回暂存.value };
     delete 下一份[物品名];
@@ -496,10 +627,17 @@ function pickRecipe(r: 配方) {
   form.阶位 = r.来源 === '模板' ? 1 : r.阶位 || 1;
   form.子类型 = r.装备子类 === '武器' ? weaponTypes[2] : r.装备子类 === '防具' ? '轻装' : '';
   form.数量 = 1;
-  form.核心材料名 = '';
+  form.核心材料 = [];
   store.lastOutcome = null; // 换配方清掉上一次结果，避免误显
   store.syncFromMvu();
   tab.value = 'craft';
+}
+
+/** 核心材料多选（v2.1）：一件件勾/取消，开工时整份交给 store 按类别认领到配方的核心需求 */
+function toggle核心材料(name: string): void {
+  const i = form.核心材料.indexOf(name);
+  if (i === -1) form.核心材料.push(name);
+  else form.核心材料.splice(i, 1);
 }
 
 async function go() {
@@ -510,7 +648,7 @@ async function go() {
     子类型: form.子类型,
     副属性: form.副属性,
     数量: form.数量,
-    核心材料名: form.核心材料名,
+    核心材料名: [...form.核心材料], // v2.1：多件（store 按类别映射到核心需求）
     越阶材料: form.越阶材料,
     劣质材料: form.劣质材料,
   });
@@ -518,7 +656,6 @@ async function go() {
 
 onMounted(() => {
   store.syncFromMvu();
-  定核心材料默认();
 });
 </script>
 
@@ -546,6 +683,16 @@ onMounted(() => {
 .crf-form label { display: flex; justify-content: space-between; align-items: center; gap: 8px; font-size: 12px; }
 .crf-form select, .crf-form input { max-width: 60%; }
 .crf-check { justify-content: flex-start !important; }
+/* 多行文本（设计要求）：标签在上、控件占满整行，与其它 label 的左右分栏区分开 */
+.crf-form label.crf-col { flex-direction: column; align-items: stretch; }
+.crf-form textarea { width: 100%; box-sizing: border-box; font: inherit; font-size: 12px; resize: vertical; }
+/* 核心材料多选（v2.1）：候选可能很多，限高滚动，免得把「开工」按钮挤出屏幕 */
+.crf-multi { display: flex; flex-direction: column; gap: 4px; padding: 6px 8px; border: 1px solid rgba(127,127,127,.25); border-radius: 6px; font-size: 12px; max-height: 190px; overflow-y: auto; }
+.cm-title { font-weight: 700; opacity: .9; }
+.crf-multi input[type='checkbox'] { width: auto; max-width: none; margin: 0; }
+.crf-tip { font-size: 11px; opacity: .7; }
+.crf-tip.ok { color: #4a9d5f; opacity: 1; }
+.crf-tip.bad { color: #e67e22; opacity: 1; }
 .crf-dc { font-size: 12px; opacity: .8; }
 /* 难度分档配色：必成 / 靠骰运 / 掷满也不够（分档口径见脚本里的 难度提示 注释） */
 .crf-dc.ok { color: #4a9d5f; opacity: 1; }
