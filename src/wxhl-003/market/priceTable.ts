@@ -28,8 +28,9 @@ export interface PriceCheck {
   reason: string;
 }
 
-/** 一阶基准价表 [下限, 上限]（经济系统·恒定物价体系）；与 worker.js 同步 */
-const BASE: Record<EquipCategory, Record<EquipQuality, [number, number]>> = {
+/** 一阶基准价表 [下限, 上限]（经济系统·恒定物价体系）；与 worker.js 同步
+ *  export 供 crafting/blueprint 的图纸定价表做交叉断言（防两表手抄漂移） */
+export const BASE: Record<EquipCategory, Record<EquipQuality, [number, number]>> = {
   武器: { 白色: [30, 60], 蓝色: [100, 200], 金色: [400, 800], 紫色: [1500, 3000], 银色: [1500, 3000] },
   防具: { 白色: [15, 40], 蓝色: [50, 150], 金色: [250, 600], 紫色: [1000, 2000], 银色: [1000, 2000] },
   饰品: { 白色: [20, 40], 蓝色: [60, 150], 金色: [300, 700], 紫色: [1200, 2500], 银色: [1200, 2500] },

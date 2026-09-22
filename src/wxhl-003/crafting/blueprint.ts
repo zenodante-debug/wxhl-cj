@@ -4,9 +4,10 @@
 // ================================================================
 import { bagRemove, type Bag } from '../market/settle';
 import { TIER_COEF, type Quality } from './equipTables';
-import { BlueprintDataSchema, type 图纸数据, type 配方库 } from './recipes';
+import { BlueprintDataSchema, 配方Schema, type 图纸数据, type 配方库 } from './recipes';
 
-/** 一阶成品价格区间中值（与 market/priceTable.ts 的 BASE 同源；改动须两边同步） */
+/** 一阶成品价格区间中值（与 market/priceTable.ts 的 BASE 同源；改动须两边同步）
+ *  防具「白色」=(15+40)/2=27.5，按 Math.round 上取整为 28（测试对两表做交叉断言） */
 const EQUIP_MID: Record<'武器' | '防具' | '饰品', Record<Quality, number>> = {
   武器: { 白色: 45, 蓝色: 150, 金色: 600, 紫色: 2250 },
   防具: { 白色: 28, 蓝色: 100, 金色: 425, 紫色: 1500 },
@@ -24,13 +25,16 @@ export function blueprintPrice(
   道具一阶单价?: number,
 ): number {
   const coef = TIER_COEF[阶位];
-  if (coef === undefined) throw new Error(`未知阶位：${阶位}`);
+  // 注意：TIER_COEF[0] === 0 是"未使用"哨兵，故用 falsy 判定，0 阶/越界阶位一律抛错
+  if (!coef) throw new Error(`未知阶位：${阶位}`);
   if (成品类型 === '消耗品') {
     if (!道具一阶单价) throw new Error('道具图纸定价需要一阶单价');
     return 道具一阶单价 * GOODS_MULT * coef;
   }
   if (!子类) throw new Error('装备图纸定价需要子类');
-  return EQUIP_MID[子类][品质] * EQUIP_MULT * coef;
+  const 一阶中值 = EQUIP_MID[子类]?.[品质];
+  if (一阶中值 === undefined) throw new Error(`未知成品子类或品质：${子类} ${品质}`);
+  return 一阶中值 * EQUIP_MULT * coef;
 }
 
 /** 扫描背包，挑出带合法图纸数据的物品 */
@@ -68,7 +72,8 @@ export function uploadBlueprint(
   const 数据 = readBlueprint(bag, 物品名);
   if (!数据) return { error: `「${物品名}」不是有效图纸` };
   const 名称 = 数据.配方.名称;
-  if (配方库[名称]) return { error: `已掌握配方「${名称}」，不能重复上传` };
+  // 用 hasOwn：图纸名由 AI 生成，`constructor`/`toString` 之类会让真值判定误报"已掌握"
+  if (Object.hasOwn(配方库, 名称)) return { error: `已掌握配方「${名称}」，不能重复上传` };
   let nextBag: Bag;
   try {
     nextBag = bagRemove(bag, 物品名, 1);
@@ -78,14 +83,47 @@ export function uploadBlueprint(
   return { bag: nextBag, 配方库: { ...配方库, [名称]: 数据.配方 } };
 }
 
-/** 补全：只填缺失/非法的字段，不覆盖已有有效内容 */
+/** 是否「已填」：undefined/null/空串/空数组/0 视为未填（0 判定只对数值字段有意义） */
+function 已填(v: unknown): boolean {
+  if (v === undefined || v === null) return false;
+  if (typeof v === 'string') return v.trim() !== '';
+  if (Array.isArray(v)) return v.length > 0;
+  if (typeof v === 'number') return v !== 0;
+  return true;
+}
+
+type 字段校验器 = { safeParse: (v: unknown) => { success: boolean } };
+type 字段形状 = Record<string, 字段校验器 | undefined>;
+
+function 取对象(v: unknown): Record<string, unknown> {
+  return v !== null && typeof v === 'object' ? (v as Record<string, unknown>) : {};
+}
+
+/** base 的该字段算「已有有效内容」：已填 且 通过字段自身的 schema 校验 */
+function 有效字段(base: Record<string, unknown>, k: string, 形状: 字段形状): boolean {
+  const v = base[k];
+  return 已填(v) && (形状[k]?.safeParse(v).success ?? true);
+}
+
+/** 逐字段合并：base 优先；base 缺失/空/非法时才用补的 */
+function 合并字段(base: Record<string, unknown>, 补: Record<string, unknown>, 形状: 字段形状): Record<string, unknown> {
+  const out: Record<string, unknown> = { ...base };
+  for (const [k, v] of Object.entries(补)) {
+    if (!有效字段(out, k, 形状)) out[k] = v;
+  }
+  return out;
+}
+
+/** 补全：只填缺失/非法的字段，绝不覆盖已有有效内容
+ *  配方逐字段 base 优先（名称是配方库去重键，尤不可被 AI 改写）；补全恒置 true；末尾 parse 收口 */
 export function mergeBlueprintData(现有: unknown, 补全结果: Partial<图纸数据>): 图纸数据 {
-  const base = BlueprintDataSchema.safeParse(现有);
-  const merged = {
-    ...(base.success ? base.data : {}),
-    ...补全结果,
-    配方: { ...(base.success ? base.data.配方 : {}), ...(补全结果.配方 ?? {}) },
+  const base = 取对象(现有);
+  const 补 = 补全结果 as Record<string, unknown>;
+  const 顶层形状 = BlueprintDataSchema.shape as 字段形状;
+  return BlueprintDataSchema.parse({
+    制作者: 有效字段(base, '制作者', 顶层形状) ? base.制作者 : 补.制作者,
+    版本: 有效字段(base, '版本', 顶层形状) ? base.版本 : 补.版本,
+    配方: 合并字段(取对象(base.配方), 取对象(补.配方), 配方Schema.shape as 字段形状),
     补全: true,
-  };
-  return BlueprintDataSchema.parse(merged);
+  });
 }
