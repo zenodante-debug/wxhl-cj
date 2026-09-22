@@ -280,7 +280,7 @@ import { computed, onMounted, reactive, ref, watchEffect } from 'vue';
 import { 归一位阶 } from '../dice';
 import type { DesignTarget } from './blueprintAI';
 import { computeDC, 难度分档 } from './craft';
-import { armorStats, weaponStats, WEAPON_TABLE, type ArmorSpectrum, type Attr, type Quality } from './equipTables';
+import { armorStats, attrBonus, weaponStats, WEAPON_TABLE, type ArmorSpectrum, type Attr, type Quality } from './equipTables';
 import {
   INDUSTRY_ATTR, 材料类别, 行业列表, isBlueprintName,
   type MaterialCategory, type 配方, type 行业,
@@ -379,37 +379,71 @@ const 难度提示 = computed(() => {
 
 // ---- v2.1：制作页必须摊开「成品数值从哪来」（AI 图纸的 种类 是自创名，数值其实取自 参照模板）----
 
-/** 表内取武器数值（非法模板返回 null 由调用方给可读文案——不在此抛错，与 buildEquip 的抛错点分开） */
+/** 成功档波动说明（与 store.ts 确认框里的同一句）：防具的装备防御/闪避、饰品与装备的主/副属性加成，
+ *  以及恢复类道具的恢复量，在「成功」档会被 fluctuate 到基准的 80%~100%（精制/杰作取基准，失败/大失败
+ *  不产出）。伤害骰/倍率/负重、爆炸物的附加固定伤害不波动，故那几项后面不挂这句。 */
+const 波动说明 = '（成功档 80%~100% 波动）';
+
+/** 表内取武器数值：非法模板/阶位（AI·GM 直写背包的坏图纸）不抛错，返回 null 由调用方给可读文案。
+ *  只判模板键不够——weaponStats 对越界阶位同样会抛（`WEAPON_TABLE[键][9]` 是 undefined），
+ *  而 配方.阶位 在 schema 里没有范围校验，坏图纸能一路走到这里，抛在 computed 里就是整页崩。 */
 function 武器数值(模板: string, 阶位: number, 品质: Quality) {
-  return Object.hasOwn(WEAPON_TABLE, 模板) ? weaponStats(模板, 阶位, 品质) : null;
+  try {
+    return weaponStats(模板, 阶位, 品质);
+  } catch (_) {
+    return null;
+  }
 }
-/** 表内取防具数值（同上：非法光谱返回 null） */
+/** 表内取防具数值（同上：非法光谱或阶位返回 null） */
 function 防具数值(光谱: string, 阶位: number, 品质: Quality) {
-  return armorTypes.includes(光谱 as ArmorSpectrum) ? armorStats(光谱 as ArmorSpectrum, 阶位, 品质) : null;
+  try {
+    return armorStats(光谱 as ArmorSpectrum, 阶位, 品质);
+  } catch (_) {
+    return null;
+  }
+}
+/** 表内取饰品加成（同上：阶位/品质非法返回 null） */
+function 饰品数值(阶位: number, 品质: Quality) {
+  try {
+    return attrBonus('饰品', 阶位, 品质);
+  } catch (_) {
+    return null;
+  }
 }
 
 /** 「这些数字是哪来的」一行：装备看 参照模板（含按当前阶位/品质算出的具体数值）、道具看结构化字段。
- *  与 buildEquip/buildGoods 同口径：参照模板优先，为空才回落制作时选的子类型（模板/标准配方走那条路）。 */
+ *  与 buildEquip/buildGoods 同口径：参照模板优先，为空才回落制作时选的子类型（模板/标准配方走那条路）。
+ *  数值一律现算、绝不硬编码（表一改，硬编码的文案就开始骗人）；文案与 store.ts 的「数值来源行」
+ *  （确认框/图纸描述）保持同口径。本行只是展示路径，取不到值就给可读文案——坏图纸该在开工时被 store 拦。 */
 const 数值来源文本 = computed(() => {
   const r = form.配方;
   if (!r) return '';
   if (r.成品类型 === '道具') {
-    return `道具数值：${r.道具类型}${r.道具固定值 ? ` · 固定值 ${r.道具固定值}` : ''}（吃 ${r.关联属性} 修正）`;
+    // 恢复HP/MP 的固定值是**基准恢复量**（成功档 80%~100%）；爆炸物的固定值是附加固定伤害（不波动），
+    // 其余类型只是口径标签——故这句只挂在恢复类后面，不无差别地贴给所有道具。
+    const 波动 = r.道具类型 === '恢复HP' || r.道具类型 === '恢复MP' ? 波动说明 : '';
+    return `道具数值：${r.道具类型}${r.道具固定值 ? ` · 固定值 ${r.道具固定值}${波动}` : ''}（吃 ${r.关联属性} 修正）`;
   }
-  if (r.装备子类 === '饰品') return '饰品数值：只加主/副属性加成，无伤害骰/防御/负重';
+  if (r.装备子类 === '饰品') {
+    const b = 饰品数值(form.阶位, r.品质);
+    return b
+      ? `饰品数值：主属性加成 +${b.主} / 副属性 +${b.副}${波动说明}（无伤害骰/防御/负重）`
+      : '饰品数值：只加主/副属性加成（阶位或品质非法，取不到数值）';
+  }
   const 模板 = r.参照模板 || form.子类型;
   if (!模板) return '未指定数值参照——请在下面选一个武器/防具类型';
   if (r.装备子类 === '武器') {
     const w = 武器数值(模板, form.阶位, r.品质);
     return w
       ? `数值参照【${模板}】→ 伤害骰 ${w.伤害骰} / 倍率 ${w.倍率} / 负重 ${w.负重}kg`
-      : `数值参照【${模板}】不在武器表内，制作会失败`;
+      : `数值参照【${模板}】取不到数值（模板或阶位非法），制作会失败`;
   }
   if (r.装备子类 === '防具') {
     const a = 防具数值(模板, form.阶位, r.品质);
+    // 波动说明紧跟在**会波动的那两项**（防御/闪避）后面，别让它看起来像在说负重也波动
     return a
-      ? `数值参照【${模板}】→ 装备防御 ${a.装备防御} / 闪避 ${a.装备闪避} / 负重 ${a.负重}kg`
-      : `数值参照【${模板}】不在防具表内，制作会失败`;
+      ? `数值参照【${模板}】→ 装备防御 ${a.装备防御} / 闪避 ${a.装备闪避}${波动说明} / 负重 ${a.负重}kg`
+      : `数值参照【${模板}】取不到数值（模板或阶位非法），制作会失败`;
   }
   return '';
 });
