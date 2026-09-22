@@ -311,6 +311,21 @@ describe('金紫制作 · 图纸与降档', () => {
   it('无对应职业 → 阻断', () => {
     expect(validateCraft(金输入(true, 1, '无'), bag)[0]).toContain('职业');
   });
+  // Task 6：技能校验改由 checkSkill 统一判定，**分类**由此第一次被真正检查
+  //（v2.1 前只比 等级：基础系 Lv.9 也能过金图纸写着的「高级技能 Lv.1」）
+  it('金图纸要高级技能：基础系 Lv.9 照样拦（旧版只看等级会放行）', () => {
+    const i = 金输入(true, 9);
+    i.制作者.技能 = { ...i.制作者.技能!, 分类: '基础' };
+    const errs = validateCraft(i, bag);
+    expect(errs).toHaveLength(1);
+    expect(errs[0]).toContain('高级');
+    expect(errs[0]).toContain('基础');
+  });
+  it('高级可代基础：高级技能做白/蓝配方不被拦（单向「上兼容下」）', () => {
+    const input = makeInput({ 配方: 锻造武器蓝 });
+    input.制作者.技能 = { 分类: '高级', 阶位: 3, 等级: 3 };
+    expect(validateCraft(input, bag)).toEqual([]);
+  });
   // spec §6.1：紫 = 高级技能 Lv.5 + 职业 + 高阶材料（核心材料档案阶位 ≥ 配方阶位）
   it('紫色配方 + 核心材料阶位 3 = 配方阶位 3 → 可制作', () => {
     expect(validateCraft(紫输入(), bag, 3)).toEqual([]);

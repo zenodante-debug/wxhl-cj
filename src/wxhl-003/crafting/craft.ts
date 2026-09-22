@@ -11,6 +11,7 @@ import {
   INDUSTRY_ATTR, isBlueprintName,
   type MaterialCategory, type 材料档案条目, type 配方,
 } from './recipes';
+import { checkSkill, type 技能命中 } from './skillMatch';
 
 export type CraftResult = '大失败' | '失败' | '成功' | '精制' | '杰作';
 
@@ -133,12 +134,20 @@ export interface CraftOutcome {
  *  该参数仅紫色配方会读；白/蓝/金传不传都一样。未传（纯函数调用方无档案）按**不满足**处理——fail-closed。 */
 export function validateCraft(input: CraftInput, bag: Bag, 核心材料档位?: number): string[] {
   const errs: string[] = [];
+  const 行业 = input.配方.行业;
   const sk = input.制作者.技能;
+  const 金紫 = input.配方.品质 === '金色' || input.配方.品质 === '紫色';
+  // 技能判定（**分类 + 等级**）统一交给 checkSkill ——「哪条技能算这个行业的」这一层已在
+  // store.assembleMaker 用 resolveSkill 四级回退解析过（映射表/精确名/模糊名/效果文本），
+  // 这里只把结果装回「命中」形状（依据 只是审计信息，本层无需重解析）。
+  // v2.1 的关键补漏：旧版只比 `等级`，`分类` 完全没查 —— 基础系 Lv.9 能过金图纸的「高级技能 Lv.1」。
+  const 命中: 技能命中 | null = sk ? { 技能名: 行业, 技能: sk, 依据: '精确名' } : null;
+  const 技能错误 = checkSkill(命中, input.配方.技能要求, 行业);
   // 金/紫（v2 图纸系统）：需高级技能 + 对应生活系职业；缺图纸**不阻断**——由 executeCraft 走「降档 + DC+5」
-  if (input.配方.品质 === '金色' || input.配方.品质 === '紫色') {
-    if (!sk) return [`未掌握生活技能「${input.配方.行业}」`];
-    if (input.配方.品质 === '金色' && sk.等级 < 1) errs.push('金色图纸需高级技能 Lv.1');
-    if (input.配方.品质 === '紫色' && sk.等级 < 5) errs.push('紫色图纸需高级技能 Lv.5');
+  if (金紫) {
+    // 无技能时只报「未掌握」一条（旧行为）：checkSkill 给的就是这一条，直接返回即可
+    if (!sk) return errs;
+    errs.push(...技能错误);
     if (!input.制作者.职业名 || input.制作者.职业名 === '无') errs.push('金/紫品质需对应生活系职业');
     // spec §6.1：紫 = 高级技能 Lv.5 + 职业 + **高阶材料**（至少一件核心材料的档案阶位 ≥ 配方阶位）
     if (input.配方.品质 === '紫色' && !(核心材料档位 !== undefined && 核心材料档位 >= input.配方.阶位)) {
@@ -147,12 +156,12 @@ export function validateCraft(input: CraftInput, bag: Bag, 核心材料档位?: 
   }
   if (input.阶位 > input.制作者.阶位上限) errs.push(`成品阶位超过契约者阶位上限（${input.制作者.阶位上限}）`);
   if (!sk) {
-    errs.push(`未掌握生活技能「${input.配方.行业}」`);
+    errs.push(`未掌握生活技能「${行业}」`);
     return errs;
   }
   if (input.阶位 > sk.阶位) errs.push(`生活技能阶位不足（技能${sk.阶位}阶 < 成品${input.阶位}阶）`);
-  const 需要等级 = input.配方.技能要求.等级;
-  if (sk.等级 < 需要等级) errs.push(`技能等级不足：需要 Lv.${需要等级}，当前 Lv.${sk.等级}`);
+  // 白/蓝的技能错误放在这里报：金/紫那条路径上「先技能、后职业」的既有顺序（与 [0] 文案）保持不变
+  if (!金紫) errs.push(...技能错误);
   if (input.设施.仅白色 && input.配方.品质 !== '白色') errs.push('野外简陋环境仅可制作白色品质');
   if (input.数量 > input.配方.批量上限) errs.push(`批量超过上限（${input.配方.批量上限}）`);
   const 全部投入 = [...input.核心材料, ...input.辅料];

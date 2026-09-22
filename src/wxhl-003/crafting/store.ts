@@ -21,6 +21,7 @@ import {
   blueprintPrice, collectBlueprints, readBlueprint, uploadBlueprint, writeBlueprint,
 } from './blueprint';
 import { completeBlueprint, generateBlueprint, type DesignTarget } from './blueprintAI';
+import { resolveSkill } from './skillMatch';
 
 const CHAT_KEY = 'wxhl003_crafting';
 
@@ -65,6 +66,20 @@ function loadChatState(): { 材料档案: Record<string, 材料档案条目>; �
   }
 }
 
+/** 行业技能映射（聊天变量 `wxhl003_crafting.行业技能映射`，缺省 `{}`）：行业名 → 该行业可替代的技能名列表。
+ *  喂给 `resolveSkill` 的第一级回退 —— 「铸造」算不算「锻造」这种无字面关系，只能靠玩家自己登记。
+ *  永远现读、不进 store state：本任务**只读**（UI 编辑入口留待后续），也就没有"忘了响应式"的问题；
+ *  坏形状（非对象/键值非数组）一律当空表，由 resolveSkill 逐级降级，绝不让变量编辑器手滑炸掉开工。 */
+function readSkillMap(): Record<string, string[]> {
+  try {
+    const vars = getVariables({ type: 'chat' }) as any;
+    const m = vars?.[CHAT_KEY]?.行业技能映射;
+    return m && typeof m === 'object' ? m : {};
+  } catch (_) {
+    return {};
+  }
+}
+
 /** 图纸效果逐条摘要（确认弹窗与图纸物品「描述」共用；数值 0 视为无该效果故省略） */
 function 效果行(数据: 图纸数据): string[] {
   return 数据.配方.效果.map(e => {
@@ -78,19 +93,33 @@ function 效果行(数据: 图纸数据): string[] {
   });
 }
 
+/** 成功档波动说明（与 CraftingView 的 `波动说明` 逐字同一句）：本行显示的是**基准值**，
+ *  而防具的装备防御/闪避、饰品的主/副属性加成、恢复类道具的恢复量在「成功」档会被 `fluctuate`
+ *  压到基准的 80%~100%（精制/杰作取基准）。不说清，玩家会拿基准值当保底而觉得被坑。 */
+const 波动说明 = '（成功档 80%~100% 波动）';
+
 /** 数值来源一行（v2.1）：v2.1 把「名字」与「数值」分了家——种类名是自由文本、AI 自创（「浮游炮」），
  *  真正的数值来自 参照模板 / 结构化字段。玩家若在**付费那一刻**看不到这一行，就只能对着自创名猜强度。
  *  数值一律从 equipTables 的**实际表**取（weaponStats/armorStats/attrBonus），绝不硬编码字符串——
  *  表一改，硬编码的文案就开始骗人。文案与 CraftingView 的「数值来源文本」逐字对齐，制作页与确认框同口径。
- *  本函数是**展示路径**：非法阶位/模板（AI·GM 直写背包的坏图纸）一律不抛错，只回落成不带数值的写法。 */
+ *  本函数是**展示路径**：非法阶位/模板（AI·GM 直写背包的坏图纸）一律不抛错，只回落成不带数值的写法。
+ *
+ *  `波动说明` 只挂在**行内真有波动项**的那几行，且紧跟会波动的那几项之后（不是行尾）：
+ *    - 防具：防御/闪避波动，负重**不**波动 → 夹在两者之间，免得读成负重也在波动
+ *    - 饰品：主/副属性加成波动（行内没有别的数字）
+ *    - 恢复HP/恢复MP 道具：固定值当**基准恢复量**过 fluctuate；爆炸物的固定值是**附加固定伤害**
+ *      （不进 fluctuate），弹药/餐食/状态/陷阱/其他连数值口径都只是标签
+ *    - 武器：伤害骰/倍率/负重都不波动（行内也没列属性加成）→ 一个字都不加
+ *  无差别挂上去就是一句新的谎话，故按事实逐行收窄。 */
 function 数值来源行(r: 配方): string {
   if (r.成品类型 === '道具') {
-    return `道具数值：${r.道具类型}${r.道具固定值 ? ` · 固定值 ${r.道具固定值}` : ''}（吃 ${r.关联属性} 修正）`;
+    const 波动 = r.道具类型 === '恢复HP' || r.道具类型 === '恢复MP' ? 波动说明 : '';
+    return `道具数值：${r.道具类型}${r.道具固定值 ? ` · 固定值 ${r.道具固定值}${波动}` : ''}（吃 ${r.关联属性} 修正）`;
   }
   try {
     if (r.装备子类 === '饰品') {
       const b = attrBonus('饰品', r.阶位, r.品质);
-      return `饰品数值：主属性加成 +${b.主} / 副属性 +${b.副}（无伤害骰/防御/负重）`;
+      return `饰品数值：主属性加成 +${b.主} / 副属性 +${b.副}${波动说明}（无伤害骰/防御/负重）`;
     }
     if (!r.参照模板) return '未指定数值参照——补全或制作前请先选一个';
     if (r.装备子类 === '武器') {
@@ -98,7 +127,7 @@ function 数值来源行(r: 配方): string {
       return `数值参照【${r.参照模板}】→ 伤害骰 ${w.伤害骰} / 倍率 ${w.倍率} / 负重 ${w.负重}kg`;
     }
     const a = armorStats(r.参照模板 as ArmorSpectrum, r.阶位, r.品质);
-    return `数值参照【${r.参照模板}】→ 装备防御 ${a.装备防御} / 闪避 ${a.装备闪避} / 负重 ${a.负重}kg`;
+    return `数值参照【${r.参照模板}】→ 装备防御 ${a.装备防御} / 闪避 ${a.装备闪避}${波动说明} / 负重 ${a.负重}kg`;
   } catch (_) {
     return r.装备子类 === '饰品' ? '饰品数值：只加主/副属性加成' : `数值参照【${r.参照模板}】`;
   }
@@ -170,9 +199,17 @@ function 分配核心材料(
  * 制作者组装（纯函数导出，便于回归测试）。
  * 注意：归一位阶 返回 0 基下标（一阶→0），仓库惯例是 `n + 1` 转回 1 基
  * （见 settlementRules.ts 阶数）；认不出来时兜底为一阶（与「未知当一阶」一致）。
+ *
+ * `行业` 对应的技能由 `resolveSkill` 四级回退解析（映射表/精确名/模糊名/效果文本），
+ * 而**不再**是 `c.通用技能[行业]` 精确查表：技能叫「锻造术」的玩家以前会被判「未掌握生活技能」。
+ * 映射表是 I/O（聊天变量），故由调用方读出后喂进来 —— 本函数保持纯函数、可单测。
  */
-export function assembleMaker(c: any, 行业: string): CraftInput['制作者'] {
-  const sk = c.通用技能?.[行业];
+export function assembleMaker(
+  c: any,
+  行业: string,
+  映射表?: Record<string, string[]>,
+): CraftInput['制作者'] {
+  const sk = resolveSkill(c?.通用技能 ?? {}, 行业, 映射表)?.技能;
   return {
     姓名: String(c.头部?.姓名 ?? '无名契约者'),
     阶位上限: (归一位阶(c.头部?.阶位 ?? '一阶') ?? 0) + 1,
@@ -194,10 +231,11 @@ export function assembleMaker(c: any, 行业: string): CraftInput['制作者'] {
 /** 当前存档的制作者组成（按行业取该行业的生活技能）。
  *  供 UI 在开工前算「检定值上限 = 20 + 行业对应基础属性 + 技能等级」并与 DC 对比（executeCraft 同式，d20 取满值）。
  *  与 facilityInfo 同形：直接读 MVU、非响应式，调用点放在 computed 里。
- *  读不到存档返回 null（与 assembleMaker 的纯函数契约分开——这一层才是 I/O）。 */
+ *  读不到存档返回 null（与 assembleMaker 的纯函数契约分开——这一层才是 I/O）。
+ *  技能映射表也在这里读（同为 I/O）：UI 的「检定值上限」与 doCraft 必须看到同一套技能，否则提示与实测会对不上。 */
 export function makerFor(行业: string): CraftInput['制作者'] | null {
   const r = readContractor();
-  return r ? assembleMaker(r.c, 行业) : null;
+  return r ? assembleMaker(r.c, 行业, readSkillMap()) : null;
 }
 
 export const useCraftingStore = defineStore('wxhl003-crafting', () => {
@@ -302,7 +340,9 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     if (!r) return null;
     const c = r.c;
 
-    const 制作者 = assembleMaker(c, args.配方.行业);
+    // 技能映射表与 makerFor 同源（都现读聊天变量）：UI 的「检定值上限」与实际开工必须用同一条技能，
+    // 否则会出现「提示够得着、开工却报未掌握」（或反过来）
+    const 制作者 = assembleMaker(c, args.配方.行业, readSkillMap());
 
     // 核心材料 = 玩家选定的多件，按类别映射到配方的核心需求（v2.1 多核心，见 分配核心材料）；
     // 辅料 = autoPick 自动拣选（排除核心物品）
