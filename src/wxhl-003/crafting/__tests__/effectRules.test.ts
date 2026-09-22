@@ -66,14 +66,20 @@ describe('checkEffects · 违禁与条数', () => {
     // 同上但条件缺失 → 仍拒（消耗字段不豁免）
     expect(checkEffects([{ 类型: '消耗', 描述: '即死', 消耗: '每场1次' }], 3).ok).toBe(false);
   });
-  it('无敌按「回合」限次豁免，消耗字样不得豁免', () => {
+  it('无敌只认「时长/次数」豁免，条件类不豁免', () => {
+    // 硬子句：永久/无限/绝对 无论如何都拒
     expect(checkEffects([{ 类型: '常驻', 描述: '永久无敌；每回合开始时发动' }], 3).ok).toBe(false);
-    // 消耗类词不得豁免无敌禁令（无「永久」硬子句时靠守卫兜住）
     expect(checkEffects([{ 类型: '常驻', 描述: '永久无敌，消耗1点MP' }], 3).ok).toBe(false);
+    // 条件类词不是时长上限 → 不豁免无敌（缺口：无时限的无敌）
+    expect(checkEffects([{ 类型: '常驻', 描述: '无敌', 触发条件: '受到攻击时' }], 3).ok).toBe(false);
+    expect(checkEffects([{ 类型: '常驻', 描述: '无敌，目标生命低于15%时' }], 3).ok).toBe(false);
+    // 消耗类词（如「消耗」）同样不豁免
     expect(checkEffects([{ 类型: '常驻', 描述: '无敌，消耗1点MP' }], 3).ok).toBe(false);
-    // 世界书约束：限定明确回合数的无敌是合法写法 → 放行
+    // 世界书约束：写明时长/次数上限的无敌是合法写法 → 放行
     expect(checkEffects([{ 类型: '常驻', 描述: '无敌3回合' }], 3).ok).toBe(true);
     expect(checkEffects([{ 类型: '常驻', 描述: '无敌，持续2回合' }], 3).ok).toBe(true);
+    expect(checkEffects([{ 类型: '常驻', 描述: '无敌，每场1次' }], 3).ok).toBe(true);
+    expect(checkEffects([{ 类型: '常驻', 描述: '无敌，次数1次' }], 3).ok).toBe(true);
   });
   it('必中核心/弱点/要害双向都算违禁，写明条件才放行', () => {
     expect(checkEffects([{ 类型: '常驻', 描述: '核心弱点必中' }], 3).ok).toBe(false);
