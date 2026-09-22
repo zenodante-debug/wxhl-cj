@@ -2,20 +2,25 @@
 // ================================================================
 // 工坊 store：MVU 读写严格照 market/store.ts writeToSave 模式
 // （楼层探测 → _.set → replaceMvuData → 回读校验）
-// 材料档案持久化到小手机聊天变量（键 wxhl003_crafting），主卡 schema 零改动
+// 材料档案 + 配方库持久化到小手机聊天变量（键 wxhl003_crafting，读-并-写保留同键其他字段），
+// 主卡 schema 零改动：只写 契约者.背包 与 契约者.经济.UP
 // ================================================================
 import { rollDie, 归一位阶 } from '../dice';
 import type { MarketItemSnapshot } from '../market/priceTable';
-import { bagAdd, bagRemove, type Bag } from '../market/settle';
+import { bagAdd, bagRemove, spendUP, type Bag } from '../market/settle';
 import {
   autoPick, executeCraft, validateCraft, type CraftInput, type CraftOutcome,
 } from './craft';
 import {
-  STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES,
-  type MaterialCategory, type 材料档案条目, type 配方,
+  STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES, blueprintItemName,
+  type MaterialCategory, type 材料档案条目, type 配方, type 配方库, type 图纸数据,
 } from './recipes';
 import type { Attr } from './equipTables';
 import { 启发式归类 } from './recipes';
+import {
+  blueprintPrice, collectBlueprints, readBlueprint, uploadBlueprint, writeBlueprint,
+} from './blueprint';
+import { completeBlueprint, generateBlueprint, type DesignTarget } from './blueprintAI';
 
 const CHAT_KEY = 'wxhl003_crafting';
 
@@ -49,13 +54,55 @@ async function commit(mvu: any, mid: number | 'latest', checks: [string[], unkno
   }
 }
 
-function loadCodex(): Record<string, 材料档案条目> {
+/** 聊天变量读取：同时取出材料档案与配方库（键不存在时各自兜底空表） */
+function loadChatState(): { 材料档案: Record<string, 材料档案条目>; 配方库: 配方库 } {
   try {
     const vars = getVariables({ type: 'chat' }) as any;
-    return vars?.[CHAT_KEY]?.材料档案 ?? {};
+    const s = vars?.[CHAT_KEY] ?? {};
+    return { 材料档案: s.材料档案 ?? {}, 配方库: s.配方库 ?? {} };
   } catch (_) {
-    return {};
+    return { 材料档案: {}, 配方库: {} };
   }
+}
+
+/** 道具一阶单价表（UP/件）：AI 定制「消耗品」图纸的定价基数
+ *  （spec §7.1：道具图纸 = 成品一阶单价 × 20 × 阶位系数；×20 在 blueprint.ts 的 GOODS_MULT 里）。
+ *  取值抄自设计文档 §2 世界书物价表；未列名的新奇消耗品走 DEFAULT 兜底（均为可调初值）。 */
+const GOODS_UNIT_PRICE: Record<string, number> = {
+  基础治疗药剂: 15, 强效治疗药剂: 40, 急救包: 80,
+  基础精神药剂: 20, 强效精神药剂: 45, 冥想熏香: 70,
+  净化药剂: 25, 万能解毒剂: 60, 兴奋剂: 35,
+  普通弹药20发: 10, 穿甲弹药20发: 25, 元素弹药20发: 30,
+};
+/** 未列名消耗品的兜底一阶单价（≈ 世界书道具价中位，可调） */
+const DEFAULT_GOODS_UNIT_PRICE = 25;
+
+/** 图纸效果逐条摘要（确认弹窗与图纸物品「描述」共用；数值 0 视为无该效果故省略） */
+function 效果行(数据: 图纸数据): string[] {
+  return 数据.配方.效果.map(e => {
+    const 数值 = [
+      e.命中闪避 ? `命中/闪避 ${e.命中闪避 > 0 ? '+' : ''}${e.命中闪避}%` : '',
+      e.伤害百分比 ? `伤害 ${e.伤害百分比 > 0 ? '+' : ''}${e.伤害百分比}%` : '',
+      e.属性加成 ? `属性 ${e.属性加成 > 0 ? '+' : ''}${e.属性加成}` : '',
+    ].filter(Boolean).join('，');
+    const 条件 = e.触发条件 ? `（${e.触发条件}${e.消耗 ? `｜消耗：${e.消耗}` : ''}）` : '';
+    return `【${e.类型}】${e.描述}${数值 ? `（${数值}）` : ''}${条件}`;
+  });
+}
+
+/** 图纸可读摘要：AI 风味文案 + 机械要点（确认弹窗与图纸物品「描述」共用） */
+function 图纸摘要(数据: 图纸数据): string {
+  const r = 数据.配方;
+  const 类型 = r.成品类型 === '装备'
+    ? `装备·${r.装备子类}${r.装备基础 ? `（${r.装备基础}）` : ''}`
+    : '消耗品';
+  const 材料 = r.材料.map(m => `${m.核心 ? '★' : ''}${m.类别}×${m.数量}`).join('、');
+  return [
+    r.描述,
+    `${r.品质}·${r.阶位}阶 ${类型}`,
+    `材料：${材料}`,
+    ...效果行(数据).map(l => `效果：${l}`),
+  ].filter(Boolean).join('\n');
 }
 
 /**
@@ -84,21 +131,34 @@ export function assembleMaker(c: any, 行业: string): CraftInput['制作者'] {
 }
 
 export const useCraftingStore = defineStore('wxhl003-crafting', () => {
-  const codex = ref<Record<string, 材料档案条目>>(loadCodex());
+  const chatState = loadChatState();
+  const codex = ref<Record<string, 材料档案条目>>(chatState.材料档案);
+  /** 已上传学习的配方库（键 = 配方名）；持久化到聊天变量，与内置配方合并后供 UI 展示 */
+  const 配方库 = ref<配方库>(chatState.配方库);
   const playerName = ref('无名契约者');
   const playerTier = ref('一阶');
   const playerUP = ref(0);
   const bag = ref<Bag>({});
   const lastOutcome = ref<CraftOutcome | null>(null);
   const lastError = ref('');
+  const designing = ref(false);
+  const completing = ref(false);
 
-  const allRecipes = computed<配方[]>(() => [...TEMPLATE_RECIPES, ...STANDARD_GOODS_RECIPES]);
+  const allRecipes = computed<配方[]>(() => [
+    ...TEMPLATE_RECIPES, ...STANDARD_GOODS_RECIPES, ...Object.values(配方库.value),
+  ]);
 
-  // 材料档案变更 → 读-并-写聊天变量（不覆盖其他 key）
+  /** 背包里未上传的图纸（Task 7 的「背包图纸」区消费） */
+  const 背包图纸 = computed(() => collectBlueprints(bag.value));
+
+  // 材料档案/配方库变更 → 读-并-写聊天变量（保留同键其他字段，也不动其他顶层变量）
   watchEffect(() => {
     try {
       const vars = (getVariables({ type: 'chat' }) ?? {}) as any;
-      replaceVariables({ ...vars, [CHAT_KEY]: { 材料档案: klona(codex.value) } }, { type: 'chat' });
+      replaceVariables(
+        { ...vars, [CHAT_KEY]: { ...(vars?.[CHAT_KEY] ?? {}), 材料档案: klona(codex.value), 配方库: klona(配方库.value) } },
+        { type: 'chat' },
+      );
     } catch (_) {}
   });
 
@@ -226,8 +286,159 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     return outcome;
   }
 
+  // ---------------- 图纸（v2）：AI 定制 / 补全 / 上传学习 / 删除配方 ----------------
+
+  /** AI 定制图纸：生成 → 标价 → 玩家确认 → 扣 UP → 图纸物品入包（一次 commit 写 背包 + 经济.UP） */
+  async function designBlueprint(目标: DesignTarget): Promise<boolean> {
+    if (designing.value) return false;
+    // 早失败：先确认存档可读、顺手刷新 UP，再去烧 token
+    if (!syncFromMvu()) return false;
+    designing.value = true;
+    try {
+      const gen = await generateBlueprint(目标);
+      if (!gen.ok) {
+        const msg = gen.reasons.join('；');
+        lastError.value = msg;
+        toastr.error(`图纸定制失败：${msg}`);
+        return false;
+      }
+      const 数据 = gen.数据;
+      const r = 数据.配方;
+
+      // 定价：装备按成品一阶中值×2，消耗品按道具一阶单价×20，阶位系数由 blueprintPrice 内部乘
+      // 用 sanitizeDesign 收口后的 r（成品类型/装备子类/阶位/品质已归一到目标值），免去手写映射；
+      // 道具单价先按玩家点名的目标查表（AI 可能给配方改名），再退回收口后的成品名
+      let 价: number;
+      try {
+        价 = blueprintPrice(
+          r.成品类型, r.装备子类, r.阶位, r.品质,
+          r.成品类型 === '消耗品'
+            ? (GOODS_UNIT_PRICE[目标.名称] ?? GOODS_UNIT_PRICE[r.成品名] ?? DEFAULT_GOODS_UNIT_PRICE)
+            : undefined,
+        );
+      } catch (e: any) {
+        const msg = `图纸定价失败：${e?.message ?? e}`;
+        lastError.value = msg;
+        toastr.error(msg);
+        return false;
+      }
+
+      const 摘要 = 图纸摘要(数据);
+      const 钳制 = gen.clamped.length ? `\n\n【系统钳制】\n${gen.clamped.map(c => `· ${c}`).join('\n')}` : '';
+      if (!window.confirm(
+        `【AI 定制图纸】${r.名称}\n\n${摘要}\n\n定价：${价} UP（当前 ${playerUP.value} UP）${钳制}\n\n确认支付并生成图纸？`,
+      )) return false; // 不付款零变量变动
+
+      const rr = readContractor();
+      if (!rr) {
+        lastError.value = '读不到存档变量（契约者不存在）';
+        toastr.error(lastError.value);
+        return false;
+      }
+      let 余UP: number;
+      try {
+        余UP = spendUP(Number(rr.c.经济?.UP ?? 0), 价);
+      } catch (e: any) {
+        const msg = e?.message ?? 'UP 不足';
+        lastError.value = msg;
+        toastr.error(msg);
+        return false;
+      }
+
+      // 图纸物品：描述 = AI 风味文案 + 机械要点；图纸数据 = 完整的图纸数据（上传学习时读它）
+      const 物品名 = blueprintItemName(r.名称);
+      const 物品 = {
+        名称: 物品名, 描述: 摘要, 品质: r.品质, 阶位: `${r.阶位}阶`, 类型: '图纸', 图纸数据: klona(数据),
+      };
+      const 累加 = bagAdd(bag.value, 物品, 1);
+      // 包里已有同名图纸时 bagAdd 只加数量、保留旧的图纸数据；本次是玩家刚花钱买下的结果，显式让它胜出
+      const newBag = { ...累加, [物品名]: { ...累加[物品名], ...物品 } };
+      _.set(rr.mvu, ['stat_data', '契约者', '背包'], newBag);
+      _.set(rr.mvu, ['stat_data', '契约者', '经济', 'UP'], 余UP);
+      await commit(rr.mvu, rr.mid, [
+        [['stat_data', '契约者', '背包'], newBag],
+        [['stat_data', '契约者', '经济', 'UP'], 余UP],
+      ]);
+
+      syncFromMvu();
+      toastr.success(`已获得图纸「${物品名}」，花费 ${价} UP（上传学习后才进配方库）`);
+      return true;
+    } finally {
+      designing.value = false;
+    }
+  }
+
+  /** AI 补全残缺图纸：只填缺失/非法字段，回写背包物品（一次 commit 只写 背包） */
+  async function completeBp(物品名: string): Promise<boolean> {
+    if (completing.value) return false;
+    const 现有 = readBlueprint(bag.value, 物品名);
+    if (!现有) {
+      const msg = `「${物品名}」不是有效图纸或已不在背包`;
+      lastError.value = msg;
+      toastr.error(msg);
+      return false;
+    }
+    completing.value = true;
+    try {
+      const res = await completeBlueprint(现有, 现有.配方.阶位);
+      if (!res.ok) {
+        const msg = res.reasons.join('；');
+        lastError.value = msg;
+        toastr.error(`图纸补全失败：${msg}`);
+        return false;
+      }
+      const rr = readContractor();
+      if (!rr) {
+        lastError.value = '读不到存档变量（契约者不存在）';
+        toastr.error(lastError.value);
+        return false;
+      }
+      const newBag = writeBlueprint(bag.value, 物品名, res.数据);
+      _.set(rr.mvu, ['stat_data', '契约者', '背包'], newBag);
+      await commit(rr.mvu, rr.mid, [[['stat_data', '契约者', '背包'], newBag]]);
+      syncFromMvu();
+      if (res.clamped.length) {
+        toastr.warning(`已补全，但系统做了 ${res.clamped.length} 处钳制：\n${res.clamped.map(c => `· ${c}`).join('\n')}`);
+      } else {
+        toastr.success(`图纸「${物品名}」补全完成`);
+      }
+      return true;
+    } finally {
+      completing.value = false;
+    }
+  }
+
+  /** 上传学习：图纸物品出包，配方登记进配方库（背包走一次 commit，配方库走聊天变量落盘） */
+  async function uploadBp(物品名: string): Promise<boolean> {
+    const r = readContractor();
+    if (!r) return false;
+    const res = uploadBlueprint(bag.value, 物品名, 配方库.value);
+    if ('error' in res) {
+      lastError.value = res.error;
+      toastr.error(res.error);
+      return false;
+    }
+    _.set(r.mvu, ['stat_data', '契约者', '背包'], res.bag as any);
+    await commit(r.mvu, r.mid, [[['stat_data', '契约者', '背包'], res.bag]]);
+    配方库.value = res.配方库;
+    syncFromMvu();
+    toastr.success(`已掌握配方「${Object.keys(res.配方库).slice(-1)[0]}」`);
+    return true;
+  }
+
+  /** 删除配方：只动配方库（watchEffect 自动落盘），不走 MVU 写入；图纸已在上传时消耗，不退回 */
+  function deleteRecipe(名称: string): void {
+    if (!Object.hasOwn(配方库.value, 名称)) return;
+    if (!window.confirm(`确认删除配方「${名称}」？\n\n上传学习时图纸已被消耗，删除不会退回图纸；重新获得同一张图纸并上传才能恢复。`)) return;
+    const next = { ...配方库.value };
+    delete next[名称];
+    配方库.value = next;
+    toastr.success(`已删除配方「${名称}」`);
+  }
+
   return {
-    codex, playerName, playerTier, playerUP, bag, lastOutcome, lastError,
-    allRecipes, syncFromMvu, facilityInfo, matchMaterials, setCodex, doCraft,
+    codex, 配方库, playerName, playerTier, playerUP, bag, lastOutcome, lastError, designing, completing,
+    allRecipes, 背包图纸, syncFromMvu, facilityInfo, matchMaterials, setCodex, doCraft,
+    designBlueprint, completeBp, uploadBp, deleteRecipe,
   };
 });
