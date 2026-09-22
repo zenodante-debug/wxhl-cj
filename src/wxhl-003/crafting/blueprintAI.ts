@@ -15,8 +15,8 @@ import { extractJSON, getActiveCfg, useForumStore, aiGenerate } from '../store';
 
 export interface DesignTarget {
   名称: string;
-  成品类型: '装备' | '消耗品';
-  子类: string; // 武器=WEAPON_TABLE 键 / 防具=光谱 / 消耗品=''
+  成品类型: '装备' | '道具';
+  子类: string; // 武器=WEAPON_TABLE 键 / 防具=光谱 / 道具=''
   品质: Quality; // AI 定制只服务金/紫（见 generateBlueprint 入口守卫）；补全沿用图纸原品质（白/蓝不可被静默升格）
   阶位: number; // 1~5，0 与越界一律拒绝（EFFECT_CAP[0] 是零哨兵行）
   核心材料: string;
@@ -192,7 +192,7 @@ export function sanitizeDesign(
       return { ok: false, reasons: [...reasons, '未知的装备基础：' + 目标.子类] };
     }
   }
-  // 消耗品：装备基础/装备子类 恒为空串（配方 schema 也只接受空串）
+  // 道具：装备基础/装备子类 恒为空串（配方 schema 也只接受空串）
 
   const 名称 = String(o.名称 ?? 目标.名称);
   const 配方输入 = {

@@ -18,7 +18,7 @@ const EQUIP_MULT = 2;
 const GOODS_MULT = 20;
 
 export function blueprintPrice(
-  成品类型: '装备' | '消耗品',
+  成品类型: '装备' | '道具',
   子类: '武器' | '防具' | '饰品' | '',
   阶位: number,
   品质: Quality,
@@ -27,7 +27,7 @@ export function blueprintPrice(
   const coef = TIER_COEF[阶位];
   // 注意：TIER_COEF[0] === 0 是"未使用"哨兵，故用 falsy 判定，0 阶/越界阶位一律抛错
   if (!coef) throw new Error(`未知阶位：${阶位}`);
-  if (成品类型 === '消耗品') {
+  if (成品类型 === '道具') {
     if (!道具一阶单价) throw new Error('道具图纸定价需要一阶单价');
     return 道具一阶单价 * GOODS_MULT * coef;
   }

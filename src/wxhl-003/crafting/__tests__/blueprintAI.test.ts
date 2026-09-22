@@ -47,12 +47,12 @@ describe('sanitizeDesign · AI 结果硬校验', () => {
     expect(r.ok).toBe(false);
   });
   it('品质/成品类型/阶位与目标不符 → 强制回到目标值', () => {
-    const r = sanitizeDesign(rawAI({ 品质: '紫色', 阶位: 5, 成品类型: '消耗品' }), 目标);
+    const r = sanitizeDesign(rawAI({ 品质: '紫色', 阶位: 5, 成品类型: '道具' }), 目标);
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.数据.配方.品质).toBe('金色');
     expect(r.数据.配方.阶位).toBe(3);
-    expect(r.数据.配方.成品类型).toBe('装备'); // 目标说装备，AI 说消耗品 → 以目标为准
+    expect(r.数据.配方.成品类型).toBe('装备'); // 目标说装备，AI 说道具 → 以目标为准
     expect(r.数据.配方.装备子类).toBe('武器');
   });
   it('被子强制回目标值的字段同时进 clamped（成功路径只回传 clamped）', () => {
@@ -134,8 +134,8 @@ describe('sanitizeDesign · 装备基础参照校验', () => {
     if (r.ok) return;
     expect(r.reasons.join()).toContain('未知的装备基础');
   });
-  it('消耗品 → 装备基础与装备子类一律为空串（AI 编造的基础被丢弃）', () => {
-    const r = sanitizeDesign(rawAI({ 装备基础: '不存在的武器' }), { ...目标, 成品类型: '消耗品', 子类: '' });
+  it('道具 → 装备基础与装备子类一律为空串（AI 编造的基础被丢弃）', () => {
+    const r = sanitizeDesign(rawAI({ 装备基础: '不存在的武器' }), { ...目标, 成品类型: '道具', 子类: '' });
     expect(r.ok).toBe(true);
     if (!r.ok) return;
     expect(r.数据.配方.装备基础).toBe('');

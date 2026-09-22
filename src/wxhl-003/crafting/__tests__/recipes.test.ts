@@ -3,12 +3,12 @@ import {
   BLUEPRINT_PREFIX,
   BlueprintDataSchema,
   blueprintItemName,
-  GOODS_BASE,
   isBlueprintName,
   启发式归类,
   配方Schema,
   STANDARD_GOODS_RECIPES,
   TEMPLATE_RECIPES,
+  道具基准价,
 } from '../recipes';
 
 describe('启发式归类 · 材料分类词典', () => {
@@ -46,9 +46,10 @@ describe('内置配方合法性', () => {
       expect(r.技能要求.等级).toBe(r.品质 === '白色' ? 1 : 3);
     }
   });
-  it('标准道具配方名称与 GOODS_BASE 键一一对应', () => {
+  it('标准道具配方均带结构化数值，可算出正的一阶基准价', () => {
     for (const r of STANDARD_GOODS_RECIPES) {
-      expect(GOODS_BASE[r.名称], r.名称).toBeDefined();
+      expect(r.成品类型, r.名称).toBe('道具');
+      expect(道具基准价(r.道具类型, r.道具固定值), r.名称).toBeGreaterThan(0);
     }
   });
 });
@@ -78,5 +79,40 @@ describe('图纸数据与命名', () => {
   });
   it('金色配方可含效果，白色配方效果为空', () => {
     expect(配方Schema.parse({ ...TEMPLATE_RECIPES[0] }).效果).toEqual([]);
+  });
+});
+
+describe('v2.1 数据模型修订', () => {
+  it('成品类型枚举为 装备/道具，不含 消耗品', () => {
+    const 道具配方 = STANDARD_GOODS_RECIPES[0];
+    expect(道具配方.成品类型).toBe('道具');
+    expect(配方Schema.parse({ ...道具配方 }).成品类型).toBe('道具');
+    expect(() => 配方Schema.parse({ ...道具配方, 成品类型: '消耗品' })).toThrow();
+  });
+  it('标准道具配方带结构化数值，且与旧 GOODS_BASE 取值一致', () => {
+    const 治疗 = STANDARD_GOODS_RECIPES.find(r => r.名称 === '基础治疗药剂')!;
+    expect(治疗.道具类型).toBe('恢复HP');
+    expect(治疗.道具固定值).toBe(20);
+    expect(治疗.关联属性).toBe('PER');
+  });
+  it('配方可承载多个核心材料', () => {
+    const r = 配方Schema.parse({
+      名称: 'x', 来源: '自定义', 行业: '锻造', 成品类型: '装备', 品质: '蓝色',
+      材料: [
+        { 类别: '金属', 数量: 1, 核心: true },
+        { 类别: '怪物素材', 数量: 1, 核心: true },
+        { 类别: '任意', 数量: 2, 核心: false },
+      ],
+      技能要求: { 分类: '基础', 等级: 3 },
+    });
+    expect(r.材料.filter(m => m.核心).length).toBe(2);
+  });
+  it('道具基准价随类型与固定值变化', () => {
+    expect(道具基准价('恢复HP', 40)).toBeGreaterThan(道具基准价('恢复HP', 20));
+    expect(道具基准价('状态', 0)).toBeGreaterThan(0);
+  });
+  it('参照模板与设计要求默认空串', () => {
+    expect(TEMPLATE_RECIPES[0].参照模板).toBe('');
+    expect(TEMPLATE_RECIPES[0].设计要求).toBe('');
   });
 });

@@ -12,7 +12,7 @@ import {
   autoPick, executeCraft, validateCraft, type CraftInput, type CraftOutcome,
 } from './craft';
 import {
-  GOODS_BASE, STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES, blueprintItemName,
+  STANDARD_GOODS_RECIPES, TEMPLATE_RECIPES, blueprintItemName,
   type MaterialCategory, type 材料档案条目, type 配方, type 配方库, type 图纸数据,
 } from './recipes';
 import { ARMOR_NAME, WEAPON_TABLE, type Attr } from './equipTables';
@@ -65,17 +65,20 @@ function loadChatState(): { 材料档案: Record<string, 材料档案条目>; �
   }
 }
 
-/** 道具一阶单价表（UP/件）：AI 定制「消耗品」图纸的定价基数
+/** 道具一阶单价表（UP/件）：AI 定制「道具」图纸的定价基数
  *  （spec §7.1：道具图纸 = 成品一阶单价 × 20 × 阶位系数；×20 在 blueprint.ts 的 GOODS_MULT 里）。
- *  取值抄自设计文档 §2 世界书物价表；未列名的新奇消耗品走 DEFAULT 兜底（均为可调初值）。 */
+ *  取值抄自设计文档 §2 世界书物价表；未列名的新奇道具走 DEFAULT 兜底（均为可调初值）。 */
 const GOODS_UNIT_PRICE: Record<string, number> = {
   基础治疗药剂: 15, 强效治疗药剂: 40, 急救包: 80,
   基础精神药剂: 20, 强效精神药剂: 45, 冥想熏香: 70,
   净化药剂: 25, 万能解毒剂: 60, 兴奋剂: 35,
   普通弹药20发: 10, 穿甲弹药20发: 25, 元素弹药20发: 30,
 };
-/** 未列名消耗品的兜底一阶单价（≈ 世界书道具价中位，可调） */
+/** 未列名道具的兜底一阶单价（≈ 世界书道具价中位，可调） */
 const DEFAULT_GOODS_UNIT_PRICE = 25;
+
+/** 内置标准道具配方的成品名集合（旧 GOODS_BASE 的键；buildGoods 的道具数值也从这批配方取） */
+const 标准道具名 = new Set(STANDARD_GOODS_RECIPES.map(r => r.名称));
 
 /** 图纸效果逐条摘要（确认弹窗与图纸物品「描述」共用；数值 0 视为无该效果故省略） */
 function 效果行(数据: 图纸数据): string[] {
@@ -95,7 +98,7 @@ function 图纸摘要(数据: 图纸数据): string {
   const r = 数据.配方;
   const 类型 = r.成品类型 === '装备'
     ? `装备·${r.装备子类}${r.装备基础 ? `（${r.装备基础}）` : ''}`
-    : '消耗品';
+    : '道具';
   const 材料 = r.材料.map(m => `${m.核心 ? '★' : ''}${m.类别}×${m.数量}`).join('、');
   return [
     r.描述,
@@ -161,12 +164,13 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
   /** 背包里未上传的图纸（Task 7 的「背包图纸」区消费） */
   const 背包图纸 = computed(() => collectBlueprints(bag.value));
 
-  /** 消耗品图纸的成品名必须命中 GOODS_BASE（craft.ts 的 buildGoods 只从该表取数值/效果）：
-   *  AI 自创的消耗品名会产出「只有风味描述、没有数值也没有效果条目」的哑弹，
-   *  而这张图纸最多要花 12,500 UP（25 一阶单价 × 20 × 25 五阶系数）才买得到。 */
-  function 消耗品名理由(名称: string): string | null {
-    if (Object.hasOwn(GOODS_BASE, 名称)) return null;
-    return `消耗品图纸仅支持已有配方（${Object.keys(GOODS_BASE).join('/')}）`;
+  /** 道具图纸的成品名必须命中内置标准道具配方（craft.ts 的 buildGoods 只从该批配方取数值/效果）：
+   *  AI 自创的道具名会产出「只有风味描述、没有数值也没有效果条目」的哑弹，
+   *  而这张图纸最多要花 12,500 UP（25 一阶单价 × 20 × 25 五阶系数）才买得到。
+   *  用 Set 而非对象键：成品名由 AI 生成，`constructor`/`toString` 之类会让真值判定误报。 */
+  function 道具名理由(名称: string): string | null {
+    if (标准道具名.has(名称)) return null;
+    return `道具图纸仅支持已有配方（${[...标准道具名].join('/')}）`;
   }
 
   /** 同名图纸/配方查重：命中返回给玩家看的理由，无命中返回 null（调用方负责 toastr + lastError）。
@@ -323,7 +327,7 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     if (!syncFromMvu()) return false;
     // 两道「扣款前早退」：都不写任何变量、也不烧 AI token。查的是**目标名**——AI 若自行改成品名，
     // 拿到生成结果后还会按最终名再收口一次（见下面 r.名称 处的两处复查）。
-    const 早退 = (目标.成品类型 === '消耗品' ? 消耗品名理由(目标.名称) : null)
+    const 早退 = (目标.成品类型 === '道具' ? 道具名理由(目标.名称) : null)
       ?? 同名理由(目标.名称, bag.value);
     if (早退) {
       lastError.value = 早退;
@@ -342,10 +346,10 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
       const 数据 = gen.数据;
       const r = 数据.配方;
 
-      // 复查其一：消耗品的成品名（AI 可能改过名）。buildGoods 只认 GOODS_BASE，
+      // 复查其一：道具的成品名（AI 可能改过名）。buildGoods 只认内置标准道具配方，
       // 名字落不进去就是哑弹——宁可拒掉这次定制（只亏 token）也不让玩家花钱买到废纸。
-      if (r.成品类型 === '消耗品') {
-        const 名理由 = 消耗品名理由(r.名称);
+      if (r.成品类型 === '道具') {
+        const 名理由 = 道具名理由(r.名称);
         if (名理由) {
           const msg = r.名称 === 目标.名称 ? 名理由 : `AI 返回的成品名「${r.名称}」不在配方表内——${名理由}`;
           lastError.value = msg;
@@ -354,16 +358,16 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
         }
       }
 
-      // 定价：装备按成品一阶中值×2，消耗品按道具一阶单价×20，阶位系数由 blueprintPrice 内部乘
+      // 定价：装备按成品一阶中值×2，道具按道具一阶单价×20，阶位系数由 blueprintPrice 内部乘
       // 用 sanitizeDesign 收口后的 r（成品类型/装备子类/阶位/品质已归一到目标值），免去手写映射；
-      // 道具单价按**实际产出的成品名** r.名称 查表——buildGoods 就是拿 r.名称 查 GOODS_BASE 的，
+      // 道具单价按**实际产出的成品名** r.名称 查表——buildGoods 就是拿 r.名称 查内置标准道具配方的，
       // 上面的复查又已保证它命中该表，故这里「按成品名计价」与「按成品名产装」是同一把尺子；
-      // 目标名只作防御性兜底，两者都查不到（GOODS_BASE 里 5 个未列价的道具）才走 DEFAULT 初值。
+      // 目标名只作防御性兜底，两者都查不到（标准配方表里 5 个未列价的道具）才走 DEFAULT 初值。
       let 价: number;
       try {
         价 = blueprintPrice(
           r.成品类型, r.装备子类, r.阶位, r.品质,
-          r.成品类型 === '消耗品'
+          r.成品类型 === '道具'
             ? (GOODS_UNIT_PRICE[r.名称] ?? GOODS_UNIT_PRICE[目标.名称] ?? DEFAULT_GOODS_UNIT_PRICE)
             : undefined,
         );

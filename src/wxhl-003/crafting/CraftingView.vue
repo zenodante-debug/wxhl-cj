@@ -30,7 +30,7 @@
           <label>成品类型
             <select v-model="定制.成品类型">
               <option value="装备">装备</option>
-              <option value="消耗品">消耗品</option>
+              <option value="道具">道具</option>
             </select>
           </label>
           <template v-if="定制.成品类型 === '装备'">
@@ -353,14 +353,14 @@ function 效果文本(e: 配方['效果'][number]): string {
 function 成品摘要(r: 配方): string {
   const 类型 = r.成品类型 === '装备'
     ? `装备·${r.装备子类 || '?'}${r.装备基础 ? `（${r.装备基础}）` : ''}`
-    : '消耗品';
+    : '道具';
   return `${类型} ｜ ${材料文本(r)}`;
 }
 
-// ---- AI 定制图纸表单（成品类型=消耗品时隐藏子类：图纸 schema 里消耗品的 装备子类/装备基础 恒为空串）----
+// ---- AI 定制图纸表单（成品类型=道具时隐藏子类：图纸 schema 里道具的 装备子类/装备基础 恒为空串）----
 const 定制 = reactive({
   名称: '',
-  成品类型: '装备' as '装备' | '消耗品',
+  成品类型: '装备' as '装备' | '道具',
   装备类: '武器' as '武器' | '防具',
   武器类: weaponTypes[2],
   防具类: '轻装' as ArmorSpectrum,

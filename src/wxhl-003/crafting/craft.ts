@@ -7,7 +7,10 @@ import {
   ARMOR_NAME, TIER_COEF, TIER_NAMES, armorStats, attrBonus, nextQuality,
   weaponStats, wearThreshold, type ArmorSpectrum, type Attr, type Quality,
 } from './equipTables';
-import { GOODS_BASE, INDUSTRY_ATTR, isBlueprintName, type MaterialCategory, type 材料档案条目, type 配方 } from './recipes';
+import {
+  INDUSTRY_ATTR, STANDARD_GOODS_RECIPES, isBlueprintName,
+  type MaterialCategory, type 材料档案条目, type 配方, type 道具类型,
+} from './recipes';
 
 export type CraftResult = '大失败' | '失败' | '成功' | '精制' | '杰作';
 
@@ -91,7 +94,7 @@ export function autoPick(
 export interface CraftInput {
   配方: 配方;
   阶位: number; // 1~5，制作时选定
-  子类型: string; // 武器: WEAPON_TABLE 键；防具: ArmorSpectrum；消耗品: ''
+  子类型: string; // 武器: WEAPON_TABLE 键；防具: ArmorSpectrum；道具: ''
   副属性: Attr;
   数量: number; // 批量（≤ 配方.批量上限）
   核心材料: { 物品名: string; 数量: number };
@@ -215,9 +218,15 @@ function buildEquip(input: CraftInput, 结果: CraftResult, rand: () => number):
   };
 }
 
-/** 消耗品成品生成（恢复量=固定值×阶位+属性修正×阶位系数；固定值/倍率均为设计填补） */
+/** 道具数值表：按成品名从内置标准道具配方取结构化数值（旧 GOODS_BASE 已删除，数值改由配方携带）。
+ *  Task 2 会把 buildGoods 改为直接消费 配方.道具类型/道具固定值/关联属性，本表届时删除。 */
+const 道具数值表 = new Map<string, { 类别: 道具类型; 固定值: number; 关联属性: 'PER' | 'CON' }>(
+  STANDARD_GOODS_RECIPES.map(r => [r.名称, { 类别: r.道具类型, 固定值: r.道具固定值, 关联属性: r.关联属性 }]),
+);
+
+/** 道具成品生成（恢复量=固定值×阶位+属性修正×阶位系数；固定值/倍率均为设计填补） */
 function buildGoods(input: CraftInput, 结果: CraftResult, rand: () => number): MarketItemSnapshot & { 数量: number } {
-  const base = GOODS_BASE[input.配方.名称];
+  const base = 道具数值表.get(input.配方.名称);
   const tier = input.阶位;
   const q = input.配方.品质;
   const 署名 = 结果 === '杰作' ? `\n署名：由${input.制作者.姓名}亲手调制，永久刻印。` : '';
@@ -237,7 +246,7 @@ function buildGoods(input: CraftInput, 结果: CraftResult, rand: () => number):
     效果描述 = `${base.类别}用品。`;
   }
   return {
-    名称: input.配方.名称, 类型: '消耗品', 品质: q, 阶位: TIER_NAMES[tier - 1],
+    名称: input.配方.名称, 类型: '道具', 品质: q, 阶位: TIER_NAMES[tier - 1],
     自制: true, 毒性值: tier,
     描述: `${效果描述}（自制品：同类连用效果减半，含毒性需医疗中心净化）${风味}${署名}`,
     数量: input.数量,

@@ -69,7 +69,7 @@ const 当前UP = () => Number(mvu.stat_data.契约者.经济.UP);
 const 当前背包 = () => mvu.stat_data.契约者.背包;
 
 /** AI 定制表单提交出去的那一份（与 blueprintAI.DesignTarget 同形） */
-const 目标 = (名称: string, 成品类型: '装备' | '消耗品') => ({
+const 目标 = (名称: string, 成品类型: '装备' | '道具') => ({
   名称,
   成品类型,
   子类: 成品类型 === '装备' ? '巨剑' : '',
@@ -80,7 +80,7 @@ const 目标 = (名称: string, 成品类型: '装备' | '消耗品') => ({
 });
 
 /** AI 生成的合法图纸数据（走 schema，保证与 store 消费的形状一致） */
-const 图纸 = (名称: string, 成品类型: '装备' | '消耗品' = '消耗品') =>
+const 图纸 = (名称: string, 成品类型: '装备' | '道具' = '道具') =>
   BlueprintDataSchema.parse({
     配方: 配方Schema.parse({
       名称,
@@ -151,21 +151,21 @@ beforeEach(() => {
   setActivePinia(createPinia());
 });
 
-describe('Fix 1 · 定制消耗品图纸必须命中 GOODS_BASE（否则花钱买到哑弹）', () => {
+describe('Fix 1 · 定制道具图纸必须命中内置标准道具配方（否则花钱买到哑弹）', () => {
   it('玩家自创名：拒绝、不烧 AI token、零变量变动', async () => {
     const s = useCraftingStore();
-    expect(await s.designBlueprint(目标('不存在的药', '消耗品') as any)).toBe(false);
+    expect(await s.designBlueprint(目标('不存在的药', '道具') as any)).toBe(false);
     expect(genMock).not.toHaveBeenCalled();
     expect(当前UP()).toBe(20000);
     expect(当前背包()).toEqual({});
-    expect(提示[0]).toContain('消耗品图纸仅支持已有配方');
+    expect(提示[0]).toContain('道具图纸仅支持已有配方');
     expect(提示[0]).toContain('基础治疗药剂');
   });
 
   it('AI 把成品名改到表外：按最终名复查后拒绝（否则「改名即绕过」）', async () => {
     genMock.mockResolvedValue({ ok: true, 数据: 图纸('不存在的药'), clamped: [] });
     const s = useCraftingStore();
-    expect(await s.designBlueprint(目标('基础治疗药剂', '消耗品') as any)).toBe(false);
+    expect(await s.designBlueprint(目标('基础治疗药剂', '道具') as any)).toBe(false);
     expect(genMock).toHaveBeenCalledTimes(1);
     expect(当前UP()).toBe(20000);
     expect(当前背包()).toEqual({});
@@ -175,7 +175,7 @@ describe('Fix 1 · 定制消耗品图纸必须命中 GOODS_BASE（否则花钱�
   it('已知名：正常扣款（一阶单价 15 × 20 × 1 阶系数 = 300）并把图纸入包', async () => {
     genMock.mockResolvedValue({ ok: true, 数据: 图纸('基础治疗药剂'), clamped: [] });
     const s = useCraftingStore();
-    expect(await s.designBlueprint(目标('基础治疗药剂', '消耗品') as any)).toBe(true);
+    expect(await s.designBlueprint(目标('基础治疗药剂', '道具') as any)).toBe(true);
     expect(当前UP()).toBe(19700);
     expect(当前背包()[blueprintItemName('基础治疗药剂')].图纸数据.配方.名称).toBe('基础治疗药剂');
   });
@@ -189,7 +189,7 @@ describe('Fix 1 · 定制消耗品图纸必须命中 GOODS_BASE（否则花钱�
   it('AI 改名到另一个合法道具名：按产出名计价，而不是玩家的点名价', async () => {
     genMock.mockResolvedValue({ ok: true, 数据: 图纸('强效治疗药剂'), clamped: [] });
     const s = useCraftingStore();
-    expect(await s.designBlueprint(目标('基础治疗药剂', '消耗品') as any)).toBe(true);
+    expect(await s.designBlueprint(目标('基础治疗药剂', '道具') as any)).toBe(true);
     expect(当前UP()).toBe(19200); // 强效治疗药剂 40 × 20 × 1，不是点名的 15
   });
 });
@@ -198,7 +198,7 @@ describe('Fix 2 · 同名图纸禁止重复购买，背包图纸可丢弃', () =
   it('配方库已掌握：拒绝、不烧 AI token、零变量变动', async () => {
     chatVars = { wxhl003_crafting: { 配方库: { 基础治疗药剂: 图纸('基础治疗药剂').配方 } } };
     const s = useCraftingStore();
-    expect(await s.designBlueprint(目标('基础治疗药剂', '消耗品') as any)).toBe(false);
+    expect(await s.designBlueprint(目标('基础治疗药剂', '道具') as any)).toBe(false);
     expect(genMock).not.toHaveBeenCalled();
     expect(当前UP()).toBe(20000);
     expect(当前背包()).toEqual({});
@@ -208,7 +208,7 @@ describe('Fix 2 · 同名图纸禁止重复购买，背包图纸可丢弃', () =
   it('背包里已有同名图纸物品：拒绝且零变量变动', async () => {
     mvu.stat_data.契约者.背包 = { [blueprintItemName('基础治疗药剂')]: 图纸物品('基础治疗药剂') };
     const s = useCraftingStore();
-    expect(await s.designBlueprint(目标('基础治疗药剂', '消耗品') as any)).toBe(false);
+    expect(await s.designBlueprint(目标('基础治疗药剂', '道具') as any)).toBe(false);
     expect(genMock).not.toHaveBeenCalled();
     expect(当前UP()).toBe(20000);
     expect(提示[0]).toContain('背包里已有一张同名图纸');

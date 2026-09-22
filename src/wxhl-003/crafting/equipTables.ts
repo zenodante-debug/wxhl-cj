@@ -12,7 +12,7 @@ export type ArmorSpectrum = '极轻' | '轻装' | '中装' | '重装' | '极重'
 
 export const Q_ORDER: readonly Quality[] = ['白色', '蓝色', '金色', '紫色'];
 export const TIER_NAMES = ['一阶', '二阶', '三阶', '四阶', '五阶'] as const;
-/** 阶位系数 x²（经济/消耗品通用） */
+/** 阶位系数 x²（经济/道具通用） */
 export const TIER_COEF = [0, 1, 4, 9, 16, 25] as const;
 /** 防具防闪阶位倍率（世界书：1、2、4、7、11） */
 export const TIER_DEF_MULT = [0, 1, 2, 4, 7, 11] as const;

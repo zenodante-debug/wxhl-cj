@@ -16,6 +16,8 @@ const 金配方 = {
   装备子类: '武器' as const, 品质: '金色' as const, 阶位: 3, 装备基础: '短剑',
   材料: [{ 类别: '怪物素材' as const, 数量: 1, 核心: true }],
   技能要求: { 分类: '高级' as const, 等级: 1 }, 批量上限: 1, 成品名: '', 效果: [], 描述: '',
+  // 装备夹具：v2.1 新增的道具/模板字段取 schema 默认值
+  参照模板: '', 道具类型: '其他' as const, 道具固定值: 0, 关联属性: 'PER' as const, 设计要求: '',
 };
 const 图纸物品 = blueprintItemName('狼王牙刃');
 
@@ -41,7 +43,7 @@ describe('blueprintPrice · 图纸定价（成品一阶中值×2×阶位系数�
     expect(blueprintPrice('装备', '武器', 1, '金色')).toBe(1200);
   });
   it('道具图纸 = 一阶单价×20×阶位系数', () => {
-    expect(blueprintPrice('消耗品', '', 3, '金色', 40)).toBe(7200);
+    expect(blueprintPrice('道具', '', 3, '金色', 40)).toBe(7200);
   });
 });
 
@@ -111,10 +113,10 @@ describe('blueprintPrice · 非法输入一律抛错（不得返回 0 价 / NaN 
     expect(() => blueprintPrice('装备', '武器', 0, '金色')).toThrow();
     expect(() => blueprintPrice('装备', '武器', 9, '金色')).toThrow();
   });
-  it('装备缺子类、消耗品缺一阶单价（含 0）抛错', () => {
+  it('装备缺子类、道具缺一阶单价（含 0）抛错', () => {
     expect(() => blueprintPrice('装备', '', 1, '金色')).toThrow();
-    expect(() => blueprintPrice('消耗品', '', 1, '金色')).toThrow();
-    expect(() => blueprintPrice('消耗品', '', 1, '金色', 0)).toThrow();
+    expect(() => blueprintPrice('道具', '', 1, '金色')).toThrow();
+    expect(() => blueprintPrice('道具', '', 1, '金色', 0)).toThrow();
   });
   it('未知子类/品质抛错（不再静默产 NaN）', () => {
     expect(() => blueprintPrice('装备', '法器' as any, 1, '金色')).toThrow();
