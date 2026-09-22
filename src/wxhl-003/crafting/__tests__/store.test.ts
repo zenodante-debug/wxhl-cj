@@ -726,3 +726,55 @@ describe('matchMaterials · 候选里不得出现图纸（否则手工勾选就�
     expect(s.matchMaterials('草药')).toEqual([]);
   });
 });
+
+// ================================================================
+// M1（终审 Minor）：executeCraft 抛错必须报给玩家，不能静默 no-op
+// 坏配方（跨子类的 参照模板 / 装备子类 为空）在 schema 上**合法**——AI·GM 直写背包或旧数据可携带，
+// validateCraft 又不看数值来源那一栏，故要一路走到 buildEquip 查表才抛。此前该调用在 try 之外、
+// 视图 go() 也没有 try/catch：玩家点「开工」看到的是「什么都没发生」，既无 toastr 也无 lastError。
+// ================================================================
+describe('M1 · executeCraft 抛错不再静默（报到玩家面前 + 零变量变动）', () => {
+  /** 坏配方：数值来源那一栏故意给非法值——validateCraft 不管它，只有 buildEquip 查表时才炸 */
+  const 坏配方 = (参照模板: string, 装备子类: '武器' | '防具' | '' = '武器'): 配方 =>
+    配方Schema.parse({
+      名称: '坏刀', 来源: '自定义', 行业: '锻造', 成品类型: '装备', 装备子类,
+      品质: '白色', 材料: [{ 类别: '金属', 数量: 2, 核心: true }],
+      技能要求: { 分类: '基础', 等级: 1 }, 参照模板,
+    }) as 配方;
+
+  beforeEach(() => {
+    mvu.stat_data.契约者.当前世界 = '回廊';
+    mvu.stat_data.契约者.通用技能.锻造 = { 分类: '基础', 阶位: '一阶', 等级: 3 };
+    mvu.stat_data.契约者.背包 = { 精铁: { 名称: '精铁', 数量: 10 } };
+  });
+
+  const 开工 = (配方: 配方, 子类型: string) => {
+    const s = useCraftingStore();
+    return {
+      s,
+      结果: s.doCraft({
+        配方, 阶位: 1, 子类型, 副属性: 'AGI', 数量: 1,
+        核心材料名: ['精铁'], 越阶材料: false, 劣质材料: false,
+      }),
+    };
+  };
+
+  it('武器配方的参照模板不在武器表内 → 不抛到调用方、报出具体原因、材料未扣', async () => {
+    const { s, 结果 } = 开工(坏配方('光剑'), '');
+    await expect(结果).resolves.toBeNull(); // 旧实现：异常冒到调用方（视图 go() 无 try/catch → 点了没反应）
+    expect(s.lastError).toContain('配方数据异常');
+    expect(s.lastError).toContain('光剑'); // 报得出具体原因，不是一句笼统的失败
+    expect(提示[0]).toContain('配方数据异常');
+    expect(Number(当前背包()['精铁'].数量)).toBe(10); // 抛错在任何写入之前，材料一件未扣
+    expect(当前UP()).toBe(20000);
+  });
+
+  it('装备子类为空（旧数据形态）→ 同样接住（走防具表，子类型不在光谱里就抛）', async () => {
+    const { s, 结果 } = 开工(坏配方('', ''), '短剑'); // 参照模板也空 → 回落制作时选的子类型
+    await expect(结果).resolves.toBeNull();
+    expect(s.lastError).toContain('配方数据异常');
+    expect(s.lastError).toContain('短剑'); // 未知防具光谱：短剑
+    expect(Number(当前背包()['精铁'].数量)).toBe(10);
+    expect(成功).toEqual([]); // 绝不假报成功
+  });
+});

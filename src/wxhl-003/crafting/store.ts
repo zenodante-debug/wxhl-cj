@@ -405,7 +405,20 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
     }
 
     const d20 = rollDie(20);
-    const outcome = executeCraft(input, d20, Math.random);
+    // executeCraft 会抛：装备子类 为空/异型，或 参照模板 与子类不同类（buildEquip 查 weaponStats/armorStats
+    // 抛「未知武器或阶位」/「未知防具光谱」）。这类坏配方在 schema 上**合法**（AI·GM 直写背包、旧数据可携带），
+    // validateCraft 又只管技能/材料/阶位那几项、不看数值来源这一栏，故一路走到这里才炸。
+    // 此前本调用在下面的 try **之外**、视图的 go() 也没有 try/catch —— 玩家点「开工」看到的是「什么都没发生」：
+    // 没有 toastr、没有 lastError，也不知道原因。抛错发生在任何写入之前，材料未扣，故只需报错返回。
+    let outcome: CraftOutcome;
+    try {
+      outcome = executeCraft(input, d20, Math.random);
+    } catch (e: any) {
+      const msg = `配方数据异常（装备子类/数值参照不合法），无法制作：${e?.message ?? e}`;
+      toastr.error(msg);
+      lastError.value = msg;
+      return null;
+    }
 
     // 应用背包变动 + 炸炉扣血，一次性落档
     let newBag = klona(bag.value) as Bag;
@@ -413,7 +426,10 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
       for (const d of outcome.扣减) newBag = bagRemove(newBag, d.物品名, d.数量);
       for (const it of outcome.新增) newBag = bagAdd(newBag, it as MarketItemSnapshot, Number(it.数量 ?? 1));
     } catch (e: any) {
-      toastr.error('背包结算失败: ' + (e?.message ?? e));
+      // 与上面那条一致：toastr 只闪几秒，lastError 才是顶部常驻的错误条，两条路径都要写
+      const msg = '背包结算失败: ' + (e?.message ?? e);
+      toastr.error(msg);
+      lastError.value = msg;
       return null;
     }
     _.set(r.mvu, ['stat_data', '契约者', '背包'], newBag);
