@@ -429,16 +429,10 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
 
   /** 回写图纸的「装备基础」（武器类型 / 防具光谱）：残缺图纸的 装备基础 为空时，
    *  completeBlueprint 会因装备基础校验不过而拒绝，需要先补这一格——UI 不该自备 MVU 管道。
-   *  先验后写：该值会被 craft.ts 的 buildEquip 直接查表消费（weaponStats / armorStats），
-   *  编造的值会产出坏成品，故只收 equipTables 真实表里的键。 */
+   *  边界不变量在边界上收口：该值会被 craft.ts 的 buildEquip 直接查表消费（按 装备子类 分支、
+   *  按 装备基础 查 weaponStats/armorStats），故既要求它是真实表里的键，也要求它与该图纸的
+   *  装备子类 同类——跨类的坏图纸会一路留到制作时才抛错。 */
   async function setBpBase(物品名: string, 装备基础: string): Promise<boolean> {
-    // 纯入参校验放在最前：不合法时不必碰存档，存档读不到也照样能报出参数错
-    if (!Object.hasOwn(WEAPON_TABLE, 装备基础) && !Object.hasOwn(ARMOR_NAME, 装备基础)) {
-      const msg = `非法装备基础「${装备基础}」：武器须是 WEAPON_TABLE 的键（${Object.keys(WEAPON_TABLE).join('/')}），防具须是光谱之一（${Object.keys(ARMOR_NAME).join('/')}）`;
-      lastError.value = msg;
-      toastr.error(msg);
-      return false;
-    }
     // 与 doCraft/designBlueprint/completeBp/uploadBp 一致：入口先按存档刷新，写入基底取新读值
     if (!syncFromMvu()) return false;
     const rr = readContractor();
@@ -449,6 +443,22 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
       const msg = `「${物品名}」不是有效图纸或已不在背包`;
       lastError.value = msg;
       toastr.error(msg);
+      return false;
+    }
+    // 校验依赖图纸自身的 装备子类，故只能放在读出数据之后（错误信息也只列该子类对应的合法值）
+    const 子类 = 数据.配方.装备子类;
+    let 合法 = false;
+    let 说明 = `该图纸的装备子类为「${子类 || '空'}」，无法指定装备基础（只有武器/防具图纸需要这一栏）`;
+    if (子类 === '武器') {
+      合法 = Object.hasOwn(WEAPON_TABLE, 装备基础);
+      说明 = `该图纸是武器，装备基础须为武器类型（${Object.keys(WEAPON_TABLE).join('/')}）`;
+    } else if (子类 === '防具') {
+      合法 = Object.hasOwn(ARMOR_NAME, 装备基础);
+      说明 = `该图纸是防具，装备基础须为光谱之一（${Object.keys(ARMOR_NAME).join('/')}）`;
+    }
+    if (!合法) {
+      lastError.value = 说明;
+      toastr.error(说明);
       return false;
     }
     const newBag = writeBlueprint(当前背包, 物品名, { ...数据, 配方: { ...数据.配方, 装备基础 } });
