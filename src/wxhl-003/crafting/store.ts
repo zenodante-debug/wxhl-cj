@@ -94,6 +94,52 @@ function 图纸摘要(数据: 图纸数据): string {
 }
 
 /**
+ * 核心需求 → 玩家选定材料的映射（v2.1 多核心）。
+ *
+ * 每件选中的材料按 `codexOf` 的类别认领配方里一条 `核心: true` 且类别相同的需求，扣**该需求**的数量
+ * （同类别多选时按顺序分配）——配方「金属×2 + 怪物素材×1」就扣 精铁×2、狼牙×1，而不是两样都扣 2。
+ * 合同性与覆盖性都在这里收口，任何一条满足不了都只返回理由（不抛错，由调用方 toastr + lastError）：
+ *   - 覆盖性（先查）：核心需求有 N 条，就必须条条有材料认领——少选的会被点名
+ *   - 合同性（后查）：选中材料对不上任何核心需求 → 拒（多余材料不许混进来白扣）
+ * 配方给的「任意」当兜底通配：类别先精确匹配、都匹配不上才交给它——AI 偶尔会在核心材料上填「任意」，
+ * 不兜底的话那张图纸永远做不出来（没有任何物品的类别叫「任意」）。
+ */
+function 分配核心材料(
+  需求列表: 配方['材料'],
+  选中: string[],
+  查类别: (物品名: string) => MaterialCategory | '未分类',
+  批量: number,
+): { ok: true; 材料: { 物品名: string; 数量: number }[] } | { ok: false; 理由: string } {
+  const 待配 = [...需求列表];
+  const 材料: { 物品名: string; 数量: number }[] = [];
+  const 多余: string[] = [];
+  for (const 物品名 of 选中) {
+    const 类别 = 查类别(物品名);
+    let i = 待配.findIndex(req => req.类别 === 类别);
+    if (i === -1) i = 待配.findIndex(req => req.类别 === '任意');
+    if (i === -1) {
+      多余.push(`「${物品名}」（类别 ${类别}）`);
+      continue;
+    }
+    材料.push({ 物品名, 数量: 待配.splice(i, 1)[0].数量 * 批量 });
+  }
+  // 先报「需求没着落」（漏选），再报「材料多余」（多选）：漏选是玩家更可能犯的错，且理由里点名的是
+  // 配方要求的那门类别，比反过来说「你选的某某对不上」更贴近玩家要补的东西
+  if (待配.length > 0) {
+    return { ok: false, 理由: `核心需求「${待配.map(r => r.类别).join('/')}」没有对应材料，请选择该类别的一件` };
+  }
+  if (多余.length > 0) {
+    return {
+      ok: false,
+      理由: 需求列表.length === 0
+        ? `该配方不需要核心材料，核心材料${多余.join('、')}不能混进来`
+        : `核心材料${多余.join('、')}对不上本配方的核心需求（需 ${需求列表.map(r => r.类别).join('/')}）`,
+    };
+  }
+  return { ok: true, 材料 };
+}
+
+/**
  * 制作者组装（纯函数导出，便于回归测试）。
  * 注意：归一位阶 返回 0 基下标（一阶→0），仓库惯例是 `n + 1` 转回 1 基
  * （见 settlementRules.ts 阶数）；认不出来时兜底为一阶（与「未知当一阶」一致）。
@@ -231,19 +277,24 @@ export const useCraftingStore = defineStore('wxhl003-crafting', () => {
 
     const 制作者 = assembleMaker(c, args.配方.行业);
 
-    // 核心材料 = 玩家选定的多件（配方可要求多种核心材料）；辅料 = autoPick 自动拣选（排除核心物品）
-    const 核心需求 = args.配方.材料.find(m => m.核心);
-    const 核心材料 = args.核心材料名.map(物品名 => ({
-      物品名, 数量: (核心需求?.数量 ?? 1) * args.数量,
-    }));
+    // 核心材料 = 玩家选定的多件，按类别映射到配方的核心需求（v2.1 多核心，见 分配核心材料）；
+    // 辅料 = autoPick 自动拣选（排除核心物品）
+    const 核心需求列表 = args.配方.材料.filter(m => m.核心);
     // 配方要核心材料却没选：单件时代靠「物品名='' → 数量不足」隐式拦住，多选下空列表不进
     // validateCraft 的数量核对（会放行一次不耗核心材料的制作），故显式拦一道
-    if (核心需求 && 核心材料.length === 0) {
+    if (核心需求列表.length > 0 && args.核心材料名.length === 0) {
       const msg = '请先选择核心材料';
       toastr.error(msg);
       lastError.value = msg;
       return null;
     }
+    const 分配 = 分配核心材料(核心需求列表, args.核心材料名, n => codexOf(n).类别, args.数量);
+    if (!分配.ok) {
+      toastr.error(分配.理由);
+      lastError.value = 分配.理由;
+      return null;
+    }
+    const 核心材料 = 分配.材料;
     const 辅料: { 物品名: string; 数量: number }[] = [];
     for (const req of args.配方.材料.filter(m => !m.核心)) {
       const picks = autoPick(bag.value, codex.value, req.类别, req.数量 * args.数量, args.核心材料名);

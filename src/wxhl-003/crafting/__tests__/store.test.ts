@@ -2,7 +2,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { createPinia, setActivePinia } from 'pinia';
 import {
   BlueprintDataSchema, 配方Schema, blueprintItemName,
-  type 图纸数据, type 道具类型,
+  type 图纸数据, type 道具类型, type 配方,
 } from '../recipes';
 import type { Quality } from '../equipTables';
 import type { DesignTarget } from '../blueprintAI';
@@ -15,6 +15,15 @@ const { genMock } = vi.hoisted(() => ({ genMock: vi.fn() }));
 vi.mock('../blueprintAI', () => ({
   generateBlueprint: genMock,
   completeBlueprint: vi.fn(),
+}));
+
+/** d20 固定为 20（自然 20 = 杰作）：杰作档「扣全部投入」，扣减与实际投入逐件一致，断言才可确定。
+ *  其余导出（归一位阶 等）经 importOriginal 保留真身，assembleMaker 的回归断言不受影响。
+ *  路径是 `../../dice`（不是 `../dice`）：本文件在 __tests__/ 里，`../` 只到 crafting/，
+ *  而 store 引的 '../dice' 落在 wxhl-003/ —— 写成 '../dice' 会静默注册一个不存在的模块、mock 不生效。 */
+vi.mock('../../dice', async importOriginal => ({
+  ...(await importOriginal<typeof import('../../dice')>()),
+  rollDie: () => 20,
 }));
 
 // 回归测试：归一位阶 返回 0 基下标（一阶→0），制作者阶位必须 +1 转回 1 基，
@@ -378,5 +387,107 @@ describe('Fix 2 · 同名图纸禁止重复购买，背包图纸可丢弃', () =
     expect(await s.discardBp(blueprintItemName('不存在'))).toBe(false);
     expect(当前背包()['止血草'].数量).toBe(5);
     expect(提示.length).toBe(2);
+  });
+});
+
+// ================================================================
+// C4 · 多核心材料的类别映射与数量
+// 旧口径把**所有**选中材料都按「第一条核心需求」的数量扣：配方「金属×2 + 怪物素材×1」会两样都按 2 扣。
+// 现口径按 codexOf 的类别把每件材料认领到对应需求、扣**该需求**的数量，并做覆盖检查。
+// ================================================================
+describe('C4 · 多核心材料：按类别映射到核心需求、扣该需求的数量', () => {
+  const 配方 = (名称: string, 材料: { 类别: string; 数量: number; 核心: boolean }[]) =>
+    配方Schema.parse({
+      名称, 来源: '自定义', 行业: '锻造', 成品类型: '装备', 装备子类: '防具',
+      品质: '白色', 材料, 技能要求: { 分类: '基础', 等级: 1 }, 参照模板: '轻装',
+    }) as 配方;
+
+  /** 双核心：金属×2 + 怪物素材×1（两样都核心，故意**不给辅料**——辅料的 autoPick 会混进无关扣减） */
+  const 双核 = 配方('双核测试甲', [
+    { 类别: '金属', 数量: 2, 核心: true },
+    { 类别: '怪物素材', 数量: 1, 核心: true },
+  ]);
+  /** 单核心：金属×2 */
+  const 单核 = 配方('单核测试甲', [{ 类别: '金属', 数量: 2, 核心: true }]);
+  /** 同类别两条需求：金属×2 + 金属×1（钉「同类别多选按顺序分配」） */
+  const 双金属 = 配方('双金属测试甲', [
+    { 类别: '金属', 数量: 2, 核心: true },
+    { 类别: '金属', 数量: 1, 核心: true },
+  ]);
+  /** 需求类别「任意」：没有任何物品的档案类别叫「任意」，只能靠通配兜底匹配上 */
+  const 任意核 = 配方('任意核测试甲', [{ 类别: '任意', 数量: 1, 核心: true }]);
+
+  /** 备料：回廊主城设施（不限「仅白色」以外的品质）+ 锻造技能 + 材料
+   *  分类走 启发式归类：精铁/精铁2→金属，狼牙/兽骨→怪物素材 */
+  const 备料 = (): void => {
+    mvu.stat_data.契约者.当前世界 = '回廊';
+    mvu.stat_data.契约者.通用技能.锻造 = { 分类: '基础', 阶位: '一阶', 等级: 3 };
+    mvu.stat_data.契约者.背包 = {
+      精铁: { 名称: '精铁', 数量: 10 },
+      精铁2: { 名称: '精铁2', 数量: 10 },
+      狼牙: { 名称: '狼牙', 数量: 5 },
+      兽骨: { 名称: '兽骨', 数量: 5 },
+    };
+  };
+  const 开工 = (配方: 配方, 核心材料名: string[]) =>
+    useCraftingStore().doCraft({
+      配方, 阶位: 1, 子类型: '轻装', 副属性: 'AGI', 数量: 1,
+      核心材料名, 越阶材料: false, 劣质材料: false,
+    });
+  const 存有 = (名: string) => Number(当前背包()[名]?.数量 ?? 0);
+
+  it('金属×2 + 怪物素材×1：分别按 2 / 1 扣（不是两样都扣 2）', async () => {
+    备料();
+    const out = await 开工(双核, ['精铁', '狼牙']);
+    expect(out?.结果).toBe('杰作'); // d20 固定 20 → 杰作：扣全部投入，扣减与投入逐件一致
+    expect(out?.扣减).toEqual([
+      { 物品名: '精铁', 数量: 2 },
+      { 物品名: '狼牙', 数量: 1 },
+    ]);
+    expect(存有('精铁')).toBe(8);
+    expect(存有('狼牙')).toBe(4); // 旧口径会扣 2（按金属需求）→ 会是 3
+  });
+
+  it('金属×2 + 怪物素材×1：只选两件金属 → 拒（「怪物素材」需求没着落），零变量变动', async () => {
+    备料();
+    expect(await 开工(双核, ['精铁', '精铁2'])).toBeNull();
+    expect(提示[0]).toContain('怪物素材');
+    expect(提示[0]).toContain('没有对应材料');
+    expect(存有('精铁')).toBe(10);
+    expect(存有('精铁2')).toBe(10);
+  });
+
+  it('多余材料（对不上任何核心需求）→ 拒并点名', async () => {
+    备料();
+    expect(await 开工(单核, ['精铁', '狼牙'])).toBeNull();
+    expect(提示[0]).toContain('狼牙');
+    expect(提示[0]).toContain('对不上本配方的核心需求');
+    expect(存有('精铁')).toBe(10);
+  });
+
+  it('一件核心材料都没选 → 拒（「请先选择核心材料」守卫）', async () => {
+    备料();
+    expect(await 开工(单核, [])).toBeNull();
+    expect(提示[0]).toBe('请先选择核心材料');
+    expect(存有('精铁')).toBe(10);
+    expect(当前UP()).toBe(20000);
+  });
+
+  it('同类别两条需求：按选择顺序分配（金属×2 给第一件、金属×1 给第二件）', async () => {
+    备料();
+    const out = await 开工(双金属, ['精铁', '精铁2']);
+    expect(out?.扣减).toEqual([
+      { 物品名: '精铁', 数量: 2 },
+      { 物品名: '精铁2', 数量: 1 },
+    ]);
+    expect(存有('精铁')).toBe(8);
+    expect(存有('精铁2')).toBe(9);
+  });
+
+  it('需求类别为「任意」：任何一件选中材料都能认领（否则这张图纸永远做不出）', async () => {
+    备料();
+    const out = await 开工(任意核, ['兽骨']);
+    expect(out?.扣减).toEqual([{ 物品名: '兽骨', 数量: 1 }]);
+    expect(存有('兽骨')).toBe(4);
   });
 });
