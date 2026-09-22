@@ -132,6 +132,20 @@ export function isEquip(item: MarketItemSnapshot): boolean {
   return classify(item).kind === 'equip';
 }
 
+/** 市场分类筛选：装备按 武器/防具/饰品 细分，其余归「道具」 */
+export type MarketCategory = '武器' | '防具' | '饰品' | '道具';
+
+export function categoryOf(item: MarketItemSnapshot): MarketCategory {
+  const c = classify(item);
+  return c.kind === 'equip' ? c.category : '道具';
+}
+
+/** 物品定价阶位下标 0..4：优先物品自身阶位，缺省回退卖家阶位；认不出返回 null */
+export function tierIndexOfItem(item: MarketItemSnapshot, sellerTier: string): number | null {
+  const idx = 归一位阶(String(item.阶位 ?? '') || sellerTier);
+  return idx === undefined ? null : idx;
+}
+
 // ———— 价格 ————
 
 /** 阶位 → 系数 x²（一阶1、二阶4、三阶9、四阶16、五阶25），认不出返回 null */

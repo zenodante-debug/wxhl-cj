@@ -13,8 +13,9 @@ import {
   buildReviewPrompt,
   getCachedReview,
   REVIEW_SCHEMA,
-  reviewVerdict,
+  reviewVerdicts,
   setCachedReview,
+  type ReviewTarget,
   type ReviewVerdict,
 } from './aiReview';
 import { aiGenerate, extractJSON, getActiveCfg, useForumStore } from '../store';
@@ -68,6 +69,10 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
   const lastError = ref('');
   /** 上架 AI 审核进行中（前端审核，用卖家终端设置里配置的 API） */
   const reviewing = ref(false);
+  /** 双击防护：结算进行中标志（购买/上架/下架/领取各自独立） */
+  const purchasing = ref(false);
+  const listing = ref(false);
+  const collecting = ref(false);
 
   const playerName = ref('无名契约者');
   const playerTier = ref('一阶');
@@ -104,94 +109,174 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
   }
 
   /**
-   * 上架前 AI 审核（两道：规则/效果合规 + 红线）。
-   * fail-closed：未配置 API、调用失败、格式异常 → 抛错，由 sell 拒绝上架。
-   * 同一物品内容走会话级缓存（改价/改数量不重审，改内容才重审）。
+   * 上架前 AI 审核（两道：规则/效果合规 + 红线），支持批量——多选上架只花一次 API。
+   * 已审过的物品走会话级缓存（改价/改数量不重审，改内容才重审）。
+   * fail-closed：未配置 API、调用失败、格式异常、有物品未被审到 → 抛错，由 sellBatch 拒绝上架。
    */
-  async function aiReviewItem(item: MarketItemSnapshot, kind: 'equip' | 'goods'): Promise<ReviewVerdict> {
-    const cached = getCachedReview(item);
-    if (cached) return cached;
+  async function aiReviewItems(targets: ReviewTarget[]): Promise<Map<string, ReviewVerdict>> {
+    const out = new Map<string, ReviewVerdict>();
+    const todo: ReviewTarget[] = [];
+    for (const t of targets) {
+      const cached = getCachedReview(t.item);
+      if (cached) out.set(t.item.名称, cached);
+      else todo.push(t);
+    }
+    if (todo.length === 0) return out;
+
     const cfg = getActiveCfg(useForumStore().settings);
     if (!cfg.url || !cfg.apiKey) {
       throw new Error('上架需通过回廊 AI 审核——请先在「终端设置」中配置 API');
     }
     reviewing.value = true;
     try {
-      const raw = await aiGenerate(cfg, buildReviewPrompt(item, kind), {
+      const raw = await aiGenerate(cfg, buildReviewPrompt(todo), {
         name: REVIEW_SCHEMA.name,
         value: REVIEW_SCHEMA.value as unknown as Record<string, any>,
       });
-      const verdict = reviewVerdict(extractJSON(raw));
-      setCachedReview(item, verdict);
-      return verdict;
+      const fresh = reviewVerdicts(
+        extractJSON(raw),
+        todo.map(t => t.item.名称),
+      );
+      for (const t of todo) {
+        const v = fresh.get(t.item.名称)!;
+        setCachedReview(t.item, v);
+        out.set(t.item.名称, v);
+      }
+      return out;
     } finally {
       reviewing.value = false;
     }
   }
 
-  /** 上架：AI 审核通过 → 本地扣背包 → 服务器登记；任何一步失败都回滚/不动本地 */
+  /**
+   * 单件上架（sellBatch 的薄封装）：AI 审核通过 → 本地扣背包 → 服务器登记。
+   * 双击防护：结算进行中(listing)直接忽略重复调用。
+   */
   async function sell(name: string, snapshot: MarketItemSnapshot, kind: 'equip' | 'goods', qty: number, price: number): Promise<boolean> {
+    const ok = await sellBatch([{ name, snapshot, kind, qty, price }]);
+    return ok;
+  }
+
+  /**
+   * 批量上架：一次 AI 审核覆盖所有待上架物品，再逐件本地扣背包 + 服务器登记。
+   * 单价为 0 的条目按「未定价」跳过。任一环节失败只回滚该件，已成功的保留。
+   */
+  async function sellBatch(
+    entries: { name: string; snapshot: MarketItemSnapshot; kind: 'equip' | 'goods'; qty: number; price: number }[],
+  ): Promise<boolean> {
+    if (listing.value) return false; // 双击防护
     lastError.value = '';
-    const r = readContractor();
-    if (!r) {
+    const todo = entries.filter(e => Number(e.price) > 0);
+    if (todo.length === 0) {
+      lastError.value = '请先为要上架的物品填写单价';
+      toastr.warning(lastError.value);
+      return false;
+    }
+
+    // ① 先只读校验每件数量，任何一件不合法就整体不上架
+    const r0 = readContractor();
+    if (!r0) {
       lastError.value = '读不到存档变量';
       return false;
     }
-    const oldBag = (r.c.背包 ?? {}) as Bag;
-    let newBag: Bag;
-    try {
-      newBag = bagRemove(oldBag, name, qty); // 只读校验数量，不落任何变动
-    } catch (e: any) {
-      lastError.value = e.message;
-      toastr.error(e.message);
-      return false;
+    const bag0 = (r0.c.背包 ?? {}) as Bag;
+    for (const e of todo) {
+      const have = Number(bag0[e.name]?.数量 ?? 0);
+      if (!Number.isInteger(e.qty) || e.qty < 1 || e.qty > have) {
+        lastError.value = `「${e.name}」数量不合法：现有 ${have}，拟上架 ${e.qty}`;
+        toastr.error(lastError.value);
+        return false;
+      }
     }
-    // AI 审核（fail-closed：审核不过/失败时本地背包分毫未动）
-    let verdict: ReviewVerdict;
+
+    // ② AI 审核（一次调用覆盖全部；fail-closed：本地背包分毫未动）
+    listing.value = true;
+    let verdicts: Map<string, ReviewVerdict>;
     try {
-      verdict = await aiReviewItem({ ...snapshot, 名称: name, 数量: qty }, kind);
+      verdicts = await aiReviewItems(
+        todo.map(e => ({ item: { ...e.snapshot, 名称: e.name, 数量: e.qty }, kind: e.kind })),
+      );
     } catch (e: any) {
+      listing.value = false;
       lastError.value = e?.message || 'AI 审核失败';
       toastr.error('上架被拒: ' + lastError.value);
       return false;
     }
-    if (!verdict.pass) {
-      lastError.value = verdict.reasons.join('；');
-      toastr.error('AI 审核未通过: ' + lastError.value);
-      return false;
-    }
-    const oldQty = Number(oldBag[name]?.数量 ?? 0);
-    _.set(r.mvu, ['stat_data', '契约者', '背包'], newBag);
-    await commit(r.mvu, r.mid, [
-      [['stat_data', '契约者', '背包', name, '数量'], oldQty - qty > 0 ? oldQty - qty : undefined],
-    ]);
+
+    const failed: string[] = [];
+    const rejected: string[] = [];
     try {
-      await createListing({
-        seller: playerName.value,
-        tier: playerTier.value,
-        kind,
-        item: { ...snapshot, 名称: name, 数量: qty },
-        qty,
-        price,
-      });
-    } catch (e: any) {
-      // 回滚：把物品加回去
-      const rb = readContractor();
-      if (rb) {
-        _.set(rb.mvu, ['stat_data', '契约者', '背包'], bagAdd((rb.c.背包 ?? {}) as Bag, { ...snapshot, 名称: name }, qty));
-        await commit(rb.mvu, rb.mid, []);
+      for (const e of todo) {
+        const v = verdicts.get(e.name);
+        if (!v?.pass) {
+          rejected.push(`「${e.name}」：${(v?.reasons ?? ['未通过审核']).join('；')}`);
+          continue;
+        }
+        // ③ 本地扣背包
+        const r = readContractor();
+        if (!r) {
+          failed.push(`「${e.name}」读不到存档变量`);
+          continue;
+        }
+        const bag = (r.c.背包 ?? {}) as Bag;
+        let newBag: Bag;
+        try {
+          newBag = bagRemove(bag, e.name, e.qty);
+        } catch (err: any) {
+          failed.push(`「${e.name}」${err.message}`);
+          continue;
+        }
+        _.set(r.mvu, ['stat_data', '契约者', '背包'], newBag);
+        await commit(r.mvu, r.mid, []);
+        // ④ 服务器登记；失败则把该件加回背包
+        try {
+          await createListing({
+            seller: playerName.value,
+            tier: playerTier.value,
+            kind: e.kind,
+            item: { ...e.snapshot, 名称: e.name, 数量: e.qty },
+            qty: e.qty,
+            price: e.price,
+          });
+        } catch (err: any) {
+          const rb = readContractor();
+          if (rb) {
+            _.set(rb.mvu, ['stat_data', '契约者', '背包'], bagAdd((rb.c.背包 ?? {}) as Bag, { ...e.snapshot, 名称: e.name }, e.qty));
+            await commit(rb.mvu, rb.mid, []);
+          }
+          failed.push(`「${e.name}」${err?.message || '服务器拒绝'}`);
+        }
       }
-      lastError.value = e?.message || '上架被拒绝';
-      toastr.error('上架失败: ' + lastError.value);
-      return false;
+    } finally {
+      listing.value = false;
     }
-    toastr.success(`「${name}」×${qty} 已上架`);
+
+    const okCount = todo.length - failed.length - rejected.length;
+    if (okCount > 0) toastr.success(`已上架 ${okCount} 件`);
+    if (rejected.length > 0) {
+      lastError.value = rejected.join('\n');
+      toastr.error(`AI 审核驳回 ${rejected.length} 件：\n` + rejected.join('\n'));
+    }
+    if (failed.length > 0) {
+      lastError.value = failed.join('\n');
+      toastr.error(`上架失败 ${failed.length} 件：\n` + failed.join('\n'));
+    }
     await refresh();
-    return true;
+    return okCount > 0;
   }
 
-  /** 购买：本地先校验余额（不足则不动服务器）→ 服务器销账 → 本地扣 UP 入包 */
+  /** 购买：本地先校验余额（不足则不动服务器）→ 服务器销账 → 本地扣 UP 入包。双击防护：结算中直接忽略 */
   async function buy(l: Listing): Promise<boolean> {
+    if (purchasing.value) return false; // 双击防护：防止一次支付 N 份钱只买一件
+    purchasing.value = true;
+    try {
+      return await doBuy(l);
+    } finally {
+      purchasing.value = false;
+    }
+  }
+
+  async function doBuy(l: Listing): Promise<boolean> {
     lastError.value = '';
     const r = readContractor();
     if (!r) {
@@ -221,9 +306,32 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     return true;
   }
 
-  /** 下架：先服务器删单 → 本地回包（本地写失败只警告，物品实质在服务器侧已核销） */
+  /**
+   * 下架取回。双击防护 + 「前世记忆」提醒：
+   * 挂单归属客户端标识（localStorage，不随存档变），换新存档后仍能取回旧存档挂的单——
+   * 这是玩家自己的东西（不阻止），但弹窗说明来源，避免"凭空多出物品"。
+   */
   async function cancel(l: Listing): Promise<boolean> {
+    if (listing.value) return false; // 双击防护
+    listing.value = true;
+    try {
+      return await doCancel(l);
+    } finally {
+      listing.value = false;
+    }
+  }
+
+  async function doCancel(l: Listing): Promise<boolean> {
     lastError.value = '';
+    // 卖家名与当前存档不符 → 大概率是上一世（旧存档）挂的单
+    const 前世 = l.seller && playerName.value && l.seller !== playerName.value;
+    if (前世) {
+      const ok = window.confirm(
+        `「${l.item.名称}」的挂单来自「${l.seller}」，与你当前存档的契约者「${playerName.value}」不同。\n\n` +
+          `确认这是你上一世（旧存档）挂的单并取回吗？（物品会进入当前存档的背包）`,
+      );
+      if (!ok) return false;
+    }
     try {
       await cancelListing(l.id);
     } catch (e: any) {
@@ -236,13 +344,27 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
       _.set(r.mvu, ['stat_data', '契约者', '背包'], bagAdd((r.c.背包 ?? {}) as Bag, l.item, l.qty));
       await commit(r.mvu, r.mid, []);
     }
-    toastr.success(`「${l.item.名称}」已取回`);
+    toastr.success(`「${l.item.名称}」已取回${前世 ? '（来自旧存档）' : ''}`);
     await refresh();
     return true;
   }
 
-  /** 领取货款：先服务器清零 → 本地加 UP */
+  /**
+   * 领取货款。双击防护 + 「前世记忆」提醒：
+   * 货款按客户端标识挂账，换新存档后旧存档的货款仍可领进当前存档。
+   * 登录前无法知道挂账来自哪一世（KV 里只存金额），因此只在有待领货款时提醒一次来源不明。
+   */
   async function collect(): Promise<boolean> {
+    if (collecting.value) return false; // 双击防护
+    collecting.value = true;
+    try {
+      return await doCollect();
+    } finally {
+      collecting.value = false;
+    }
+  }
+
+  async function doCollect(): Promise<boolean> {
     lastError.value = '';
     let gained = 0;
     try {
@@ -256,6 +378,11 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
       toastr.info('没有待领货款');
       return true;
     }
+    const ok = window.confirm(
+      `待领货款 ${gained} UP 将进入当前存档。\n\n` +
+        `注意：货款按你的终端标识挂账，若其中包含上一世（旧存档）卖出的货款，也会一并领入当前存档。\n继续领取？`,
+    );
+    if (!ok) return false;
     const r = readContractor();
     if (r) {
       const up = Number(r.c.经济?.UP ?? 0);
@@ -274,6 +401,9 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     pendingSell,
     loading,
     reviewing,
+    purchasing,
+    listing,
+    collecting,
     lastError,
     playerName,
     playerTier,
@@ -281,6 +411,7 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     playerBag,
     refresh,
     sell,
+    sellBatch,
     buy,
     cancel,
     collect,

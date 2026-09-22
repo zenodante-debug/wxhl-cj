@@ -28,6 +28,28 @@
     <div v-if="tab === 'browse'" class="mkt-body">
       <div class="mkt-filters">
         <button
+          v-for="f in CATEGORY_FILTERS"
+          :key="f.key"
+          class="mkt-chip"
+          :class="{ active: catFilter === f.key }"
+          @click="catFilter = f.key"
+        >
+          {{ f.label }}
+        </button>
+      </div>
+      <div class="mkt-filters">
+        <button
+          v-for="f in TIER_FILTERS"
+          :key="f.key"
+          class="mkt-chip"
+          :class="{ active: tierFilter === f.key }"
+          @click="tierFilter = f.key"
+        >
+          {{ f.label }}
+        </button>
+      </div>
+      <div class="mkt-filters">
+        <button
           v-for="f in FILTERS"
           :key="f.key"
           class="mkt-chip"
@@ -38,7 +60,7 @@
         </button>
       </div>
       <div v-if="filteredListings.length === 0" class="mkt-empty">
-        {{ store.loading ? '市集加载中…' : '市集空空如也，去上架第一单吧' }}
+        {{ store.loading ? '市集加载中…' : '没有符合条件的挂单' }}
       </div>
       <div v-for="l in filteredListings" :key="l.id" class="mkt-card">
         <div class="mc-head">
@@ -53,72 +75,71 @@
         <div v-if="l.item.描述" class="mc-desc">{{ l.item.描述 }}</div>
         <div class="mc-foot">
           <span class="mc-seller">{{ l.seller }} · {{ l.tier }} · {{ timeAgo(l.created) }}</span>
-          <button v-if="l.client !== myClient" class="mc-buy" @click="confirmBuy = l">购买</button>
+          <button
+            v-if="l.client !== myClient"
+            class="mc-buy"
+            :disabled="store.purchasing"
+            @click="confirmBuy = l"
+          >
+            购买
+          </button>
           <span v-else class="mc-own">我的挂单</span>
         </div>
       </div>
     </div>
 
-    <!-- ============ 上架 ============ -->
+    <!-- ============ 上架（多选批量） ============ -->
     <div v-if="tab === 'sell'" class="mkt-body">
-      <template v-if="!sellPick">
-        <div class="mkt-hint">选择要上架的背包物品（装备按品质与阶位定价并做规则校验，道具按阶位定价；上架前经回廊 AI 审核，需在终端设置中配置 API）</div>
-        <div v-if="bagEntries.length === 0" class="mkt-empty">背包里没有可上架的物品</div>
-        <div v-for="entry in bagTagged" :key="entry.name" class="mkt-card pick" @click="pickItem(entry.name, entry.item)">
-          <div class="mc-head">
+      <div class="mkt-hint">
+        勾选要上架的物品（可多选，多件只审核一次）→ 逐件填价 → 一次提交。
+        装备按品质与阶位定价并做规则校验，道具按阶位定价；全部经回廊 AI 审核，需在终端设置中配置 API。
+      </div>
+      <div class="mkt-hint dim">
+        分错类了？点物品上的「装备/道具」标签可手动改判定口径（只影响 AI 审核与价格提示；服务器仍按物品字段定价，带装备字段的物品躲不过装备价格上限）。
+      </div>
+      <div v-if="bagEntries.length === 0" class="mkt-empty">背包里没有可上架的物品</div>
+
+      <div v-for="entry in bagTagged" :key="entry.name" class="mkt-card pick">
+        <div class="mc-head">
+          <label class="mc-pick">
+            <input type="checkbox" :checked="!!sellSel[entry.name]" @change="toggleSel(entry.name, entry.item)" />
             <span class="mc-name" :style="{ color: qualityColor(entry.item) }">{{ entry.name }}</span>
-            <span class="mc-tag">×{{ entry.item.数量 }}</span>
+          </label>
+          <span class="mc-tag">×{{ entry.item.数量 }}</span>
+        </div>
+        <div class="mc-tags">
+          <button class="mc-kind" :class="{ equip: kindOf(entry.name) === 'equip' }" @click="cycleKind(entry.name, entry.item)">
+            {{ kindOf(entry.name) === 'equip' ? '装备' : '道具' }}
+          </button>
+          <span class="mc-tag">{{ entry.tag || '道具' }}·{{ entry.item.阶位 || store.playerTier }}</span>
+        </div>
+
+        <!-- 选中的物品：逐件填数量与单价 -->
+        <div v-if="sellSel[entry.name]" class="sell-form">
+          <label class="sf-row">
+            <span>数量</span>
+            <input v-model.number="sellSel[entry.name].qty" type="number" min="1" :max="entry.item.数量" />
+          </label>
+          <label class="sf-row">
+            <span>单价 UP</span>
+            <input v-model.number="sellSel[entry.name].price" type="number" min="0" max="9999999" />
+          </label>
+          <div v-if="entry.kindCheck" class="sf-check">
+            <div v-for="e in entry.kindCheck.errors" :key="e" class="sf-err">✕ {{ e }}</div>
+            <div v-for="w in entry.kindCheck.warnings" :key="w" class="sf-warn">⚠ {{ w }}</div>
           </div>
-          <div class="mc-tags">
-            <span v-if="entry.tag" class="mc-tag">{{ entry.tag }}·{{ entry.item.阶位 || store.playerTier }}</span>
-            <span v-else class="mc-tag goods">道具·按阶位定价</span>
+          <div v-if="entry.priceHint" class="sf-hint" :class="{ bad: !entry.priceHint.ok }">
+            {{ entry.priceHint.ok ? `合法区间 ${entry.priceHint.min} ~ ${entry.priceHint.max} UP` : entry.priceHint.reason }}
           </div>
         </div>
-      </template>
-      <template v-else>
-        <div class="mkt-card">
-          <div class="mc-head">
-            <span class="mc-name" :style="{ color: qualityColor(sellPick.item) }">{{ sellPick.name }}</span>
-            <button class="mc-repick" @click="sellPick = null">重选</button>
-          </div>
-          <div class="mc-tags">
-            <span v-if="sellEquip" class="mc-tag">
-              {{ sellEquip.gray ? `灰色封印(${sellEquip.quality})` : sellEquip.quality }}·{{ sellEquip.category }}·{{ sellPick.item.阶位 || store.playerTier }}（装备·回廊校验）
-            </span>
-            <span v-else class="mc-tag goods">道具·按阶位定价</span>
-            <span class="mc-tag">持有 ×{{ sellPick.item.数量 }}</span>
-          </div>
+      </div>
 
-          <!-- 装备规则校验面板（上架前合规检查） -->
-          <div v-if="sellBlocked" class="sf-check">
-            <div class="sf-err">✕ {{ sellBlocked }}</div>
-          </div>
-          <template v-else-if="equipCheck">
-            <div v-if="equipCheck.errors.length || equipCheck.warnings.length" class="sf-check">
-              <div v-for="e in equipCheck.errors" :key="e" class="sf-err">✕ {{ e }}</div>
-              <div v-for="w in equipCheck.warnings" :key="w" class="sf-warn">⚠ {{ w }}</div>
-            </div>
-            <div v-else class="sf-check ok">✓ 装备规则校验通过（效果条目 / 属性加成基准 / 骰面格式 / 强效果限制）</div>
-          </template>
-
-          <div class="sell-form">
-            <label class="sf-row">
-              <span>数量</span>
-              <input v-model.number="sellQty" type="number" min="1" :max="sellPick.item.数量" />
-            </label>
-            <label class="sf-row">
-              <span>单价 UP</span>
-              <input v-model.number="sellPrice" type="number" min="0" max="9999999" />
-            </label>
-            <div v-if="priceHint" class="sf-hint" :class="{ bad: !priceHint.ok }">
-              {{ priceHint.ok ? `合法区间 ${priceHint.min} ~ ${priceHint.max} UP` : priceHint.reason }}
-            </div>
-            <button class="mc-buy big" :disabled="!canSell || store.loading || store.reviewing" @click="doSell">
-              {{ store.reviewing ? 'AI 审核中…' : store.loading ? '上架中…' : equipCheck && !equipCheck.ok ? '规则校验未通过' : '确认上架' }}
-            </button>
-          </div>
-        </div>
-      </template>
+      <!-- 批量提交栏 -->
+      <div v-if="selCount > 0" class="mkt-submit">
+        <button class="mc-buy big" :disabled="sellableCount === 0 || store.loading || store.reviewing || store.listing" @click="doSellAll">
+          {{ store.reviewing ? 'AI 审核中…' : store.listing ? '上架中…' : `确认上架 ${sellableCount} / ${selCount} 件（一次审核）` }}
+        </button>
+      </div>
     </div>
 
     <!-- ============ 我的 ============ -->
@@ -164,11 +185,19 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
+import { computed, onMounted, reactive, ref, watch } from 'vue';
 import { getClientId, type Listing } from './api';
-import { checkPrice, classify, hasEquipMarkers, parseQuality, type MarketItemSnapshot, type PriceCheck } from './priceTable';
+import {
+  categoryOf,
+  checkPrice,
+  classify,
+  hasEquipMarkers,
+  parseQuality,
+  tierIndexOfItem,
+  type MarketItemSnapshot,
+  type PriceCheck,
+} from './priceTable';
 import { validateEquip } from './equipRules';
-import { 归一位阶 } from '../dice';
 import type { Bag } from './settle';
 import { useMarketStore } from './store';
 
@@ -186,20 +215,43 @@ const myClient = getClientId();
 
 // ============ 逛市场 ============
 const FILTERS = [
-  { key: 'all', label: '全部' },
+  { key: 'all', label: '全部品质' },
   { key: '蓝色', label: '蓝' },
   { key: '金色', label: '金' },
   { key: '紫色', label: '紫' },
-  { key: 'goods', label: '道具' },
 ] as const;
 const filter = ref<(typeof FILTERS)[number]['key']>('all');
 
-const filteredListings = computed(() => {
-  if (filter.value === 'all') return store.listings;
-  if (filter.value === 'goods') return store.listings.filter(l => l.kind === 'goods');
-  // 品质筛选按解包后的原品质（灰色封印(紫色) 也算紫色）
-  return store.listings.filter(l => l.kind === 'equip' && parseQuality(l.item.品质)?.quality === filter.value);
-});
+const CATEGORY_FILTERS = [
+  { key: 'all', label: '全部类型' },
+  { key: '武器', label: '武器' },
+  { key: '防具', label: '防具' },
+  { key: '饰品', label: '饰品' },
+  { key: '道具', label: '道具' },
+] as const;
+const catFilter = ref<(typeof CATEGORY_FILTERS)[number]['key']>('all');
+
+const TIER_FILTERS = [
+  { key: 'all', label: '全部阶位' },
+  { key: '0', label: '一阶' },
+  { key: '1', label: '二阶' },
+  { key: '2', label: '三阶' },
+  { key: '3', label: '四阶' },
+  { key: '4', label: '五阶' },
+] as const;
+const tierFilter = ref<(typeof TIER_FILTERS)[number]['key']>('all');
+
+const filteredListings = computed(() =>
+  store.listings.filter(l => {
+    // 类型筛选：装备按 武器/防具/饰品，其余归道具
+    if (catFilter.value !== 'all' && categoryOf(l.item) !== catFilter.value) return false;
+    // 阶位筛选：物品自身阶位优先，缺省按卖家阶位
+    if (tierFilter.value !== 'all' && tierIndexOfItem(l.item, l.tier) !== Number(tierFilter.value)) return false;
+    // 品质筛选：按解包后的原品质（灰色封印(紫色) 也算紫色）
+    if (filter.value !== 'all' && parseQuality(l.item.品质)?.quality !== filter.value) return false;
+    return true;
+  }),
+);
 
 const confirmBuy = ref<Listing | null>(null);
 
@@ -209,65 +261,115 @@ async function doBuy() {
   if (ok) confirmBuy.value = null;
 }
 
-// ============ 上架 ============
-const sellPick = ref<{ name: string; item: MarketItemSnapshot & { 数量: number } } | null>(null);
-const sellQty = ref(1);
-const sellPrice = ref(0);
+// ============ 上架（多选批量） ============
+export interface SellEntry {
+  name: string;
+  item: MarketItemSnapshot & { 数量: number };
+  /** 数量/单价 输入缓冲（price 为空串表示未填） */
+  qty: number;
+  price: number | string;
+}
+
+/** 已勾选待上架的物品（名称 → 输入缓冲） */
+const sellSel = reactive<Record<string, SellEntry>>({});
+/** 卖家手动标注口径（只影响 AI 审核与价格提示；服务器仍按物品字段定价） */
+const kindOverride = reactive<Record<string, 'equip' | 'goods'>>({});
 
 const bagEntries = computed(() =>
   Object.entries(store.playerBag as Bag).filter(([, item]) => Number(item.数量) > 0),
 );
 
-function pickItem(name: string, item: MarketItemSnapshot & { 数量: number }) {
-  sellPick.value = { name, item };
-  sellQty.value = 1;
-  sellPrice.value = 0;
+/** 每件物品的自动判定（重量级价格提示/装备校验只在勾选后算） */
+const bagRows = computed(() =>
+  bagEntries.value.map(([name, item]) => {
+    const auto = classify({ ...item, 名称: name });
+    /** 自动判定为装备的物品仍可被玩家标成道具（纠正误判）；自动判定为道具则只能标成装备 */
+    const kind: 'equip' | 'goods' = kindOverride[name] ?? (auto.kind === 'equip' ? 'equip' : 'goods');
+    const 无法定价 =
+      auto.kind === 'goods' &&
+      hasEquipMarkers({ ...item, 名称: name }) &&
+      !kindOverride[name]; // 未手动标注且带装备字段却定不了价 → 服务器会拒
+    return { name, item, kind, auto, 无法定价 };
+  }),
+);
+
+/** 勾选后的逐件价格提示与装备校验 */
+const sellRows = computed(() =>
+  bagRows.value
+    .filter(r => sellSel[r.name])
+    .map(r => {
+      const sel = sellSel[r.name];
+      const snap = { ...r.item, 名称: r.name, 数量: sel.qty };
+      const priceNum = Number(sel.price);
+      const priceValid = sel.price !== '' && Number.isFinite(priceNum) && priceNum >= 0;
+      const equipCheck =
+        r.kind === 'equip'
+          ? validateEquip(
+              snap,
+              r.auto.kind === 'equip' ? r.auto : { quality: '蓝色', category: '武器', gray: false },
+              tierIndexOfItem(r.item, store.playerTier) ?? 0,
+            )
+          : null;
+      return {
+        ...r,
+        entry: sel,
+        // 价格合法区间提示（按标注口径算）
+        priceHint: priceValid ? checkPrice(r.kind, snap, store.playerTier, priceNum) : null,
+        equipCheck,
+        canSell:
+          !r.无法定价 &&
+          Number.isInteger(sel.qty) &&
+          sel.qty >= 1 &&
+          sel.qty <= r.item.数量 &&
+          priceValid &&
+          (!equipCheck || equipCheck.ok),
+      };
+    }),
+);
+
+/** 模板用：每件背包物品 + 勾选状态（放最后，避免引用未初始化的 sellRows） */
+const bagTagged = computed(() =>
+  bagRows.value.map(r => ({ ...r, sel: sellSel[r.name] ?? null })),
+);
+
+const selCount = computed(() => sellRows.value.length);
+const sellableCount = computed(() => sellRows.value.filter(r => r.canSell).length);
+
+function toggleSel(name: string, item: MarketItemSnapshot & { 数量: number }) {
+  if (sellSel[name]) delete sellSel[name];
+  else sellSel[name] = { name, item, qty: 1, price: '' };
 }
 
-const sellCls = computed(() =>
-  sellPick.value ? classify({ ...sellPick.value.item, 名称: sellPick.value.name }) : null,
-);
-/** classify 判定为装备时的详细信息（品质/分类/灰色封印） */
-const sellEquip = computed(() => (sellCls.value?.kind === 'equip' ? sellCls.value : null));
-const sellKind = computed<'equip' | 'goods'>(() => (sellEquip.value ? 'equip' : 'goods'));
+/** 切换装备/道具标注口径 */
+function cycleKind(name: string, item: MarketItemSnapshot) {
+  const auto = classify({ ...item, 名称: name });
+  const cur = kindOverride[name] ?? (auto.kind === 'equip' ? 'equip' : 'goods');
+  const next = cur === 'equip' ? 'goods' : 'equip';
+  // 自动判定为道具的物品，标成"装备"才有意义；标回自动值则清除覆盖
+  if (next === (auto.kind === 'equip' ? 'equip' : 'goods')) delete kindOverride[name];
+  else kindOverride[name] = next;
+}
 
-/** 带装备字段但品质/类型无法定价：服务器会拒，前端直接拦下并说明 */
-const sellBlocked = computed(() => {
-  if (!sellPick.value || !sellCls.value) return '';
-  if (sellCls.value.kind === 'goods' && hasEquipMarkers({ ...sellPick.value.item, 名称: sellPick.value.name })) {
-    return '物品带有装备字段（穿戴门槛/伤害骰/装备防御等）但品质或类型无法识别，回廊无法定价——请先补全「品质」与「类型」字段';
+function kindOf(name: string): 'equip' | 'goods' {
+  return kindOverride[name] ?? bagRows.value.find(r => r.name === name)?.kind ?? 'goods';
+}
+
+/** 批量提交：一次 AI 审核覆盖全部勾选物品 */
+async function doSellAll() {
+  const entries = sellRows.value
+    .filter(r => r.canSell)
+    .map(r => ({
+      name: r.name,
+      snapshot: r.item as MarketItemSnapshot,
+      kind: r.kind,
+      qty: Number(r.entry.qty),
+      price: Number(r.entry.price),
+    }));
+  if (entries.length === 0) return;
+  const ok = await store.sellBatch(entries);
+  if (ok) {
+    for (const e of entries) delete sellSel[e.name];
   }
-  return '';
-});
-
-/** 上架前的装备规则校验（效果条目/属性加成基准/骰面/强效果限制） */
-const equipCheck = computed(() => {
-  if (!sellPick.value || !sellEquip.value) return null;
-  const item = { ...sellPick.value.item, 名称: sellPick.value.name };
-  const tierIdx = 归一位阶(String(item.阶位 ?? '') || store.playerTier) ?? 0;
-  return validateEquip(item, sellEquip.value, tierIdx);
-});
-
-/** 价格区间提示（装备与道具共用：装备按品质阶位、道具按阶位） */
-const priceHint = computed<PriceCheck | null>(() => {
-  if (!sellPick.value) return null;
-  const item = { ...sellPick.value.item, 名称: sellPick.value.name, 数量: sellQty.value };
-  return checkPrice(sellKind.value, item, store.playerTier, sellPrice.value);
-});
-
-const canSell = computed(() => {
-  if (!sellPick.value) return false;
-  if (sellBlocked.value) return false;
-  if (!Number.isInteger(sellQty.value) || sellQty.value < 1 || sellQty.value > sellPick.value.item.数量) return false;
-  if (!Number.isFinite(sellPrice.value) || sellPrice.value < 0) return false;
-  if (equipCheck.value && !equipCheck.value.ok) return false;
-  return priceHint.value?.ok === true;
-});
-
-async function doSell() {
-  if (!sellPick.value || !canSell.value) return;
-  const ok = await store.sell(sellPick.value.name, sellPick.value.item, sellKind.value, sellQty.value, sellPrice.value);
-  if (ok) sellPick.value = null;
 }
 
 // ============ 展示辅助 ============
@@ -319,7 +421,7 @@ watch(
     const item = (store.playerBag as Bag)[name];
     if (!item || Number(item.数量) <= 0) return;
     tab.value = 'sell';
-    pickItem(name, item);
+    if (!sellSel[name]) sellSel[name] = { name, item, qty: 1, price: '' };
     store.pendingSell = '';
   },
   { immediate: true },
@@ -564,6 +666,44 @@ watch(
   color: var(--amber-d, #b08a4f);
   font-size: 11px;
   cursor: pointer;
+}
+/* 勾选框 + 物品名 */
+.mc-pick {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
+  min-width: 0;
+  input[type='checkbox'] {
+    accent-color: #b08a4f;
+    flex-shrink: 0;
+  }
+}
+/* 装备/道具 标注切换 */
+.mc-kind {
+  font-size: 10px;
+  padding: 1px 6px;
+  border-radius: 4px;
+  border: 1px solid rgba(122, 176, 138, 0.45);
+  background: rgba(90, 140, 100, 0.15);
+  color: #7fb08a;
+  cursor: pointer;
+  &.equip {
+    border-color: rgba(176, 138, 79, 0.5);
+    background: rgba(176, 138, 79, 0.15);
+    color: var(--amber, #d8b36a);
+  }
+}
+/* 批量提交栏 */
+.mkt-submit {
+  position: sticky;
+  bottom: 0;
+  padding-top: 6px;
+  background: linear-gradient(180deg, transparent, #100c09 40%);
+}
+.mkt-hint.dim {
+  opacity: 0.6;
+  font-size: 10px;
 }
 
 .sell-form {
