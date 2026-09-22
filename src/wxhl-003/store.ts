@@ -152,7 +152,8 @@ function save(s: Settings) {
   } catch (_) {}
 }
 
-function getActiveCfg(s: Settings): ApiConfig {
+/** 当前生效的 API 配置（多路模式且副路已配 → 副路，否则主路）。市场 AI 审核等跨模块复用 */
+export function getActiveCfg(s: Settings): ApiConfig {
   return s.apiMode === 'multi' && s.secondary.url ? s.secondary : s.primary;
 }
 
@@ -259,7 +260,8 @@ const INFLUENCE_SCHEMA = {
 // ================================================================
 // JSON 提取：支持直接、markdown 代码块、裸 JSON
 // ================================================================
-function extractJSON(text: string): any {
+/** 从 AI 回复文本中抠出 JSON（直接 parse → 代码围栏 → 首个平衡括号段）。市场 AI 审核等跨模块复用 */
+export function extractJSON(text: string): any {
   try {
     return JSON.parse(text.trim());
   } catch (_) {}
@@ -310,9 +312,9 @@ function extractJSON(text: string): any {
 }
 
 // ================================================================
-// AI 生成（内置 JSON 验证 + 格式重试）
+// AI 生成（内置 JSON 验证 + 格式重试）。市场 AI 审核等跨模块复用
 // ================================================================
-async function aiGenerate(
+export async function aiGenerate(
   cfg: ApiConfig,
   userInput: string,
   jsonSchema?: { name: string; value: Record<string, any> },

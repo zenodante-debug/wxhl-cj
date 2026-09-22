@@ -9,6 +9,15 @@ import {
   type Listing,
 } from './api';
 import type { MarketItemSnapshot } from './priceTable';
+import {
+  buildReviewPrompt,
+  getCachedReview,
+  REVIEW_SCHEMA,
+  reviewVerdict,
+  setCachedReview,
+  type ReviewVerdict,
+} from './aiReview';
+import { aiGenerate, extractJSON, getActiveCfg, useForumStore } from '../store';
 
 // ================================================================
 // 无限回廊 · 自由市场 store
@@ -57,6 +66,8 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
   const pendingSell = ref('');
   const loading = ref(false);
   const lastError = ref('');
+  /** 上架 AI 审核进行中（前端审核，用卖家终端设置里配置的 API） */
+  const reviewing = ref(false);
 
   const playerName = ref('无名契约者');
   const playerTier = ref('一阶');
@@ -92,7 +103,33 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     }
   }
 
-  /** 上架：先本地扣背包 → 服务器登记；服务器失败则把物品加回去 */
+  /**
+   * 上架前 AI 审核（两道：规则/效果合规 + 红线）。
+   * fail-closed：未配置 API、调用失败、格式异常 → 抛错，由 sell 拒绝上架。
+   * 同一物品内容走会话级缓存（改价/改数量不重审，改内容才重审）。
+   */
+  async function aiReviewItem(item: MarketItemSnapshot, kind: 'equip' | 'goods'): Promise<ReviewVerdict> {
+    const cached = getCachedReview(item);
+    if (cached) return cached;
+    const cfg = getActiveCfg(useForumStore().settings);
+    if (!cfg.url || !cfg.apiKey) {
+      throw new Error('上架需通过回廊 AI 审核——请先在「终端设置」中配置 API');
+    }
+    reviewing.value = true;
+    try {
+      const raw = await aiGenerate(cfg, buildReviewPrompt(item, kind), {
+        name: REVIEW_SCHEMA.name,
+        value: REVIEW_SCHEMA.value as unknown as Record<string, any>,
+      });
+      const verdict = reviewVerdict(extractJSON(raw));
+      setCachedReview(item, verdict);
+      return verdict;
+    } finally {
+      reviewing.value = false;
+    }
+  }
+
+  /** 上架：AI 审核通过 → 本地扣背包 → 服务器登记；任何一步失败都回滚/不动本地 */
   async function sell(name: string, snapshot: MarketItemSnapshot, kind: 'equip' | 'goods', qty: number, price: number): Promise<boolean> {
     lastError.value = '';
     const r = readContractor();
@@ -101,15 +138,29 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
       return false;
     }
     const oldBag = (r.c.背包 ?? {}) as Bag;
-    const oldQty = Number(oldBag[name]?.数量 ?? 0);
     let newBag: Bag;
     try {
-      newBag = bagRemove(oldBag, name, qty);
+      newBag = bagRemove(oldBag, name, qty); // 只读校验数量，不落任何变动
     } catch (e: any) {
       lastError.value = e.message;
       toastr.error(e.message);
       return false;
     }
+    // AI 审核（fail-closed：审核不过/失败时本地背包分毫未动）
+    let verdict: ReviewVerdict;
+    try {
+      verdict = await aiReviewItem({ ...snapshot, 名称: name, 数量: qty }, kind);
+    } catch (e: any) {
+      lastError.value = e?.message || 'AI 审核失败';
+      toastr.error('上架被拒: ' + lastError.value);
+      return false;
+    }
+    if (!verdict.pass) {
+      lastError.value = verdict.reasons.join('；');
+      toastr.error('AI 审核未通过: ' + lastError.value);
+      return false;
+    }
+    const oldQty = Number(oldBag[name]?.数量 ?? 0);
     _.set(r.mvu, ['stat_data', '契约者', '背包'], newBag);
     await commit(r.mvu, r.mid, [
       [['stat_data', '契约者', '背包', name, '数量'], oldQty - qty > 0 ? oldQty - qty : undefined],
@@ -222,6 +273,7 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     pending,
     pendingSell,
     loading,
+    reviewing,
     lastError,
     playerName,
     playerTier,

@@ -62,7 +62,7 @@
     <!-- ============ 上架 ============ -->
     <div v-if="tab === 'sell'" class="mkt-body">
       <template v-if="!sellPick">
-        <div class="mkt-hint">选择要上架的背包物品（装备按品质与阶位定价并做规则校验，道具按阶位定价）</div>
+        <div class="mkt-hint">选择要上架的背包物品（装备按品质与阶位定价并做规则校验，道具按阶位定价；上架前经回廊 AI 审核，需在终端设置中配置 API）</div>
         <div v-if="bagEntries.length === 0" class="mkt-empty">背包里没有可上架的物品</div>
         <div v-for="entry in bagTagged" :key="entry.name" class="mkt-card pick" @click="pickItem(entry.name, entry.item)">
           <div class="mc-head">
@@ -113,8 +113,8 @@
             <div v-if="priceHint" class="sf-hint" :class="{ bad: !priceHint.ok }">
               {{ priceHint.ok ? `合法区间 ${priceHint.min} ~ ${priceHint.max} UP` : priceHint.reason }}
             </div>
-            <button class="mc-buy big" :disabled="!canSell || store.loading" @click="doSell">
-              {{ store.loading ? '上架中…' : equipCheck && !equipCheck.ok ? '规则校验未通过' : '确认上架' }}
+            <button class="mc-buy big" :disabled="!canSell || store.loading || store.reviewing" @click="doSell">
+              {{ store.reviewing ? 'AI 审核中…' : store.loading ? '上架中…' : equipCheck && !equipCheck.ok ? '规则校验未通过' : '确认上架' }}
             </button>
           </div>
         </div>
