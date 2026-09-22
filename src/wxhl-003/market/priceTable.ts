@@ -174,7 +174,7 @@ export function checkPrice(kind: MarketKind, item: MarketItemSnapshot, sellerTie
 
   if (kind === 'goods') {
     const qty = Number(item.数量 ?? 1);
-    if (!Number.isInteger(qty) || qty < 1 || qty > 99) return fail('数量须为 1~99 的整数');
+    if (!Number.isInteger(qty) || qty < 1 || qty > 999) return fail('数量须为 1~999 的整数');
     const f = tierFactor(priceTierOf(item, sellerTier));
     if (!f) return fail('阶位无法识别');
     const min = GOODS_BASE[0] * f;

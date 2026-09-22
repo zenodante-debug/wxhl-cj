@@ -32,7 +32,8 @@ const ARMOR_MAX_T1 = 15;
 const ARMOR_TOLERANCE = 6;
 
 /** 伤害骰合法面（骰面升级路径 d4→d6→d8→d10→d12→d20→d40） */
-const DICE_RE = /^\d*d(4|6|8|10|12|40)$/i;
+const DICE_FACES = [4, 6, 8, 10, 12, 20, 40];
+const DICE_RE = /^(\d*)d(\d+)$/i;
 /** 骰数上限（五阶重型狙击 14d，留余量到 20） */
 const DICE_COUNT_MAX = 20;
 
@@ -113,15 +114,21 @@ export function validateEquip(
     errors.push(`装备闪避 ${num(item.装备闪避)} 超出该阶位合理范围（上限约 ${防闪上限}）`);
   }
 
-  // ———— 伤害骰格式（骰面升级路径 + 骰数上限） ————
+  // ———— 伤害骰格式（骰面升级路径 + 骰数上限）；格式与骰数分开报错，错误带原值 ————
   const dice = String(item.伤害骰 ?? '无').trim();
   if (dice !== '' && dice !== '无') {
-    if (!DICE_RE.test(dice)) {
-      errors.push(`伤害骰「${dice}」格式非法（只认 Nd4/d6/d8/d10/d12/d20/d40）`);
+    const m = dice.match(DICE_RE);
+    if (!m) {
+      errors.push(`伤害骰「${dice}」格式非法（应为 Nd4/d6/d8/d10/d12/d20/d40，如 4d20）`);
     } else {
-      const count = Number(dice.match(/^(\d*)d/i)?.[1] ?? 1) || 1;
-      if (count > DICE_COUNT_MAX) {
-        errors.push(`伤害骰骰数 ${count} 超出上限（约 ${DICE_COUNT_MAX}）`);
+      const face = Number(m[2]);
+      if (!DICE_FACES.includes(face)) {
+        errors.push(`伤害骰「${dice}」骰面 d${face} 不在合法骰面内（只认 d4/d6/d8/d10/d12/d20/d40）`);
+      } else {
+        const count = Number(m[1] || 1);
+        if (count > DICE_COUNT_MAX) {
+          errors.push(`伤害骰「${dice}」骰数 ${count} 超出上限（约 ${DICE_COUNT_MAX}）`);
+        }
       }
     }
   }

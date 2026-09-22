@@ -6,6 +6,7 @@ import {
   createListing,
   fetchListings,
   fetchMine,
+  totalPrice,
   type Listing,
 } from './api';
 import type { MarketItemSnapshot } from './priceTable';
@@ -283,9 +284,10 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
       lastError.value = '读不到存档变量';
       return false;
     }
+    const total = totalPrice(l); // 总价 = 单价 × 数量
     const up = Number(r.c.经济?.UP ?? 0);
     try {
-      spendUP(up, l.price);
+      spendUP(up, total);
     } catch (e: any) {
       lastError.value = e.message;
       toastr.error(e.message);
@@ -298,10 +300,10 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
       toastr.error('购买失败: ' + lastError.value);
       return false;
     }
-    _.set(r.mvu, ['stat_data', '契约者', '经济', 'UP'], up - l.price);
+    _.set(r.mvu, ['stat_data', '契约者', '经济', 'UP'], up - total);
     _.set(r.mvu, ['stat_data', '契约者', '背包'], bagAdd((r.c.背包 ?? {}) as Bag, l.item, l.qty));
-    await commit(r.mvu, r.mid, [[['stat_data', '契约者', '经济', 'UP'], up - l.price]]);
-    toastr.success(`购得「${l.item.名称}」×${l.qty}`);
+    await commit(r.mvu, r.mid, [[['stat_data', '契约者', '经济', 'UP'], up - total]]);
+    toastr.success(`购得「${l.item.名称}」×${l.qty}，支付 ${total} UP`);
     await refresh();
     return true;
   }

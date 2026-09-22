@@ -197,8 +197,9 @@ describe('checkPrice · goods（[5,3000]×阶位²）', () => {
     expect(checkPrice('goods', 无阶道具, '五阶', 50000).ok).toBe(true);
     expect(checkPrice('goods', 无阶道具, '五阶', 80000).ok).toBe(false);
   });
-  it('数量与价格防刷', () => {
-    expect(checkPrice('goods', { ...圣水凝晶, 数量: 100 }, '一阶', 15).ok).toBe(false);
+  it('数量与价格防刷（道具数量上限 999，支持成组出售如 50 发子弹）', () => {
+    expect(checkPrice('goods', { ...圣水凝晶, 数量: 1000 }, '一阶', 15).ok).toBe(false);
+    expect(checkPrice('goods', { ...圣水凝晶, 数量: 999 }, '一阶', 15).ok).toBe(true);
     expect(checkPrice('goods', { ...圣水凝晶, 数量: 0 }, '一阶', 15).ok).toBe(false);
     expect(checkPrice('goods', { ...圣水凝晶 }, '一阶', -1).ok).toBe(false);
   });

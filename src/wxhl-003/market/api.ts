@@ -28,8 +28,14 @@ export interface Listing {
   kind: 'equip' | 'goods';
   item: MarketItemSnapshot;
   qty: number;
+  /** 单价（UP）。成交总价 = price × qty */
   price: number;
   created: number;
+}
+
+/** 挂单成交总价（单价 × 数量） */
+export function totalPrice(l: Pick<Listing, 'price' | 'qty'>): number {
+  return Number(l.price) * Number(l.qty);
 }
 
 /** 非 2xx 时 throw Error(响应文本)；Worker 400 的响应体就是拒绝原因 */

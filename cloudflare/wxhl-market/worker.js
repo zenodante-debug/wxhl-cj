@@ -35,7 +35,8 @@ const ARMOR_MULT = [1, 2, 4, 7, 11]; // 防具防/闪阶位倍率
 const ARMOR_MAX_T1 = 15;             // 一阶防/闪绝对值上限（紫银极重防御）
 const ARMOR_TOLERANCE = 6;
 const BONUS_TOLERANCE = 2;           // 数值容差（真实存档与基准表存在小幅偏差）
-const DICE_RE = /^\d*d(4|6|8|10|12|40)$/i;
+const DICE_FACES = [4, 6, 8, 10, 12, 20, 40];
+const DICE_RE = /^(\d*)d(\d+)$/i;
 const DICE_COUNT_MAX = 20;
 const STRONG_RE = /必中|无敌|锁血|即死|无限/;
 
@@ -112,7 +113,7 @@ export function checkPrice(kind, item, sellerTier, price) {
 
   if (kind === 'goods') {
     const qty = Number(item?.数量 ?? 1);
-    if (!Number.isInteger(qty) || qty < 1 || qty > 99) return fail('数量须为 1~99 的整数');
+    if (!Number.isInteger(qty) || qty < 1 || qty > 999) return fail('数量须为 1~999 的整数');
     const f = tierFactor(tier);
     if (!f) return fail('阶位无法识别');
     const min = GOODS_BASE[0] * f;
@@ -160,9 +161,12 @@ function validateHard(item, quality, category, tierIdx) {
 
   const dice = String(item.伤害骰 ?? '无').trim();
   if (dice !== '' && dice !== '无') {
-    if (!DICE_RE.test(dice)) return `伤害骰「${dice}」格式非法（只认 Nd4/d6/d8/d10/d12/d20/d40）`;
-    const count = Number((dice.match(/^(\d*)d/i) || [])[1]) || 1;
-    if (count > DICE_COUNT_MAX) return `伤害骰骰数 ${count} 超出上限`;
+    const m = dice.match(DICE_RE);
+    if (!m) return `伤害骰「${dice}」格式非法（应为 Nd4/d6/d8/d10/d12/d20/d40，如 4d20）`;
+    const face = Number(m[2]);
+    if (!DICE_FACES.includes(face)) return `伤害骰「${dice}」骰面 d${face} 不在合法骰面内（只认 d4/d6/d8/d10/d12/d20/d40）`;
+    const count = Number(m[1] || 1);
+    if (count > DICE_COUNT_MAX) return `伤害骰「${dice}」骰数 ${count} 超出上限`;
   }
 
   let text = '';
@@ -185,8 +189,8 @@ function validateListing(b) {
   if (typeof (b.tier ?? '') !== 'string' || String(b.tier).length > 12) return 'tier 过长';
   if (!b.item || typeof b.item.名称 !== 'string' || b.item.名称.length === 0 || b.item.名称.length > 40)
     return '物品名称缺失或过长';
-  if (typeof (b.item.描述 ?? '') !== 'string' || String(b.item.描述).length > 200) return '物品描述过长';
-  if (!Number.isInteger(Number(b.qty)) || Number(b.qty) < 1 || Number(b.qty) > 99) return '数量须为 1~99 的整数';
+  if (typeof (b.item.描述 ?? '') !== 'string' || String(b.item.描述).length > 500) return '物品描述过长（上限 500 字）';
+  if (!Number.isInteger(Number(b.qty)) || Number(b.qty) < 1 || Number(b.qty) > 999) return '数量须为 1~999 的整数';
   if (JSON.stringify(b.item).length > 2048) return '物品快照过大';
 
   // 服务器自行分类: 客户端 kind 仅供参考

@@ -82,10 +82,26 @@ describe('validateEquip · 数值校验（主属性加成基准表）', () => {
   });
 
   it('伤害骰格式非法 → 拒绝（只认 d4/6/8/10/12/20/40）', () => {
-    expect(run({ ...合法蓝武, 伤害骰: '2d7' }).ok).toBe(false);
+    const r = run({ ...合法蓝武, 伤害骰: '2d7' });
+    expect(r.ok).toBe(false);
+    expect(r.errors[0]).toContain('d7'); // 骰面问题单独报，且带原值
     expect(run({ ...合法蓝武, 伤害骰: '很大' }).ok).toBe(false);
     expect(run({ ...合法蓝武, 伤害骰: '4D8' }).ok).toBe(true); // 大小写
     expect(run({ ...合法蓝武, 伤害骰: '无' }).ok).toBe(true); // 无骰（防具/饰品正常）
+  });
+
+  it('多骰面写法（4d20 / 14d10 / 6d10 / d20）合法', () => {
+    expect(run({ ...合法蓝武, 伤害骰: '4d20' }).errors).toEqual([]);
+    expect(run({ ...合法蓝武, 伤害骰: '14d10' }).errors).toEqual([]);
+    expect(run({ ...合法蓝武, 伤害骰: '6d10' }).errors).toEqual([]);
+    expect(run({ ...合法蓝武, 伤害骰: 'd20' }).errors).toEqual([]); // 单骰不带骰数
+  });
+
+  it('骰数超上限单独报错（带原值与骰数）', () => {
+    const r = run({ ...合法蓝武, 伤害骰: '30d8' });
+    expect(r.ok).toBe(false);
+    expect(r.errors[0]).toContain('骰数');
+    expect(r.errors[0]).toContain('30');
   });
 });
 

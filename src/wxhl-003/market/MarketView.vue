@@ -63,23 +63,25 @@
         {{ store.loading ? '市集加载中…' : '没有符合条件的挂单' }}
       </div>
       <div v-for="l in filteredListings" :key="l.id" class="mkt-card">
-        <div class="mc-head">
+        <div class="mc-head" @click="detailOpen = l">
           <span class="mc-name" :style="{ color: qualityColor(l.item) }">{{ l.item.名称 }}</span>
-          <span class="mc-price">{{ l.price }} UP</span>
+          <span class="mc-price">{{ l.price * l.qty }} UP</span>
         </div>
-        <div class="mc-tags">
+        <div class="mc-tags" @click="detailOpen = l">
           <span v-if="l.kind === 'equip'" class="mc-tag">{{ l.item.品质 }}·{{ l.item.类型 }}·{{ l.item.阶位 || l.tier }}</span>
           <span v-else class="mc-tag goods">道具</span>
           <span class="mc-tag">×{{ l.qty }}</span>
+          <span v-if="l.qty > 1" class="mc-tag">单价 {{ l.price }}</span>
         </div>
-        <div v-if="l.item.描述" class="mc-desc">{{ l.item.描述 }}</div>
+        <div v-if="l.item.描述" class="mc-desc" @click="detailOpen = l">{{ l.item.描述 }}</div>
         <div class="mc-foot">
           <span class="mc-seller">{{ l.seller }} · {{ l.tier }} · {{ timeAgo(l.created) }}</span>
+          <button class="mc-detail" @click="detailOpen = l">详情</button>
           <button
             v-if="l.client !== myClient"
             class="mc-buy"
             :disabled="store.purchasing"
-            @click="confirmBuy = l"
+            @click="detailOpen = l"
           >
             购买
           </button>
@@ -124,6 +126,18 @@
             <span>单价 UP</span>
             <input v-model.number="sellSel[entry.name].price" type="number" min="0" max="9999999" />
           </label>
+          <label class="sf-row col">
+            <span>描述（可编辑补充，1000 字内）</span>
+            <textarea
+              v-model="sellSel[entry.name].desc"
+              rows="3"
+              maxlength="1000"
+              placeholder="物品自带的描述会预填在这里，你可以编辑或补充"
+            ></textarea>
+          </label>
+          <div v-if="sellSel[entry.name].price" class="sf-hint">
+            总价：{{ Number(sellSel[entry.name].price) * Number(sellSel[entry.name].qty || 0) }} UP（单价 × 数量）
+          </div>
           <div v-if="selectedRow(entry.name)?.无法定价" class="sf-check">
             <div class="sf-err">✕ 物品带有装备字段但品质或类型无法识别，回廊无法定价——请先补全「品质」与「类型」字段，或点上方标签改判为道具</div>
           </div>
@@ -169,28 +183,87 @@
       <div class="mkt-hint">我的在售挂单</div>
       <div v-if="store.myListings.length === 0" class="mkt-empty">没有在售挂单</div>
       <div v-for="l in store.myListings" :key="l.id" class="mkt-card">
-        <div class="mc-head">
+        <div class="mc-head" @click="detailOpen = l">
           <span class="mc-name" :style="{ color: qualityColor(l.item) }">{{ l.item.名称 }}</span>
-          <span class="mc-price">{{ l.price }} UP</span>
+          <span class="mc-price">{{ l.price * l.qty }} UP</span>
+        </div>
+        <div class="mc-tags">
+          <span class="mc-tag">×{{ l.qty }}</span>
+          <span v-if="l.qty > 1" class="mc-tag">单价 {{ l.price }}</span>
         </div>
         <div class="mc-foot">
-          <span class="mc-seller">×{{ l.qty }} · {{ timeAgo(l.created) }}</span>
+          <span class="mc-seller">{{ timeAgo(l.created) }}</span>
+          <button class="mc-detail" @click="detailOpen = l">详情</button>
           <button class="mc-cancel" @click="store.cancel(l)">下架取回</button>
         </div>
       </div>
     </div>
 
-    <!-- ============ 购买确认 ============ -->
-    <div v-if="confirmBuy" class="mkt-mask" @click.self="confirmBuy = null">
-      <div class="mkt-dialog">
-        <div class="md-title">确认购买</div>
-        <div class="md-line">
-          「{{ confirmBuy.item.名称 }}」×{{ confirmBuy.qty }}，单价 <b>{{ confirmBuy.price }} UP</b>
+    <!-- ============ 商品详情 / 购买确认 ============ -->
+    <div v-if="detailOpen" class="mkt-mask" @click.self="detailOpen = null">
+      <div class="mkt-dialog detail">
+        <div class="md-title-row">
+          <span class="md-title" :style="{ color: qualityColor(detailOpen.item) }">{{ detailOpen.item.名称 }}</span>
+          <button class="md-close" @click="detailOpen = null">✕</button>
         </div>
-        <div class="md-line dim">卖家：{{ confirmBuy.seller }} · 支付后当前持有 {{ store.playerUP }} → {{ store.playerUP - confirmBuy.price }} UP</div>
+        <div class="mc-tags">
+          <span v-if="detailOpen.kind === 'equip'" class="mc-tag">
+            {{ qualityLabel(detailOpen.item) }}·{{ detailOpen.item.类型 }}·{{ detailOpen.item.阶位 || detailOpen.tier }}
+          </span>
+          <span v-else class="mc-tag goods">道具·{{ detailOpen.item.阶位 || detailOpen.tier }}</span>
+          <span class="mc-tag">×{{ detailOpen.qty }}</span>
+        </div>
+
+        <!-- 装备数值明细 -->
+        <div v-if="detailOpen.kind === 'equip'" class="md-grid">
+          <span v-if="has(detailOpen.item.伤害骰)">伤害骰</span><span v-if="has(detailOpen.item.伤害骰)">{{ detailOpen.item.伤害骰 }}</span>
+          <span v-if="Number(detailOpen.item.倍率)">倍率</span><span v-if="Number(detailOpen.item.倍率)">{{ detailOpen.item.倍率 }}</span>
+          <span v-if="has(detailOpen.item.主属性)">主属性</span>
+          <span v-if="has(detailOpen.item.主属性)">{{ detailOpen.item.主属性 }} +{{ detailOpen.item.主属性加成 ?? 0 }}</span>
+          <span v-if="has(detailOpen.item.副属性)">副属性</span>
+          <span v-if="has(detailOpen.item.副属性)">{{ detailOpen.item.副属性 }} +{{ detailOpen.item.副属性加成 ?? 0 }}</span>
+          <span v-if="Number(detailOpen.item.装备防御)">装备防御</span><span v-if="Number(detailOpen.item.装备防御)">{{ detailOpen.item.装备防御 }}</span>
+          <span v-if="Number(detailOpen.item.装备闪避)">装备闪避</span><span v-if="Number(detailOpen.item.装备闪避)">{{ detailOpen.item.装备闪避 }}</span>
+          <span v-if="Number(detailOpen.item.负重)">负重</span><span v-if="Number(detailOpen.item.负重)">{{ detailOpen.item.负重 }}kg</span>
+          <span v-if="Number(detailOpen.item.强化等级)">强化等级</span><span v-if="Number(detailOpen.item.强化等级)">+{{ detailOpen.item.强化等级 }}</span>
+          <span v-if="has(detailOpen.item.穿戴门槛)">穿戴门槛</span><span v-if="has(detailOpen.item.穿戴门槛)">{{ detailOpen.item.穿戴门槛 }}</span>
+        </div>
+
+        <!-- 效果明细 -->
+        <div v-if="effectList(detailOpen.item).length" class="md-block">
+          <div class="md-block-title">效果</div>
+          <div v-for="e in effectList(detailOpen.item)" :key="e.name" class="md-effect">
+            <b>{{ e.name }}</b
+            >：{{ e.text }}
+          </div>
+        </div>
+
+        <!-- 描述 -->
+        <div v-if="has(detailOpen.item.描述)" class="md-block">
+          <div class="md-block-title">描述</div>
+          <div class="md-desc-full">{{ detailOpen.item.描述 }}</div>
+        </div>
+
+        <div class="md-line dim">
+          卖家：{{ detailOpen.seller }} · {{ detailOpen.tier }} · 上架于 {{ timeAgo(detailOpen.created) }}
+        </div>
+        <div class="md-total">
+          单价 <b>{{ detailOpen.price }} UP</b> × {{ detailOpen.qty }} =
+          <b class="big">{{ detailOpen.price * detailOpen.qty }} UP</b>
+        </div>
+        <div class="md-line dim">支付后当前持有 {{ store.playerUP }} → {{ store.playerUP - detailOpen.price * detailOpen.qty }} UP</div>
+
         <div class="md-actions">
-          <button class="mc-cancel" @click="confirmBuy = null">再想想</button>
-          <button class="mc-buy" :disabled="store.loading" @click="doBuy">确认支付</button>
+          <button class="mc-cancel" @click="detailOpen = null">关闭</button>
+          <button
+            v-if="detailOpen.client !== myClient"
+            class="mc-buy"
+            :disabled="store.purchasing"
+            @click="doBuy"
+          >
+            {{ store.purchasing ? '支付中…' : '确认支付' }}
+          </button>
+          <button v-else class="mc-cancel" @click="doCancelMine(detailOpen)">下架取回</button>
         </div>
       </div>
     </div>
@@ -266,12 +339,44 @@ const filteredListings = computed(() =>
   }),
 );
 
-const confirmBuy = ref<Listing | null>(null);
+const detailOpen = ref<Listing | null>(null);
 
+/** 详情弹层里购买（总价 = 单价 × 数量） */
 async function doBuy() {
-  if (!confirmBuy.value) return;
-  const ok = await store.buy(confirmBuy.value);
-  if (ok) confirmBuy.value = null;
+  if (!detailOpen.value) return;
+  const ok = await store.buy(detailOpen.value);
+  if (ok) detailOpen.value = null;
+}
+
+/** 详情弹层里下架自己的挂单 */
+async function doCancelMine(l: Listing) {
+  const ok = await store.cancel(l);
+  if (ok) detailOpen.value = null;
+}
+
+/** 装备品质展示（灰色封印解包） */
+function qualityLabel(item: MarketItemSnapshot): string {
+  const q = parseQuality(item.品质);
+  if (!q) return String(item.品质 ?? '未知');
+  return q.gray ? `灰色封印(${q.quality})` : q.quality;
+}
+
+/** 详情用：字段是否有效（过滤"无"/0/空） */
+function has(v: unknown): boolean {
+  if (v === undefined || v === null) return false;
+  if (typeof v === 'string') return !['', '无', 'none', 'None'].includes(v.trim());
+  if (typeof v === 'number') return v !== 0;
+  return true;
+}
+
+/** 详情用：效果列表（record 或字符串） */
+function effectList(item: MarketItemSnapshot): { name: string; text: string }[] {
+  const e = item.效果;
+  if (e && typeof e === 'object' && !Array.isArray(e)) {
+    return Object.entries(e as Record<string, unknown>).map(([name, text]) => ({ name, text: String(text) }));
+  }
+  if (typeof e === 'string' && e.trim()) return [{ name: '效果', text: e }];
+  return [];
 }
 
 // ============ 上架（多选批量） ============
@@ -281,6 +386,8 @@ export interface SellEntry {
   /** 数量/单价 输入缓冲（price 为空串表示未填） */
   qty: number;
   price: number | string;
+  /** 描述（预填物品自带描述，可编辑补充） */
+  desc: string;
 }
 
 /** 已勾选待上架的物品（名称 → 输入缓冲） */
@@ -352,7 +459,7 @@ function selectedRow(name: string) {
 
 function toggleSel(name: string, item: MarketItemSnapshot & { 数量: number }) {
   if (sellSel[name]) delete sellSel[name];
-  else sellSel[name] = { name, item, qty: 1, price: '' };
+  else sellSel[name] = { name, item, qty: 1, price: '', desc: String(item.描述 ?? '') };
 }
 
 /** 切换装备/道具标注口径 */
@@ -375,7 +482,8 @@ async function doSellAll() {
     .filter(r => r.canSell)
     .map(r => ({
       name: r.name,
-      snapshot: r.item as MarketItemSnapshot,
+      // 描述以卖家编辑后的为准（可能被补充或改写），随快照一起上架并接受 AI 审核
+      snapshot: { ...r.item, 描述: String(r.entry.desc ?? '') } as MarketItemSnapshot,
       kind: r.kind,
       qty: Number(r.entry.qty),
       price: Number(r.entry.price),
@@ -423,7 +531,7 @@ watch(
     const item = (store.playerBag as Bag)[name];
     if (!item || Number(item.数量) <= 0) return;
     tab.value = 'sell';
-    if (!sellSel[name]) sellSel[name] = { name, item, qty: 1, price: '' };
+    if (!sellSel[name]) sellSel[name] = { name, item, qty: 1, price: '', desc: String(item.描述 ?? '') };
     store.pendingSell = '';
   },
   { immediate: true },
@@ -805,5 +913,112 @@ watch(
   justify-content: flex-end;
   gap: 8px;
   margin-top: 4px;
+}
+
+/* ===== 商品详情弹层 ===== */
+.mkt-dialog.detail {
+  max-height: 88%;
+  overflow-y: auto;
+}
+.md-title-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.md-close {
+  border: none;
+  background: transparent;
+  color: var(--chalk-d, #9c8f80);
+  font-size: 14px;
+  cursor: pointer;
+  padding: 0 4px;
+}
+.md-grid {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  gap: 3px 10px;
+  font-size: 11px;
+  color: var(--chalk, #d8cdbd);
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  span:nth-child(odd) {
+    color: var(--chalk-d, #9c8f80);
+  }
+}
+.md-block {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.md-block-title {
+  font-size: 11px;
+  color: var(--amber, #d8b36a);
+  letter-spacing: 1px;
+}
+.md-effect {
+  font-size: 11px;
+  color: var(--chalk, #d8cdbd);
+  line-height: 1.5;
+  padding-left: 6px;
+  border-left: 2px solid rgba(176, 138, 79, 0.4);
+  b {
+    color: var(--amber, #d8b36a);
+  }
+}
+.md-desc-full {
+  font-size: 11px;
+  color: var(--chalk, #d8cdbd);
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+.md-total {
+  font-size: 12px;
+  color: var(--chalk, #d8cdbd);
+  border-top: 1px solid rgba(80, 40, 20, 0.35);
+  padding-top: 6px;
+  b {
+    color: var(--amber, #d8b36a);
+  }
+  .big {
+    font-size: 14px;
+  }
+}
+.mc-detail {
+  padding: 3px 10px;
+  font-size: 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(176, 138, 79, 0.4);
+  background: transparent;
+  color: var(--amber-d, #b08a4f);
+  cursor: pointer;
+}
+
+/* 描述输入行（标签在上，文本域在下） */
+.sf-row.col {
+  flex-direction: column;
+  align-items: stretch;
+  gap: 4px;
+  span {
+    width: auto;
+  }
+  textarea {
+    width: 100%;
+    padding: 5px 8px;
+    font-size: 12px;
+    line-height: 1.5;
+    border-radius: 6px;
+    border: 1px solid rgba(80, 40, 20, 0.5);
+    background: rgba(16, 12, 9, 0.8);
+    color: var(--chalk, #d8cdbd);
+    outline: none;
+    resize: vertical;
+    font-family: inherit;
+    &:focus {
+      border-color: rgba(176, 138, 79, 0.6);
+    }
+  }
 }
 </style>

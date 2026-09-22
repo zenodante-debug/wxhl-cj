@@ -36,7 +36,8 @@ describe('worker checkPrice（与前端 priceTable 同规则镜像）', () => {
     expect(checkPrice('goods', { 数量: 5 }, '五阶', 50000).ok).toBe(true); // 无阶位按卖家五阶 [125,75000]
     expect(checkPrice('goods', { 数量: 5 }, '五阶', 80000).ok).toBe(false);
     expect(checkPrice('goods', { 数量: 5, 阶位: '一阶' }, '一阶', 4).ok).toBe(false);
-    expect(checkPrice('goods', { 数量: 100 }, '一阶', 15).ok).toBe(false);
+    expect(checkPrice('goods', { 数量: 1000 }, '一阶', 15).ok).toBe(false); // 数量上限 999（支持 50 发子弹整组出售）
+    expect(checkPrice('goods', { 数量: 999 }, '一阶', 15).ok).toBe(true);
   });
 });
 
