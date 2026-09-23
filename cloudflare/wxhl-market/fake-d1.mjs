@@ -29,7 +29,7 @@ function rankOrder(a, b) {
 const RANK_TIE_WHERE =
   /^lv > \? OR \(lv = \? AND updated < \?\) OR \(lv = \? AND updated = \? AND name < \?\)$/i;
 
-// ———— orders 表的三条语句 ————
+// ———— orders 表的四条语句 ————
 // 订单段的 SQL 形态很少（就下面这几条），所以**整句**锚定而不是拆 WHERE：
 // 这些语句的占位符全是位置参数，拆着认一旦看漏，参数就静默错位（例如把 maker 当 status），
 // 测试照样绿。整句锚定后，worker 改了 LIMIT / 排序 / 少了守卫条件，假件立刻炸 —— 宁可炸也不要错位。
