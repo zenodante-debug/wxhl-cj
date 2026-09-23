@@ -670,12 +670,12 @@ async function handleOrder(url, request, env, cors) {
     const row = await readOrder(String(b.id));
     if (!row) return new Response(JSON.stringify({ ok: true, deleted: true }), { headers: { ...cors, 'Content-Type': 'application/json' } }); // 已被另一边删掉，幂等
     const side = b.side === 'maker' ? 'maker' : 'poster';
-    // 当事人校验：只允许替自己领。但**该侧尚无当事人**时（从未被接单的单，maker 为 NULL）放行 ——
-    // 这不是放宽越权：claim 的归属一律按 `r.maker === who` 判，NULL 匹配不上任何名字，
-    // 所以替一张空单按 maker 侧 ACK 谁也拿不到东西，只是让这张空行也能被清掉。
-    // 当事人存在时仍逐字核对姓名，防止别人替你 ACK 把你的待领款「领」掉。
-    const 当事人 = side === 'maker' ? row.maker : row.poster;
-    if (当事人 !== null && 当事人 !== undefined && String(b.who ?? '').trim() !== 当事人)
+    // 当事人校验：`who` 必须**逐字**等于该侧的当事人，不等即 400。
+    // 这里**不给「该侧尚无当事人」留放行分支**（待接单的单 maker 为 NULL）：
+    // 发单人的订金是他在客户端 spendUP 扣掉的、服务器只留记录，
+    // 若任由第三方把一张从未被接单的单两边 ACK 掉，行被删而订金没有任何接单人 gainUP 补上
+    // —— 那笔钱就凭空消失了。所以空单的 maker 侧必须领不了。
+    if (String(b.who ?? '').trim() !== (side === 'maker' ? row.maker : row.poster))
       return new Response('不是该订单的当事人', { status: 400, headers: cors });
     const 列 = side === 'maker' ? 'maker_ack' : 'poster_ack';
     await withRetry(() => env.MARKET_DB.prepare(`UPDATE orders SET ${列} = 1, updated = ? WHERE id = ?`).bind(Date.now(), row.id).run());

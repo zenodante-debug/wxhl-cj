@@ -426,6 +426,9 @@ describe('订单 · 待领取与 ACK（Review Focus 3/4）', () => {
   it('双方 ACK 后 orders 表无该行', async () => {
     const env = { MARKET_DB: makeFakeD1() };
     const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+    // 先接单：ACK 要求 who 逐字等于该侧当事人，未接单时 maker 为 NULL、乙领不了（见下一条回归用例）。
+    // 走完整的「接单 → 双方各领一侧」才是真实流程。
+    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
 
     const a1 = await (await call(env, '/order/ack', postJson({ id, who: '甲', side: 'poster' }))).json();
     expect(a1.deleted).toBe(false);                 // 只有一方领了，行还在
@@ -435,6 +438,16 @@ describe('订单 · 待领取与 ACK（Review Focus 3/4）', () => {
 
     const { results } = await env.MARKET_DB.prepare(`SELECT * FROM orders WHERE id = ?`).bind(id).all();
     expect(results).toHaveLength(0);
+  });
+
+  it('未接单的单没有 maker 当事人：按 maker 侧 ACK 必须 400 且不删行（Ruling G 回归）', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+    const r = await call(env, '/order/ack', postJson({ id, who: '乙', side: 'maker' }));
+    expect(r.status).toBe(400);
+    // 放行会让第三方把这单删掉：订金已在发单人客户端扣掉，却没有接单人 gainUP 补上 → 钱凭空消失
+    const { results } = await env.MARKET_DB.prepare(`SELECT * FROM orders WHERE id = ?`).bind(id).all();
+    expect(results).toHaveLength(1);
   });
 
   it('重复领取是幂等的：ACK 两次不报错，且不会让行消失两次', async () => {
