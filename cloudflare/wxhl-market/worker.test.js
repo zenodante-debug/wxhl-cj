@@ -611,3 +611,72 @@ describe('订单 · 按项领取（Ruling I）', () => {
     for (const s of ['待接单', '已接单', '已交付']) expect(应领(行(s))).toEqual([]);  // 非终态：不删行
   });
 });
+
+// ================================================================
+// Ruling L：`claim` 必须给出**显式待领清单** `待领: [{ id, 项 }]`。
+// 只有汇总数字是不够的：ACK 是逐单逐项的，客户端从若干张单的「和」里反推不出该对哪张单的哪一项发 ACK；
+// 图省事把每张单的每一项都 ACK 一遍，就会提前置位尚不存在的权益（「已接单」就 ACK 尾款 →
+// `maker_final_ack=1` → 真走到「已完成」时尾款永远领不到）—— 即 Ruling I 那一类漏洞的入口。
+// ================================================================
+describe('订单 · 待领清单（Ruling L）', () => {
+  /** 该单在该用户待领清单里的项，按顺序（入参是 `/order/mine` 的整个响应体） */
+  const 项集 = (mine, id) => mine.claim.待领.filter(e => e.id === id).map(e => e.项);
+
+  it('接单后只列「订金」；领掉订金并验收后才列出「尾款」', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+
+    // 还没完成：**只能**领订金。清单里若出现「尾款」，客户端照 ACK 就会把尾款位提前置 1（永久锁死）
+    expect(项集(await 待领(env, '乙'), id)).toEqual(['订金']);
+    expect((await 待领(env, '乙')).claim.final).toBe(0);
+
+    await 领(env, id, '乙', 'maker', '订金');
+    await call(env, '/order/deliver', postJson({ id, maker: '乙', item: { 名称: '剑', 数量: 1 } }));
+    await call(env, '/order/confirm', postJson({ id, poster: '甲' }));
+
+    // 同单同 id：订金已领 → 不再列；尾款此时才列
+    expect(项集(await 待领(env, '乙'), id)).toEqual(['尾款']);
+    expect((await 待领(env, '乙')).claim.final).toBe(700);
+  });
+
+  it('汇总与清单同源：逐单对应，不是只看总数（a 领掉后 b 仍在）', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const a = (await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json()).id;
+    const b = (await (await call(env, '/order/create', postJson({ poster: '丙', spec: 需求单, deposit: 200, final: 100 }))).json()).id;
+    await call(env, '/order/accept', postJson({ id: a, maker: '乙' }));
+    await call(env, '/order/accept', postJson({ id: b, maker: '乙' }));
+
+    let mine = await 待领(env, '乙');
+    expect(mine.claim.deposit).toBe(500);                       // 300 + 200：两条都在清单里，总数才对得上
+    expect(项集(mine, a)).toEqual(['订金']);
+    expect(项集(mine, b)).toEqual(['订金']);
+
+    await 领(env, a, '乙', 'maker', '订金');
+    mine = await 待领(env, '乙');
+    expect(mine.claim.deposit).toBe(200);                       // 只剩 b
+    expect(项集(mine, a)).toEqual([]);                          // a：钱没了，条目也同步没了
+    expect(项集(mine, b)).toEqual(['订金']);
+  });
+
+  it('成品也进清单：发单人「成品」；退货后接单者的「尾款」条目给的是**物**不是钱', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    await call(env, '/order/deliver', postJson({ id, maker: '乙', item: { 名称: '剑', 数量: 1 } }));
+
+    // 已交付：发单人列「成品」，且与 `items` 同源（同一条 = 同一个 id）
+    const poster = await 待领(env, '甲');
+    expect(项集(poster, id)).toEqual(['成品']);
+    expect(poster.claim.items.map(e => e.id)).toEqual([id]);
+    expect(项集(await 待领(env, '乙'), id)).toEqual(['订金']);   // 接单者此时只有订金可领
+
+    await call(env, '/order/reject', postJson({ id, poster: '甲' }));
+    // 已取消：发单人两手空空；接单者拿退回的成品 —— 走**同一个** `maker_final` 位，故 项 也叫「尾款」
+    expect(项集(await 待领(env, '甲'), id)).toEqual([]);
+    const maker = await 待领(env, '乙');
+    expect(项集(maker, id)).toEqual(['订金', '尾款']);
+    expect(maker.claim.final).toBe(0);              // 但这一条给的是物：`final` 汇总（钱）不该被它撑大
+    expect(maker.claim.items.map(e => e.id)).toEqual([id]);
+  });
+});

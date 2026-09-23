@@ -540,6 +540,36 @@ export function 应领(row) {
   return [];
 }
 
+/**
+ * 逐单算「此刻这个人还能领哪几项」—— `/order/mine` 的**三个视图全部由它派生**：
+ * 汇总数字（`deposit`/`final`）、`items`（物）、`待领`（逐单逐项清单，客户端照它 ACK）。
+ *
+ * 绝不另写第二套判断：只要出现「汇总说有钱、`待领` 里却没这条」，
+ * 客户端就无从 ACK 那笔钱（或那件成品）→ 权益被永久锁死 —— Ruling I / L 堵的正是这一类。
+ *
+ * 返回 [{ 项, 金额, 成品 }]：
+ * - `项` ∈ `订金` | `尾款` | `成品`，直接就是 `/order/ack` 的入参；
+ * - `金额` 计入同名的汇总数字（仅 `成品` 项为 0——它给的是物不是钱）；
+ * - `成品: true` 表示这一项领的是成品快照（不是 UP），值取自 `row.item_json`。
+ *
+ * 注意「尾款」这一个 **`maker_final` 位**承载两种权益，互斥、共用一个 `项` 名：
+ * 已完成 → 尾款是**钱**；已取消（交付后退货）→ 同一个位退的是**成品**（故 `成品: true`、不进 `final` 汇总）。
+ * 客户端不必区分，见 `项: '尾款'` 就 ACK 该单的 `maker_final` 位即可。
+ */
+function 待领项(r, who) {
+  const 出 = [];
+  // 订金：接单后归接单者（`maker === who` 已蕴含「已接单」）；发单人**任何状态都不加** —— 「订金不退」的全部含义。
+  if (r.maker === who && r.maker_deposit_ack !== 1) 出.push({ 项: '订金', 金额: r.deposit, 成品: false });
+  // 尾款（钱）：验收完成后归接单者
+  if (r.maker === who && r.status === 订单状态.已完成 && r.maker_final_ack !== 1) 出.push({ 项: '尾款', 金额: r.final, 成品: false });
+  // 退回的成品：同一个 `maker_final` 位（已取消只退成品、不付尾款）
+  if (r.maker === who && r.status === 订单状态.已取消 && r.maker_final_ack !== 1 && r.item_json) 出.push({ 项: '尾款', 金额: 0, 成品: true });
+  // 成品：交付后归发单人（**验收完成后仍归发单人**，直到他 ACK 领走 —— 已完成不能漏，否则验收完反而丢了成品）
+  if (r.poster === who && (r.status === 订单状态.已交付 || r.status === 订单状态.已完成) && r.poster_ack !== 1 && r.item_json)
+    出.push({ 项: '成品', 金额: 0, 成品: true });
+  return 出;
+}
+
 function newOrderId() {
   return String(Date.now()).padStart(15, '0') + '-' + Math.random().toString(36).slice(2, 8);
 }
@@ -685,8 +715,13 @@ async function handleOrder(url, request, env, cors) {
   }
 
   // GET /order/mine?who=<姓名>  →  { asPoster, asMaker, claim }
-  // claim 是**该用户名下所有订单**的待领汇总；领取本身发生在客户端，领完调 /order/ack。
-  // 一旦 ACK 过（ack 位为 1），该项就不再出现在 claim 里 —— 汇总与「已领」互斥。
+  // claim 是该用户名下所有订单的待领**汇总**；领取本身发生在客户端，领完调 /order/ack。
+  // 一旦 ACK 过（该项的 ack 位为 1），该项就不再出现在 claim 里 —— 汇总与「已领」互斥。
+  // Ruling L：另给**显式清单** `待领: [{ id, 项 }]`，客户端照它逐条 ACK。
+  //   只有汇总数字是不够的：ACK 是逐单逐项的（`{id, who, side, 项}`），从若干张单的**和**里
+  //   反推不出该对哪张单的哪一项发 ACK；客户端若图省事把每张单的每一项都 ACK 一遍，
+  //   就会**提前置位尚不存在的权益**（订单还在「已接单」就 ACK 尾款 → `maker_final_ack=1`
+  //   → 等它真走到「已完成」时尾款永远领不到）。这正是 Ruling I 那一类漏洞的入口。
   if (p === '/order/mine' && request.method === 'GET') {
     const who = String(url.searchParams.get('who') ?? '').trim();
     if (!who) return new Response('缺少姓名', { status: 400, headers: cors });
@@ -694,21 +729,16 @@ async function handleOrder(url, request, env, cors) {
       `SELECT * FROM orders WHERE poster = ? OR maker = ? ORDER BY updated DESC LIMIT 200`,
     ).bind(who, who).all();
     const rows = results ?? [];
-    const claim = { deposit: 0, final: 0, items: [], comp: null };
+    const claim = { deposit: 0, final: 0, items: [], 待领: [], comp: null };
     for (const r of rows) {
-      // 订金：接单后归接单者（`maker` 非空即已接单）；发单人**任何状态都不加** —— 「订金不退」的全部含义。
-      // 门控在**订金那一个位**上，而不是「整侧已领」：否则一领订金，尾款与退回成品就永远看不见了。
-      if (r.maker === who && r.maker_deposit_ack !== 1) claim.deposit += r.deposit;
-      // 尾款：验收完成后归接单者（门控在**尾款那一个位**上，与订金互不影响）
-      if (r.maker === who && r.status === 订单状态.已完成 && r.maker_final_ack !== 1) claim.final += r.final;
-      // 成品：交付后归发单人（**验收完成后仍归发单人**，直到他 ACK 领走）；退货后归接单者。
-      // 已完成不能漏：发单人验收了却没领，成品还是他的，丢了就凭空蒸发。
-      // 用**数组**而非单槽：同时有多件待领时单槽互相覆盖会丢件，且带着订单 id 客户端才知道该 ACK 哪张单。
-      if ((r.status === 订单状态.已交付 || r.status === 订单状态.已完成) && r.poster === who && r.poster_ack !== 1 && r.item_json)
-        claim.items.push({ id: r.id, item: JSON.parse(r.item_json) });
-      // 退货退回的成品同样挂在 `maker_final` 位上（尾款与退回成品互斥：已完成只付尾款、已取消只退成品）
-      if (r.status === 订单状态.已取消 && r.maker === who && r.maker_final_ack !== 1 && r.item_json)
-        claim.items.push({ id: r.id, item: JSON.parse(r.item_json) });
+      // 三个视图（汇总数字 / `items` / `待领`）**全部**由 `待领项` 派生，绝不另写第二套判断：
+      // 一个说有钱、另一个没条目，客户端就 ACK 不到，那笔钱/那件成品会被永久锁死。
+      for (const p of 待领项(r, who)) {
+        if (p.成品) claim.items.push({ id: r.id, item: JSON.parse(r.item_json) });
+        else if (p.项 === '订金') claim.deposit += p.金额;
+        else claim.final += p.金额;
+        claim.待领.push({ id: r.id, 项: p.项 });
+      }
     }
     return new Response(JSON.stringify({
       asPoster: rows.filter(r => r.poster === who).map(toOrderDto),
