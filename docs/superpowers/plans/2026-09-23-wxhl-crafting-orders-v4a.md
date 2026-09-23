@@ -524,7 +524,9 @@ git commit -m "feat(wxhl): 订单 Worker 段（二）——交付/验收/退货/
   - `需求单Schema`（zod）、`type 需求单 = z.infer<typeof 需求单Schema>`、`需求单摘要(s: 需求单): string`
   - `type 订单状态 = '待接单'|'已接单'|'已交付'|'已完成'|'已取消'|'已弃单'`
   - `interface 订单 { id, poster, maker, spec, deposit, final, status, created, updated }`
-  - `interface 待领取 { deposit: number; final: number; item: MarketItemSnapshot | null; comp: unknown }`
+  - `interface 待领项 { id: string; 项: '订金' | '尾款' | '成品' }`
+  - `interface 待领取 { deposit: number; final: number; items: { id: string; item: MarketItemSnapshot }[]; 待领: 待领项[] }`
+    —— **`items` 与 `待领` 是 Ruling I/L 之后的形状**：ACK 已改为**逐单逐项**，`待领` 是服务器给出的**领取清单**，客户端**照单 ACK**，不得从汇总数字或订单列表反推（那会提前置位尚不存在的权益，使尾款/退回成品永久领不到）
   - `createOrder(p: { poster, spec, deposit, final }): Promise<{ id: string }>`
   - `fetchHall(exclude: string): Promise<订单[]>`
   - `acceptOrder(id: string, maker: string): Promise<void>`
@@ -532,7 +534,8 @@ git commit -m "feat(wxhl): 订单 Worker 段（二）——交付/验收/退货/
   - `confirmOrder(id: string, poster: string): Promise<void>`
   - `rejectOrder(id: string, poster: string): Promise<void>`
   - `fetchMine(who: string): Promise<{ asPoster: 订单[]; asMaker: 订单[]; claim: 待领取 }>`
-  - `ackOrder(id: string, who: string, side: 'poster' | 'maker'): Promise<{ deleted: boolean }>`
+  - `ackOrder(id: string, who: string, side: 'poster' | 'maker', 项: '订金' | '尾款' | '成品'): Promise<{ deleted: boolean }>`
+    —— `side` 由 `项` 唯一决定（订金/尾款 → `maker`，成品 → `poster`）
   - `ORDER_ITEM_MAX = 4096`、`成品体积检查(item): string | null`（超限返回原因，否则 null）
 
 - [ ] **Step 1: Write the failing test**
@@ -653,11 +656,13 @@ export interface 订单 {
   updated: number;
 }
 
+export interface 待领项 { id: string; 项: '订金' | '尾款' | '成品' }
 export interface 待领取 {
   deposit: number;
   final: number;
-  item: MarketItemSnapshot | null;
-  comp: unknown;
+  items: { id: string; item: MarketItemSnapshot }[];
+  /** 服务器给出的领取清单：客户端照此逐条 ACK，**不要**从汇总或订单列表反推 */
+  待领: 待领项[];
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -691,8 +696,8 @@ export function rejectOrder(id: string, poster: string): Promise<void> {
 export function fetchMine(who: string): Promise<{ asPoster: 订单[]; asMaker: 订单[]; claim: 待领取 }> {
   return req(`/order/mine?who=${encodeURIComponent(who)}`);
 }
-export function ackOrder(id: string, who: string, side: 'poster' | 'maker'): Promise<{ deleted: boolean }> {
-  return post('/order/ack', { id, who, side, client: getClientId() });
+export function ackOrder(id: string, who: string, side: 'poster' | 'maker', 项: '订金' | '尾款' | '成品'): Promise<{ deleted: boolean }> {
+  return post('/order/ack', { id, who, side, 项, client: getClientId() });
 }
 ```
 
@@ -745,7 +750,7 @@ function messageId(): number | 'latest' { /* 照抄 crafting/store.ts */ }
 function readContractor(): { mvu: any; c: any; mid: number | 'latest' } | null { /* 照抄 */ }
 async function commit(mvu: any, mid: number | 'latest', checks: [string[], unknown][]): Promise<void> { /* 照抄 */ }
 
-const 空待领: 待领取 = { deposit: 0, final: 0, item: null, comp: null };
+const 空待领: 待领取 = { deposit: 0, final: 0, items: [], 待领: [] };
 
 export const useOrderStore = defineStore('wxhl003-order', () => {
   const hall = ref<订单[]>([]);
@@ -869,39 +874,45 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
 
   /**
    * 领取全部待领物并逐项 ACK。
-   * 资金先本地入账再 ACK；物品先 ACK 再入包（避免 ACK 失败导致重复入包）。
-   * 任一项失败即停，下次刷新继续（ACK 是幂等的）。
+   * **必须照服务器给的 `待领` 清单逐条 ACK** —— 不要遍历 `asPoster`/`asMaker` 对每张单每个项都 ACK：
+   * 那会**提前置位尚不存在的权益**（如订单还在「已接单」就 ACK 尾款 → `maker_final_ack=1`），
+   * 等该单真正完成时尾款**永久领不到**。这是 Ruling L 明确禁止的写法。
+   * 资金先本地入账再 ACK；物品先入包再 ACK。任一项失败即停，下次刷新继续（ACK 幂等）。
    */
   async function claimAll(): Promise<void> {
     if (busy.value) return;
     const r = readContractor();
     if (!r) { lastError.value = '读不到存档变量'; return; }
     const c = claim.value;
-    if (c.deposit <= 0 && c.final <= 0 && !c.item) return;
+    if (c.待领.length === 0) return;
 
     busy.value = true; lastError.value = '';
     try {
-      // ① 资金：订金归接单者、尾款归接单者 —— 一律是"我收到钱"
+      // ① 资金：订金与尾款都是"我收到钱"（备注：退货时 `项='尾款'` 指的是退回的**成品**，
+      //    它不计入 `final` —— 服务器已把两者分开，故此处只管 `deposit + final`）
       const 进账 = c.deposit + c.final;
       if (进账 > 0) {
         const 新UP = gainUP(Number(r.c.经济?.UP ?? 0), 进账);
         _.set(r.mvu, ['stat_data', '契约者', '经济', 'UP'], 新UP);
         await commit(r.mvu, r.mid, [[['stat_data', '契约者', '经济', 'UP'], 新UP]]);
       }
-      // ② 物品：先入包再 ACK
-      if (c.item) {
-        const 名 = String((c.item as any).名称 ?? '');
-        if (!名) throw new Error('待领成品缺少名称');
-        const 新背包 = bagAdd((r.c.背包 ?? {}) as Bag, c.item, Number((c.item as any).数量 ?? 1));
+      // ② 物品：逐件入包（`items` 是 `{id, item}[]`）
+      if (c.items.length > 0) {
+        let 新背包 = (r.c.背包 ?? {}) as Bag;
+        for (const { item } of c.items) {
+          const 名 = String((item as any).名称 ?? '');
+          if (!名) throw new Error('待领成品缺少名称');
+          新背包 = bagAdd(新背包, item, Number((item as any).数量 ?? 1));
+        }
         _.set(r.mvu, ['stat_data', '契约者', '背包'], 新背包);
         await commit(r.mvu, r.mid, [[['stat_data', '契约者', '背包'], 新背包]]);
       }
-      // ③ ACK 所有相关订单（两侧都领完时服务端会删行）
-      for (const o of [...asPoster.value, ...asMaker.value]) {
-        const side = o.poster === playerName.value ? 'poster' : 'maker';
-        try { await ackOrder(o.id, playerName.value, side); } catch (_) { /* 幂等，下次再来 */ }
+      // ③ 照单 ACK（side 由 项 唯一决定）
+      for (const t of c.待领) {
+        const side = t.项 === '成品' ? 'poster' : 'maker';
+        try { await ackOrder(t.id, playerName.value, side, t.项); } catch (_) { /* 幂等，下次再来 */ }
       }
-      toastr.success(`已领取：${进账} UP${c.item ? ' + 1 件物品' : ''}`);
+      toastr.success(`已领取：${进账} UP${c.items.length ? ` + ${c.items.length} 件物品` : ''}`);
     } catch (e: any) {
       lastError.value = e?.message || '领取失败';
       toastr.error(lastError.value);
