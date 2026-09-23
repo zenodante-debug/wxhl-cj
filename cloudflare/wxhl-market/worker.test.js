@@ -802,3 +802,79 @@ describe('订单 · 待领逐项金额（Ruling M）', () => {
     expect(mine.claim.items.map(e => e.id)).toEqual([b]);                  // 物另算：b 退回的成品（a 的成品归发单人）
   });
 });
+
+// ================================================================
+// 超脱阶位（2026-09-23 新增支持）
+// 经济系统里超脱是五阶之上的第 6 档；定价系数 = 五阶基准价 × 20 = 一阶基准 × 500
+// ================================================================
+describe('超脱阶位 · 服务端支持', () => {
+  const 汤姆卡 = {
+    client: 'welfare-657868', seller: '无由回廊', tier: '超脱', kind: 'goods',
+    item: {
+      名称: '汤姆猫三分钟体验卡', 类型: '消耗品', 品质: '银色', 阶位: '超脱阶', 数量: 1,
+      描述: '致敬最伟大的默片动画与不死猫神。',
+      效果: {
+        动画物理学: '免疫一切常规与规则级致死伤害，生命状态绝对锁定。',
+        四次元背后: '无视质量与体积守恒，可掏出无限大的木槌等夸张造物。',
+        荒诞现实扭曲: '将周围物理法则同化为搞笑频道，持续3分钟。',
+      },
+    },
+    qty: 1, price: 0,
+  };
+
+  it('阶位解析：超脱 → 系数 500（一阶 × 500）', () => {
+    // 银武（同表紫 ×10）一阶基准 [15000,30000]；超脱 → ×500 → 参考 [7,500,000, 15,000,000]
+    const r = checkPrice('equip', { 品质: '银色', 类型: '武器', 阶位: '超脱阶' }, '一阶', 4_000_000);
+    expect(r.min).toBe(3_750_000); // 7,500,000 × 50%
+    expect(r.ok).toBe(true);
+  });
+
+  it('超脱物品可上架（0 UP 运营通道，3 条效果走结构上限内）', async () => {
+    const env = { MARKET_DB: makeFakeD1(), WELFARE_KEY: 'secret' };
+    const res = await call(env, '/market/list', postJson({ ...汤姆卡, opsKey: 'secret' }));
+    expect(res.status).toBe(200);
+    const { id } = await res.json();
+
+    const browse = await (await call(env, '/market/listings')).json();
+    const l = browse.listings.find(x => x.id === id);
+    expect(l.item.阶位).toBe('超脱阶');
+    expect(l.item.品质).toBe('银色');
+  });
+
+  it('超脱阶天然不触发超模费（其上无阶可超）', async () => {
+    const env = { MARKET_DB: makeFakeD1(), WELFARE_KEY: 'secret' };
+    const res = await call(env, '/market/list', postJson({ ...汤姆卡, opsKey: 'secret' }));
+    const { id } = await res.json();
+    const browse = await (await call(env, '/market/listings')).json();
+    expect(browse.listings.find(x => x.id === id).op).toBeUndefined();
+  });
+
+  it('装备效果 4 条仍被拒（结构铁律对超脱同样生效）', async () => {
+    const env = { MARKET_DB: makeFakeD1(), WELFARE_KEY: 'secret' };
+    const 装备 = {
+      ...汤姆卡,
+      kind: 'equip',
+      item: {
+        ...汤姆卡.item,
+        名称: '超脱试作兵器', 类型: '武器', 伤害骰: '2d20', 倍率: 2, 负重: 3, 强化等级: 0,
+        效果: { a: '1', b: '2', c: '3', d: '4' },
+      },
+    };
+    const res = await call(env, '/market/list', postJson({ ...装备, opsKey: 'secret' }));
+    expect(res.status).toBe(400);
+    expect(await res.text()).toContain('效果条目');
+  });
+
+  it('道具无效果条数限制（世界书那条铁律只约束装备）', async () => {
+    const env = { MARKET_DB: makeFakeD1(), WELFARE_KEY: 'secret' };
+    const item = { ...汤姆卡.item, 效果: { a: '1', b: '2', c: '3', d: '4' } };
+    const res = await call(env, '/market/list', postJson({ ...汤姆卡, item, opsKey: 'secret' }));
+    expect(res.status).toBe(200);
+  });
+
+  it('无运营密钥时超脱物品不能 0 UP 挂（价格下限照常生效）', async () => {
+    const env = { MARKET_DB: makeFakeD1(), WELFARE_KEY: 'secret' };
+    const res = await call(env, '/market/list', postJson(汤姆卡)); // 无 opsKey
+    expect(res.status).toBe(400);
+  });
+});

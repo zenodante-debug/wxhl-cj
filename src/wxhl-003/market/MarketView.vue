@@ -354,7 +354,7 @@ const myClient = getClientId();
 
 // 银色 2026-09-23 起可售卖（基准价 = 紫装 × 10）
 const QUALITY_OPTIONS = ['白色', '蓝色', '金色', '紫色', '银色'] as const;
-const TIER_OPTIONS = ['一阶', '二阶', '三阶', '四阶', '五阶'] as const;
+const TIER_OPTIONS = ['一阶', '二阶', '三阶', '四阶', '五阶', '超脱阶'] as const;
 
 // ============ 逛市场 ============
 const FILTERS = [
@@ -382,6 +382,7 @@ const TIER_FILTERS = [
   { key: '2', label: '三阶' },
   { key: '3', label: '四阶' },
   { key: '4', label: '五阶' },
+  { key: '5', label: '超脱' },
 ] as const;
 const tierFilter = ref<(typeof TIER_FILTERS)[number]['key']>('all');
 

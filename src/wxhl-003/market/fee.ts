@@ -145,8 +145,10 @@ export function assessDeterministic(
   return points.length > 0 ? { realIdx, points } : null;
 }
 
-/** 物品的名义阶位下标（0..4）；阶位写的是超脱或认不出 → null（无法按名义收费，走拒绝路径） */
+/** 物品的名义阶位下标（0..5，超脱 = 5）；认不出 → null（无法按名义收费，走拒绝路径） */
 export function nominalIdxOf(item: MarketItemSnapshot, sellerTier: string): number | null {
-  const idx = 归一位阶(String(item.阶位 ?? '') || sellerTier);
+  const s = String(item.阶位 ?? '') || sellerTier;
+  if (/超脱/.test(s)) return 5; // 名义即超脱：其上无阶可超，不收超模费
+  const idx = 归一位阶(s);
   return idx === undefined ? null : idx;
 }

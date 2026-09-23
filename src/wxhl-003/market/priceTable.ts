@@ -148,16 +148,24 @@ export function categoryOf(item: MarketItemSnapshot): MarketCategory {
   return c.kind === 'equip' ? c.category : '道具';
 }
 
-/** 物品定价阶位下标 0..4：优先物品自身阶位，缺省回退卖家阶位；认不出返回 null */
+/** 物品定价阶位下标 0..5：一~五阶 = 0..4，**超脱 = 5**；缺省回退卖家阶位；认不出返回 null */
 export function tierIndexOfItem(item: MarketItemSnapshot, sellerTier: string): number | null {
-  const idx = 归一位阶(String(item.阶位 ?? '') || sellerTier);
+  const s = String(item.阶位 ?? '') || sellerTier;
+  if (isTranscendent(s)) return 5;
+  const idx = 归一位阶(s);
   return idx === undefined ? null : idx;
 }
 
 // ———— 价格 ————
 
-/** 阶位 → 系数 x²（一阶1、二阶4、三阶9、四阶16、五阶25），认不出返回 null */
+/** 阶位是否「超脱」（第 6 档，五阶之上；用户经济系统口径，位阶修正系数 20） */
+export function isTranscendent(tier: unknown): boolean {
+  return /超脱/.test(String(tier ?? ''));
+}
+
+/** 阶位 → 系数（一阶1、二阶4、三阶9、四阶16、五阶25；**超脱 = 五阶基准价 × 20 = 500**），认不出返回 null */
 function tierFactor(tier: string): number | null {
+  if (isTranscendent(tier)) return 25 * 20;
   const idx = 归一位阶(tier);
   if (idx === undefined) return null;
   return (idx + 1) ** 2;

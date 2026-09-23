@@ -58,17 +58,23 @@ const STRONG_RE = /必中|无敌|锁血|即死|无限/;
 
 const TIER_DIGITS = { 一: 1, 二: 2, 三: 3, 四: 4, 五: 5, 1: 1, 2: 2, 3: 3, 4: 4, 5: 5 };
 
+// 阶位解析（2026-09-23 支持「超脱」）：
+//   一~五阶 = 1..5；超脱 = 6（经济系统里超脱是五阶之上的第 6 档，位阶修正系数 20）
+//   定价系数 x²：超脱 = 五阶基准价 × 20 = 一阶基准 × 500（用户早先定稿口径）
 function tierDigit(tier) {
-  const m = String(tier ?? '').match(/[一二三四五1-5]/);
+  const s = String(tier ?? '');
+  if (/超脱/.test(s)) return 6;
+  const m = s.match(/[一二三四五1-5]/);
   return m ? TIER_DIGITS[m[0]] : null;
 }
 function tierFactor(tier) {
   const n = tierDigit(tier);
-  return n ? n * n : null;
+  if (!n) return null;
+  return n <= 5 ? n * n : 25 * 20;
 }
 function tierIdxOf(tier) {
   const n = tierDigit(tier);
-  return n ? n - 1 : null;
+  return n ? n - 1 : null; // 超脱 → 5
 }
 function num(v) {
   const n = Number(v);
@@ -160,12 +166,13 @@ export function checkPrice(kind, item, sellerTier, price, opsKey, welfareKey) {
 // ———— 装备规则硬校验（世界书<装备效果强度限制>），返回拒绝原因或 null ————
 // opDeclared = 挂单携带超模声明（真实阶位+费用）：数值超基准与强效果改为收费路径，跳过；
 //              结构类问题（效果>3条、骰面格式）仍无条件拒绝。
+// tierIdx >= 5（超脱）：已是最顶级，其上无阶可超，数值/强效果一律跳过（只查结构）。
 function validateHard(item, quality, category, tierIdx, opDeclared) {
   const eff = item.效果 && typeof item.效果 === 'object' && !Array.isArray(item.效果)
     ? Object.keys(item.效果).length : 0;
   if (eff > 3) return `效果条目数 ${eff} 条超出上限（铁律最多 2 条，破限器上限 3 条）`;
 
-  if (!opDeclared) {
+  if (!opDeclared && tierIdx < 5) {
     const 强化加成 = category === '饰品' ? Math.max(0, num(item.强化等级)) : 0;
     const bench = (BONUS[category][quality] || [])[tierIdx] ?? 0;
     const 主上限 = bench + 强化加成 + BONUS_TOLERANCE;

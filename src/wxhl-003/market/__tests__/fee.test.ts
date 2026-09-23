@@ -114,10 +114,11 @@ describe('assessDeterministic · 数值超基准反查真实阶位', () => {
 });
 
 describe('nominalIdxOf / realTierIdx', () => {
-  it('名义阶位解析', () => {
+  it('名义阶位解析（超脱 = 5，2026-09-23 起服务端正式支持）', () => {
     expect(nominalIdxOf({ 阶位: '三阶' }, '一阶')).toBe(2);
     expect(nominalIdxOf({}, '四阶')).toBe(3);
-    expect(nominalIdxOf({ 阶位: '超脱' }, '一阶')).toBeNull(); // 名义不能是超脱
+    expect(nominalIdxOf({ 阶位: '超脱阶' }, '一阶')).toBe(5);
+    expect(nominalIdxOf({ 阶位: '认不出' }, '一阶')).toBeNull();
   });
   it('真实阶位名与下标互转', () => {
     expect(realTierIdx('超脱')).toBe(5);
