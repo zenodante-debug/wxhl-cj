@@ -10,6 +10,7 @@
 // 服务器侧那几条裁定（Ruling G/I/L/M）堵的都是这两个方向，客户端这一层不得把它们重新打开：
 //   L —— 只准照服务器给的 `待领` 清单逐条 ACK（不许遍历自己的订单，那会提前置位尚不存在的权益）；
 //   M —— 先回执、后入账，且只为回执成功的条目入账（反过来 ACK 失败会重复发钱）。
+//   N —— 图纸是生产资料（不可恢复），交付流程必须排除它：store 边界拦一道、UI 候选再挡一道。
 //
 // MVU 读写纪律（与 crafting/store.ts / market/store.ts 同一套）：
 //   楼层探测 → _.set → replaceMvuData → 回读校验；**只写 `契约者.背包` 与 `契约者.经济.UP`**。
@@ -18,6 +19,7 @@
 // ================================================================
 import { bagAdd, bagRemove, gainUP, spendUP, type Bag } from '../../market/settle';
 import type { MarketItemSnapshot } from '../../market/priceTable';
+import { isBlueprintName } from '../recipes';
 import {
   ackOrder, acceptOrder, confirmOrder, createOrder, deliverOrder,
   fetchHall, fetchMine, rejectOrder,
@@ -57,6 +59,15 @@ async function commit(mvu: any, mid: number | 'latest', checks: [string[], unkno
 }
 
 const 空待领: 待领取 = { deposit: 0, final: 0, items: [], 待领: [] };
+
+/**
+ * 交付下拉候选（Ruling N 的 UI 侧防线）：背包里数量 > 0 且**不是图纸**的物品名。
+ * 图纸是生产资料（材料候选排除它、市场禁止倒卖它，同一条护栏），不能当订单成品送出去。
+ * 真正的拦截在 `deliver` 里 —— 这里只是让玩家根本看不到这个选项。
+ */
+export function 可交付候选(背包: Bag): string[] {
+  return Object.keys(背包 ?? {}).filter(n => !isBlueprintName(n) && Number(背包[n]?.数量 ?? 0) > 0);
+}
 
 /**
  * 某件成品该不该入包：它由 `待领` 里**同 id** 的那条承载 —— 正常交付是 `项='成品'` 那条，
@@ -163,6 +174,14 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
     const 当前背包 = (r.c.背包 ?? {}) as Bag;
     const 物品 = 当前背包[物品名];
     if (!物品) { lastError.value = `背包里没有「${物品名}」`; toastr.error(lastError.value); return false; }
+    // Ruling N（store 边界防线）：图纸是生产资料（4,500~112,500 UP、不可恢复），
+    // 材料候选排除它、市场禁止倒卖它 —— 交付这道口是同一条护栏，也必须拦。
+    // 拦在函数内而不是靠每个调用点自觉（同 autoPick 那次的收口理由）。
+    if (isBlueprintName(物品名)) {
+      lastError.value = `「${物品名}」是图纸，图纸是生产资料，不能作为订单成品交付`;
+      toastr.error(lastError.value);
+      return false;
+    }
     // **数量必须是 1**：背包条目的 `数量` 是堆叠数，而交付出去的只是**一件**成品
     // （本地也只 bagRemove(…, 1)）。原样带上堆叠数上传，发单人领取时
     // `bagAdd(item, item.数量)` 会照数收下一整叠 —— 那是凭空复制出来的物品。

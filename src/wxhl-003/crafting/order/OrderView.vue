@@ -126,6 +126,8 @@
               <option v-for="n in bagNames" :key="n" :value="n">{{ n }}（×{{ craft.bag[n]?.数量 }}）</option>
             </select>
           </label>
+          <!-- 发单人肉眼验收是 spec 的设计：store 不核对品质/类型，故在这里提醒玩家自己对照，防误送 -->
+          <div class="ord-deliverhint">交付前请对照订单需求（品质/类型），发单人将就成品验收</div>
           <div class="oc-foot">
             <span v-if="!bagNames.length" class="ord-hint">背包里没有可交付的物品</span>
             <button class="ord-mini" :disabled="store.busy || !deliverSel[o.id]" @click="交付(o.id)">交付</button>
@@ -144,7 +146,7 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useCraftingStore } from '../store';
 import type { 订单 } from './api';
 import { 需求单Schema, 需求单摘要 } from './spec';
-import { useOrderStore } from './store';
+import { useOrderStore, 可交付候选 } from './store';
 
 const store = useOrderStore();
 const craft = useCraftingStore();
@@ -205,8 +207,10 @@ function 可验收(o: 订单): boolean {
   return craft.playerUP >= o.final;
 }
 
-/** 交付物品下拉候选：背包里数量 > 0 的物品名（交付快照固定 数量=1，由 store.deliver 按死） */
-const bagNames = computed(() => Object.keys(craft.bag).filter(n => Number(craft.bag[n]?.数量 ?? 0) > 0));
+/** 交付物品下拉候选：背包里数量 > 0 且不是图纸的物品名（Ruling N：图纸是生产资料，
+ *  这里挡一道让玩家看不到选项；真正的拦截在 store.deliver，绕过 UI 也送不出去）。
+ *  交付快照固定 数量=1，由 store.deliver 按死。 */
+const bagNames = computed(() => 可交付候选(craft.bag));
 /** 每张「我接的」单的交付选择（订单 id → 物品名） */
 const deliverSel = reactive<Record<string, string>>({});
 
@@ -304,4 +308,5 @@ onMounted(() => {
 .ord-hint { font-size: 11px; color: #e67e22; margin-right: auto; }
 .ord-deliver { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; }
 .ord-deliver select { max-width: 65%; }
+.ord-deliverhint { font-size: 11px; opacity: 0.65; margin-top: 2px; }
 </style>

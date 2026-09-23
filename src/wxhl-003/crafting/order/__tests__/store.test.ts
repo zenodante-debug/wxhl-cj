@@ -5,7 +5,7 @@ import {
   type 订单, type 待领取,
 } from '../api';
 import { 需求单Schema, type 需求单 } from '../spec';
-import { useOrderStore } from '../store';
+import { useOrderStore, 可交付候选 } from '../store';
 
 /**
  * 订单 store 的经济守卫测试。
@@ -204,6 +204,41 @@ describe('交付 · 从背包取出一件并上传', () => {
     expect(mocks.deliverOrder).not.toHaveBeenCalled();
     expect(落档次数).toBe(0);
     expect(提示[0]).toContain('背包里没有');
+  });
+
+  // Ruling N：图纸是生产资料（4,500~112,500 UP），材料候选排除它、市场禁止倒卖它，
+  // 交付这道口也必须拦 —— 且拦在 store 边界，不靠每个调用点自觉。
+  it('图纸 → 拒、不发请求、零落档、背包原样、报错指明「生产资料」（Ruling N）', async () => {
+    mvu.stat_data.契约者.背包 = { '图纸·狼王牙刃': { 名称: '图纸·狼王牙刃', 数量: 1 } };
+    const s = useOrderStore();
+    expect(await s.deliver('A', '图纸·狼王牙刃')).toBe(false);
+    expect(mocks.deliverOrder).not.toHaveBeenCalled(); // 请求都不许发
+    expect(落档次数).toBe(0); // 一个变量都不许写
+    expect(Number(当前背包()['图纸·狼王牙刃'].数量)).toBe(1); // 图纸还在背包里
+    expect(成功).toEqual([]); // 不许假报成功
+    expect(s.lastError).toContain('图纸');
+    expect(s.lastError).toContain('生产资料');
+    expect(提示.some(m => m.includes('生产资料'))).toBe(true);
+  });
+});
+
+// ================================================================
+// ③½ Ruling N：交付候选计算（OrderView 的 bagNames 用的就是它）——
+//     图纸不进候选，普通物品进；数量为 0 的不进。
+// ================================================================
+describe('可交付候选 · 图纸不进交付候选（Ruling N）', () => {
+  it('含普通物品、不含图纸、不含数量为 0 的', () => {
+    const 背包 = {
+      狼牙短剑: { 名称: '狼牙短剑', 数量: 2 },
+      '图纸·狼王牙刃': { 名称: '图纸·狼王牙刃', 数量: 1 },
+      精铁: { 名称: '精铁', 数量: 0 },
+    };
+    expect(可交付候选(背包 as any)).toEqual(['狼牙短剑']);
+  });
+
+  it('背包里没有非图纸物品 → 空候选（UI 据此显示「没有可交付的物品」）', () => {
+    const 背包 = { '图纸·狼王牙刃': { 名称: '图纸·狼王牙刃', 数量: 3 } };
+    expect(可交付候选(背包 as any)).toEqual([]);
   });
 });
 
