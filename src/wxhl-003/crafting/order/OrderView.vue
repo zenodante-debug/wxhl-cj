@@ -103,7 +103,7 @@
         <div v-if="o.status === '已交付'" class="oc-foot">
           <span v-if="!可验收(o)" class="ord-hint">尾款不足（需 {{ o.final }} UP）</span>
           <span v-else class="oc-meta">{{ o.maker }} 已交付成品</span>
-          <button class="ord-mini" :disabled="store.busy || !可验收(o)" @click="store.confirm(o.id)">验收</button>
+          <button class="ord-mini" :disabled="store.busy || !可验收(o)" @click="验收(o.id)">验收</button>
           <button class="ord-mini ord-mini-dang" :disabled="store.busy" @click="store.reject(o.id)">退货</button>
         </div>
       </div>
@@ -199,12 +199,22 @@ async function 发布(): Promise<void> {
   const ok = await store.publish(spec, pub.订金, pub.尾款);
   // 成功才清描述性字段（订金已托管）；类型/金额保留，方便照同一套再发一单
   if (ok) { pub.名称 = ''; pub.效果要求 = ''; pub.说明 = ''; }
+  craft.syncFromMvu(); // 发布扣了订金：验收按钮的余额判定要看到新 UP（M-3）
 }
 
 // ---------------- 我的：验收 / 交付 / 领取 ----------------
 /** 验收守卫：尾款从发单人 UP 里扣（store.confirm 会再校一遍），余额不足先禁按钮并给提示 */
 function 可验收(o: 订单): boolean {
   return craft.playerUP >= o.final;
+}
+
+// ---------------- M-3：订单动作后同步工坊 store ----------------
+// 「尾款不足」禁用态读 craft.playerUP、交付下拉读 craft.bag，而订单动作直接写 MVU——
+// 不回同步的话，按钮状态要等切页签（onMounted 的 syncFromMvu）才刷新。
+// 四个写 MVU 的动作（发布/交付/验收/领取）await 完都 sync 一次；sync 只是重读存档，失败也无害。
+async function 验收(id: string): Promise<void> {
+  await store.confirm(id); // 验收扣了尾款（其余「已交付」单的余额判定要跟着刷新）
+  craft.syncFromMvu();
 }
 
 /** 交付物品下拉候选：背包里数量 > 0 且不是图纸的物品名（Ruling N：图纸是生产资料，
@@ -219,6 +229,7 @@ async function 交付(id: string): Promise<void> {
   if (!n) return;
   const ok = await store.deliver(id, n);
   if (ok) delete deliverSel[id];
+  craft.syncFromMvu(); // 交付从背包取走了一件：下拉候选要看到新背包
 }
 
 /** 待领取汇总行：钱按「订金 X + 尾款 Y UP」、物按「N 件物品」（口径与 store.claimAll 的成功播报一致） */
@@ -233,6 +244,7 @@ const 有待领 = computed(() => (store.claim.待领?.length ?? 0) > 0);
 
 async function 领取(): Promise<void> {
   await store.claimAll(); // 结果（含部分领取）经 store.lastError 走顶部常驻提示条/错误条
+  craft.syncFromMvu();    // 领取可能加了 UP/入了包（first=true 的条目）：余额判定与交付下拉要看到新值
 }
 
 function timeAgo(ts: number): string {

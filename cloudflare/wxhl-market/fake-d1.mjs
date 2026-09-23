@@ -62,9 +62,10 @@ const ORDER_ADVANCE_SQL =
   /^UPDATE orders SET status = \?, updated = \? WHERE id = \? AND status = \?$/i;
 const ORDER_ADVANCE_ITEM_SQL =
   /^UPDATE orders SET status = \?, updated = \?, item_json = \? WHERE id = \? AND status = \?$/i;
-/** ACK：把某一**项**的 ack 位置 1。列名限定为按项 ACK 的三个合法列 —— 拼错列名即炸，不静默放过 */
+/** ACK：把某一**项**的 ack 位置 1。列名限定为按项 ACK 的三个合法列 —— 拼错列名即炸，不静默放过。
+ *  WHERE 带 `\1 = 0`（与 worker 的双发闸同形）：该位已是 1 → 改 0 行，worker 据此回 first:false */
 const ORDER_ACK_SQL =
-  /^UPDATE orders SET (maker_deposit_ack|maker_final_ack|poster_ack) = 1, updated = \? WHERE id = \?$/i;
+  /^UPDATE orders SET (maker_deposit_ack|maker_final_ack|poster_ack) = 1, updated = \? WHERE id = \? AND \1 = 0$/i;
 /** 双方 ACK 完删行 */
 const ORDER_DELETE_SQL = /^DELETE FROM orders WHERE id = \?$/i;
 
@@ -328,12 +329,13 @@ export function makeFakeD1() {
             row.updated = Number(updated);
             return ok(1);
           }
-          // ———— 工坊订单：ACK 记某一项已领取（重复 ACK 只是再写一次 1）————
+          // ———— 工坊订单：ACK 记某一项已领取（条件置位：该位已是 1 → 0 行受影响，first=false）————
           const ackM = oneLine(sql).match(ORDER_ACK_SQL);
           if (ackM) {
             const [updated, id] = st._a;
             const row = orders.get(id);
             if (!row) return ok(0);
+            if (row[ackM[1]] !== 0) return ok(0);   // 重复回执：位已是 1，SQL 的 AND <列>=0 匹配不到
             row[ackM[1]] = 1;
             row.updated = Number(updated);
             return ok(1);

@@ -330,6 +330,14 @@ describe('订单 · 发布与大厅', () => {
     expect((await call(env, '/order/create', postJson({ spec: 需求单, deposit: 1, final: 1 }))).status).toBe(400);
     expect((await call(env, '/order/create', postJson({ poster: '甲', deposit: 1, final: 1 }))).status).toBe(400);
   });
+
+  // M-2：poster 建单时已 trim 落库，exclude 不 trim 的话「 甲 」≠「甲」会把自己的单漏进大厅
+  it('大厅 exclude 会 trim：带空白的姓名不把自己的单漏进大厅', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+    const hall = await (await call(env, '/order/list?exclude=' + encodeURIComponent(' 甲 '))).json();
+    expect(hall.orders.some(o => o.id === id)).toBe(false);
+  });
 });
 
 describe('订单 · 接单竞态（Review Focus 1）', () => {
@@ -480,6 +488,38 @@ describe('订单 · 待领取与 ACK（Review Focus 3/4）', () => {
     expect(死后.status).toBe(200);
     expect((await 死后.json()).deleted).toBe(true); // 当作已领完
     expect(await 行数(env, id)).toBe(0);
+  });
+
+  // ———— I-1：first 标志（双开标签页的双发闸） ————
+  // 两个标签页共享同一存档、读到同一份待领清单：UPDATE 带 `AND <列>=0`，只有真正把
+  // 0 翻成 1 的那次回 first:true；客户端只为 first=true 的条目入账，否则两页各入一次＝双发钱。
+  it('first 标志：首次 ACK first=true、重复 first=false，且重复不妨碍后续流程删行', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const id = await 到已完成(env);
+
+    const a1 = await (await 领(env, id, '甲', 'poster', '成品')).json();
+    expect(a1.first).toBe(true);                    // 首次：位 0→1
+    const a2 = await (await 领(env, id, '甲', 'poster', '成品')).json();
+    expect(a2.first).toBe(false);                   // 重复：位已是 1，UPDATE 改 0 行
+    expect(a2.deleted).toBe(false);                 // 行仍在（乙两项未领）
+
+    await 领(env, id, '乙', 'maker', '订金');
+    const a3 = await (await 领(env, id, '乙', 'maker', '尾款')).json();
+    expect(a3.first).toBe(true);
+    expect(a3.deleted).toBe(true);                  // 应领项全齐 → 删行（中间夹过一次重复 ACK也不妨碍）
+    expect(await 行数(env, id)).toBe(0);
+  });
+
+  it('行已被删后的幂等 ACK 回 first=false（权益早被领走，本次只是补回执）', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const id = await 到已完成(env);
+    await 领(env, id, '甲', 'poster', '成品');
+    await 领(env, id, '乙', 'maker', '订金');
+    await 领(env, id, '乙', 'maker', '尾款');
+    const 死后 = await (await 领(env, id, '乙', 'maker', '尾款')).json();
+    expect(死后.ok).toBe(true);
+    expect(死后.deleted).toBe(true);
+    expect(死后.first).toBe(false);
   });
 
   it('接单者待领订金（接单后），领取前重复查询仍能看到', async () => {

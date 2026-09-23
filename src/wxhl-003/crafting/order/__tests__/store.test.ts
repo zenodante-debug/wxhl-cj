@@ -21,6 +21,8 @@ import { useOrderStore, 可交付候选 } from '../store';
  *   ⑤ Ruling M：**先回执、后入账，且只为回执成功的条目入账**。反过来的话 ACK 失败（网络抖动即可）时
  *      钱已到玩家手上而服务器仍列着该项 → 下次刷新**再发一遍**（无限刷钱）。故这里钉「ACK 失败 ⇒ 一分不入」
  *      与「部分成功只入成功的那些」；金额一律取条目自带的 `金额`，汇总数字在用例里故意写错以证明没被读。
+ *   ⑥ I-1：**只为 first=true 的条目入账**（first=false 是另一标签页已入过账的重复回执，再入一次＝双发）；
+ *      且**写入基取 ACK 循环后的新读值**——循环期间的存档变动（市场卖出）不得被整片覆盖。
  *
  * 注：**`vi.mock` 的相对路径从本文件所在目录解析**。API 模块是 `'../api'`（本文件在 order/__tests__/，
  * `../` 到 order/）。写错层级会**静默注册一个不存在的模块**、store 照旧加载真模块 ——
@@ -100,7 +102,7 @@ beforeEach(() => {
   mocks.deliverOrder.mockResolvedValue(undefined);
   mocks.confirmOrder.mockResolvedValue(undefined);
   mocks.rejectOrder.mockResolvedValue(undefined);
-  mocks.ackOrder.mockResolvedValue({ deleted: false });
+  mocks.ackOrder.mockResolvedValue({ deleted: false, first: true });
   setActivePinia(createPinia());
 });
 
@@ -307,7 +309,7 @@ describe('claimAll · 照待领清单逐条 ACK（Ruling L）+ 先回执后入�
   it('Ruling M 核心：回执失败的条目一律不入账 —— 该条的钱不进 UP、其成品不入包', async () => {
     // A 回执成功；C（尾款的钱）与 B（成品）回执失败 —— 必须只入 A 的账
     mocks.ackOrder.mockImplementation(async (id: string) => {
-      if (id === 'A') return { deleted: false };
+      if (id === 'A') return { deleted: false, first: true };
       throw new Error('网络断了');
     });
     const 成品 = { 名称: '狼牙短剑', 描述: 'd', 数量: 1 };
@@ -350,7 +352,7 @@ describe('claimAll · 照待领清单逐条 ACK（Ruling L）+ 先回执后入�
   it('部分成功：两单里只有回执成功的那张单入账', async () => {
     mocks.ackOrder.mockImplementation(async (id: string) => {
       if (id === 'B') throw new Error('网络断了');
-      return { deleted: false };
+      return { deleted: false, first: true };
     });
     备好我的({
       claim: {
@@ -414,6 +416,54 @@ describe('claimAll · 照待领清单逐条 ACK（Ruling L）+ 先回执后入�
     expect(s.lastError).toContain('本地入账失败');
     expect(s.lastError).toContain('回执已送达');
     expect(提示.some(m => m.includes('本地入账失败'))).toBe(true);
+  });
+
+  // ================================================================
+  // I-1（v4a 终审）：① first 门——双开标签页共享存档、读到同一份待领清单，
+  //   重复回执（first=false）不得再入账，否则两页各入一次＝双发钱/双入包；
+  //   ② 写入基取循环后新读值——ACK 循环是网络往返，期间存档被市场/工坊改过的话，
+  //   拿循环前的快照写回会把那段变动整片覆盖（钱物凭空蒸发/复制）。
+  // ================================================================
+  it('I-1 · first=false 的重复回执不入账：钱不进 UP、物不入包；first=true 照常入账', async () => {
+    // 另一标签页已把 A 的订金与 B 的成品领过（服务器已置位），本页的重复 ACK 回 first:false
+    mocks.ackOrder.mockImplementation(async (id: string) => ({ deleted: false, first: id === 'C' }));
+    const 成品 = { 名称: '狼牙短剑', 描述: 'd', 数量: 1 };
+    备好我的({
+      claim: {
+        deposit: 0, final: 0,
+        items: [{ id: 'B', item: 成品 }],
+        待领: [
+          { id: 'A', 项: '订金', 金额: 300 },   // first=false：另一页已入过账
+          { id: 'B', 项: '成品', 金额: 0 },     // first=false：另一页已入过包
+          { id: 'C', 项: '尾款', 金额: 700 },   // first=true：本页首次
+        ],
+      },
+    });
+    const s = useOrderStore();
+    await s.refresh();
+    await s.claimAll();
+    expect(当前UP()).toBe(20700);                       // 只有 C 的 700（A 的 300 不双发）
+    expect(当前背包()['狼牙短剑']).toBeUndefined();      // B 的成品不入包（不双入）
+    expect(落档次数).toBe(1);
+    expect(成功.some(m => m.includes('700'))).toBe(true);
+  });
+
+  it('I-1 · 写入基取循环后新读值：ACK 期间存档被市场改过，那段变动不被覆盖', async () => {
+    // ACK 循环的 await 期间，市场侧卖出了精铁（背包 −1 件、UP +90）。
+    // 旧实现拿循环前的快照 r 整片写回 → 这笔卖出被回滚（UP 回 20300、精铁凭空回包）。
+    mocks.ackOrder.mockImplementation(async () => {
+      delete (mvu.stat_data.契约者.背包 as Record<string, unknown>).精铁;
+      mvu.stat_data.契约者.经济.UP = 20090;
+      return { deleted: false, first: true };
+    });
+    mvu.stat_data.契约者.背包 = { 精铁: { 名称: '精铁', 数量: 1 } };
+    备好我的({ claim: { deposit: 0, final: 0, items: [], 待领: [{ id: 'A', 项: '订金', 金额: 300 }] } });
+    const s = useOrderStore();
+    await s.refresh();
+    await s.claimAll();
+    expect(当前UP()).toBe(20390);                        // 20090（新读值）+ 300，而不是 20000+300
+    expect((当前背包() as Record<string, unknown>).精铁).toBeUndefined(); // 卖出的精铁没被写回背包
+    expect(落档次数).toBe(1);
   });
 });
 

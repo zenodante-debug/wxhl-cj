@@ -69,6 +69,14 @@ export function rejectOrder(id: string, poster: string): Promise<void> {
 export function fetchMine(who: string): Promise<{ asPoster: 订单[]; asMaker: 订单[]; claim: 待领取 }> {
   return req(`/order/mine?who=${encodeURIComponent(who)}`);
 }
-export function ackOrder(id: string, who: string, side: 'poster' | 'maker', 项: '订金' | '尾款' | '成品'): Promise<{ deleted: boolean }> {
+/**
+ * ACK 回执。`deleted`：应领项是否已全部置位（行已删）；`first`：本次是否**真正置位**（首次 ACK）。
+ *
+ * `first` 是双开标签页的双发闸（I-1）：两页共享同一存档、读到的待领清单相同，服务器只在
+ * 0→1 的那次回 `first:true`（重复 ACK 改 0 行 → `first:false`）。客户端**只为 first=true
+ * 的条目入账**——否则两页各入一次，就是双发钱/双入包。行已被对方删掉的幂等分支也回 `first:false`
+ * （权益早被领走，本次只是补个回执）。
+ */
+export function ackOrder(id: string, who: string, side: 'poster' | 'maker', 项: '订金' | '尾款' | '成品'): Promise<{ deleted: boolean; first: boolean }> {
   return post('/order/ack', { id, who, side, 项, client: getClientId() });
 }

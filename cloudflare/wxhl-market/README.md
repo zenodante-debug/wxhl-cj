@@ -13,6 +13,8 @@ listings(id PK, client, seller, tier, kind, category, tier_idx, quality,
          item_name, item_json, qty, price, created, op_json)
 earnings(client PK, amount)          -- 卖家待领货款
 sales(id PK, client, buyer, item_json, qty, price, created)  -- 出售记录（含买家名）
+orders(id PK, poster, maker, spec_json, deposit, final, status, item_json, rating, comp_json,
+       maker_deposit_ack, maker_final_ack, poster_ack, created, updated)  -- 工坊订单（长流程，状态是行上字段）
 ```
 
 - `price` = **单价**，成交总价 = `price × 买走数量`
@@ -57,6 +59,9 @@ wrangler deploy
 
 Dashboard 兜底：Workers & Pages → `wxhl-market` → 粘贴 `worker.js` →
 Settings → Bindings → **D1 database**，变量名填 `MARKET_DB`。
+
+> **发版顺序**：先 `wrangler deploy` Worker、**再**发前端。前端的订单页签打的是本 Worker 的
+> `/order/*` 端点——Worker 部署前发前端，订单页签会显示「订单服务连接失败」。
 
 ## 玩家排行榜的管理密钥（可选，但强烈建议配）
 
@@ -113,6 +118,25 @@ wrangler secret put RANK_ADMIN_KEY
 排行榜自带 `ensureRankSchema`，**不经过市场那套建表**：两边任何一方出问题都不会
 波及另一方。
 
+### 工坊订单（v4a）
+
+发单人出钱、接单者出材料与图纸；成品走 **escrow 托管**（交付后存在订单行的 `item_json` 里，
+发单人领取、退货时直接退到接单者待领——不经过任何人的背包中转）。服务器只留飞行中订单，
+应领项全部 ACK 后删行。
+
+| 方法/路径 | 说明 |
+|---|---|
+| POST `/order/create` | 发布 `{ poster, spec, deposit, final }` → `{ id }`。订金须正整数、尾款非负整数，需求单 ≤4096 字节 |
+| GET `/order/list?exclude=` | 订单大厅：`status=待接单` 且排除自己发的（`exclude` 服务端 trim），最新 100 条 |
+| POST `/order/accept` | 接单 `{ id, maker }`。**原子**：`UPDATE ... WHERE status='待接单'`，0 行 → 400"手慢了" |
+| POST `/order/deliver` | 交付 `{ id, maker, item }`：成品快照 ≤4096 字节，上传后由服务器托管 |
+| POST `/order/confirm` | 验收 `{ id, poster }`（尾款在客户端结算，服务端只推进状态） |
+| POST `/order/reject` | 退货 `{ id, poster }`：成品从托管直接退到接单者待领，**订金不退** |
+| GET `/order/mine?who=` | `{ asPoster, asMaker, claim }`；`claim.待领` 是逐项领取清单（含逐项金额），客户端照它 ACK |
+| POST `/order/ack` | 领取回执 `{ id, who, side, 项 }` → `{ ok, deleted, first }`。`first=true` 表示本次真正置位（首次）；应领项全部置位 → 删行 |
+
+订单段自带 `ensureOrderSchema`（照排行榜的隔离套路），与市场/排行榜三方互不波及。
+
 ## 本地验证（不需要网络）
 
 ```bash
@@ -132,6 +156,10 @@ curl 'https://market.657868.xyz/market/listings?category=防具&quality=蓝色'
 # 榜单（中文同样走文件）
 curl https://market.657868.xyz/rank/top
 curl --get --data-urlencode 'name=林千尺' https://market.657868.xyz/rank/top
+
+# 工坊订单：发布（订金在发单人客户端扣除，服务器只记账托管；中文同样走文件）
+curl -X POST https://market.657868.xyz/order/create -H 'Content-Type: application/json' \
+  --data-binary @order.json   # {"poster":"林千尺","spec":{"名称":"狼牙短剑","成品类型":"装备","装备子类":"武器","品质":"金色","阶位":2,"效果要求":"","说明":""},"deposit":300,"final":700}
 
 # 运营清理：定期删掉 90 天没更新过的条目
 curl -X POST https://market.657868.xyz/rank/admin/purge -H 'Content-Type: application/json' \

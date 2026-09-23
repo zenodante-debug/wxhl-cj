@@ -14,7 +14,7 @@
 //
 // MVU 读写纪律（与 crafting/store.ts / market/store.ts 同一套）：
 //   楼层探测 → _.set → replaceMvuData → 回读校验；**只写 `契约者.背包` 与 `契约者.经济.UP`**。
-//   另：写入基底一律取**此刻**的新读值 —— 绝不用 await 之前的快照。建单/交付/验收都是网络往返，
+//   另：写入基底一律取**此刻**的新读值 —— 绝不用 await 之前的快照。建单/交付/验收/领取都是网络往返，
 //   期间市场那边可能刚卖出一件（写 背包 −物 / UP +货款）；拿旧快照写回去会把这笔整片覆盖（钱物凭空蒸发）。
 // ================================================================
 import { bagAdd, bagRemove, gainUP, spendUP, type Bag } from '../../market/settle';
@@ -74,13 +74,15 @@ export function 可交付候选(背包: Bag): string[] {
  * 退货退回的成品是 `项='尾款'` 且 `金额=0` 那条（尾款那个位两用：已完成给钱、已取消退物）。
  * 两条同时存在时以 `成品` 那条为准（服务器不会这样下发，但判定必须唯一）。
  *
- * 判定还要求该条**回执成功**：没回执到的成品不入包 —— 否则该条仍留在服务器的 `待领` 里，
- * 下次刷新会**再入一遍**（复制物品）。形状异常（找不到承载条目）同样不入：宁可滞留，也不发没回执的东西。
+ * 判定还要求该条回执**首次成功**（`first=true`）：回执失败不入包（否则该条仍留在服务器的
+ * `待领` 里，下次刷新会**再入一遍**＝复制物品）；`first=false` 的重复回执也不入包——
+ * 那是另一标签页已入过账的补回执，再入一次同样是复制（I-1 双发闸）。
+ * 形状异常（找不到承载条目）同样不入：宁可滞留，也不发没回执的东西。
  */
-function 成品已回执(待领: 待领项[], 已回执: Set<string>, id: string): boolean {
+function 成品该入账(待领: 待领项[], 该入账: Set<string>, id: string): boolean {
   const 同单 = 待领.filter(t => t.id === id);
   const 载体 = 同单.find(t => t.项 === '成品') ?? 同单.find(t => t.项 === '尾款' && Number(t.金额) === 0);
-  return !!载体 && 已回执.has(`${载体.id}|${载体.项}`);
+  return !!载体 && 该入账.has(`${载体.id}|${载体.项}`);
 }
 
 export const useOrderStore = defineStore('wxhl003-order', () => {
@@ -255,7 +257,7 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
   }
 
   /**
-   * 领取待领物并逐项 ACK。两条裁定叠在一起，顺序不能动：
+   * 领取待领物并逐项 ACK。三条裁定叠在一起，顺序不能动：
    *
    * **Ruling L（ACK 哪几项）**：必须照服务器给的 `待领` 清单逐条 ACK —— 不要遍历 `asPoster`/`asMaker`
    * 对每张单每个项都 ACK：那会**提前置位尚不存在的权益**（订单还在「已接单」就 ACK 尾款 →
@@ -267,6 +269,12 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
    * ACK 失败 ⇒ 不记账 ⇒ 那笔钱/那件物仍留在服务器上，下次刷新重试即可（幂等）。
    * 金额也因此必须取**条目自带的 `金额`** 逐条累加，不再用 `claim.deposit`/`claim.final` 汇总 ——
    * 只认汇总就认不出「这项是不是已经发过了」。
+   *
+   * **I-1（first 门 + 新读值）**：**只为 first=true 的条目入账；写入基取循环后新读值**。
+   * ACK 循环是一串网络往返（~0.5-2s/项）：期间市场/工坊/另一标签页可能改过同一楼层存档，
+   * 拿循环前的快照 `r` 写回会把那段变动整片覆盖（钱物凭空蒸发，同 crafting/store.ts 那次教训）；
+   * 而双开标签页共享存档、读到同一份 `待领`，若不问 first 各入一次账就是双发——服务器只在
+   * 0→1 的那次回 `first:true`（重复回执改 0 行 → `first:false`），入账只认它。
    *
    * 残余风险只剩「回执成功、本地落档失败」（本地写入失败比网络失败罕见得多）：此时服务器已认为
    * 该项被领走，本地却没入账 —— 只能**大声报错**，绝不静默（Ruling M 明确接受这个残余）。
@@ -298,21 +306,30 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
     let 已领件 = 0;
     busy.value = true; lastError.value = '';
     try {
-      // ① 先逐条回执（side 由 `项` 唯一决定：成品归发单人，订金/尾款归接单者）
+      // ① 先逐条回执（side 由 `项` 唯一决定：成品归发单人，订金/尾款归接单者）。
+      //    回执成功 ≠ 该入账：`first=false` 是另一标签页已入过账的重复回执，本页不得再入一次（I-1 双发闸）。
       const 待领 = c.待领;
       const 已回执 = new Set<string>();
+      const 该入账 = new Set<string>();
       for (const t of 待领) {
         const side = t.项 === '成品' ? 'poster' : 'maker';
-        try { await ackOrder(t.id, playerName.value, side, t.项); 已回执.add(`${t.id}|${t.项}`); }
+        try {
+          const ack = await ackOrder(t.id, playerName.value, side, t.项);
+          已回执.add(`${t.id}|${t.项}`);
+          if (ack.first) 该入账.add(`${t.id}|${t.项}`);
+        }
         catch (_) { 回执失败++; }        // 失败的条目**不入账**（下称「未领」），仍留在服务器的待领清单里
       }
       if (已回执.size === 0) throw new Error(`领取失败：${回执失败} 项回执均未送达服务器，请稍后重试`);
 
-      // ② 只为回执成功的条目入账：钱按条目 `金额` 累加；物品按「其承载条目已回执」入包
-      已领钱 = 待领.reduce((s, t) => (已回执.has(`${t.id}|${t.项}`) ? s + Number(t.金额) : s), 0);
-      let 新背包 = (r.c.背包 ?? {}) as Bag;
+      // ② 只为 first=true 的条目入账：钱按条目 `金额` 累加；物品按「其承载条目 first」入包。
+      //    写入基底取**循环后的新读值**（同 publish/deliver/confirm）：循环是一串网络往返，
+      //    期间市场/工坊可能改过同一楼层存档，拿循环前的快照 `r` 写回会把那段变动整片覆盖。
+      已领钱 = 待领.reduce((s, t) => (该入账.has(`${t.id}|${t.项}`) ? s + Number(t.金额) : s), 0);
+      const rr = readContractor() ?? r;
+      let 新背包 = (rr.c.背包 ?? {}) as Bag;
       for (const { id, item } of c.items ?? []) {
-        if (!成品已回执(待领, 已回执, id)) continue;
+        if (!成品该入账(待领, 该入账, id)) continue;
         const 名 = String((item as any)?.名称 ?? '');
         if (!名) throw new Error('待领成品缺少名称');
         新背包 = bagAdd(新背包, item, Number((item as any).数量 ?? 1));
@@ -323,16 +340,16 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
       //    而回执已经发出去了 —— 那件物品服务器认为已领，玩家却永远拿不到（丢失不可救）。
       const checks: [string[], unknown][] = [];
       if (已领钱 > 0) {
-        const 新UP = gainUP(Number(r.c.经济?.UP ?? 0), 已领钱);
-        _.set(r.mvu, ['stat_data', '契约者', '经济', 'UP'], 新UP);
+        const 新UP = gainUP(Number(rr.c.经济?.UP ?? 0), 已领钱);
+        _.set(rr.mvu, ['stat_data', '契约者', '经济', 'UP'], 新UP);
         checks.push([['stat_data', '契约者', '经济', 'UP'], 新UP]);
       }
       if (已领件 > 0) {
-        _.set(r.mvu, ['stat_data', '契约者', '背包'], 新背包);
+        _.set(rr.mvu, ['stat_data', '契约者', '背包'], 新背包);
         checks.push([['stat_data', '契约者', '背包'], 新背包]);
       }
       if (checks.length > 0) {
-        try { await commit(r.mvu, r.mid, checks); }
+        try { await commit(rr.mvu, rr.mid, checks); }
         catch (e: any) {
           // Ruling M 的残余：回执已送达 → 服务器已标记这些权益为「已领」，而本地没入账，
           // 刷新后它们不会再出现在待领里。只能大声报错（不许静默），让玩家知道要找管理员核对。

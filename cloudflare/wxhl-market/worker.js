@@ -627,8 +627,10 @@ async function handleOrder(url, request, env, cors) {
   }
 
   // GET /order/list?exclude=<姓名>  →  { orders }
+  // exclude 要 trim：poster 在建单时已 trim 落库，这边不 trim 的话（客户端传了带空白的姓名），
+  // 「 甲 」≠「甲」会把玩家自己的单漏进他的大厅视角。
   if (p === '/order/list' && request.method === 'GET') {
-    const exclude = String(url.searchParams.get('exclude') ?? '');
+    const exclude = String(url.searchParams.get('exclude') ?? '').trim();
     const { results } = await env.MARKET_DB.prepare(
       `SELECT * FROM orders WHERE status = ? AND poster != ? ORDER BY created DESC LIMIT 100`,
     ).bind(订单状态.待接单, exclude).all();
@@ -754,15 +756,19 @@ async function handleOrder(url, request, env, cors) {
     }), { headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
-  // POST /order/ack  { id, who, side, 项 }  →  { ok, deleted }
+  // POST /order/ack  { id, who, side, 项 }  →  { ok, deleted, first }
   // 按**项**标记领取：maker 领 订金/尾款（尾款位同时承载退货后的退回成品），poster 领 成品。
   // 订单已到终态、`应领(行)` 非空、且其每一项都已置位 → 删行（这是"服务器不撑爆"的关键）。
-  // 幂等：行已被另一边删掉就当「已领完」返回 deleted:true；同一项重复 ACK 只是把 1 再写一遍。
+  // 幂等：行已被另一边删掉就当「已领完」返回 deleted:true；同一项重复 ACK 改 0 行 → first:false。
+  //
+  // `first` 是**双开标签页的双发闸**：UPDATE 带 `AND <列>=0`，只有真正把 0 翻成 1 的那次回
+  // first:true。两个标签页共享同一存档，各自读到的待领清单相同——没有这个闸，两页都会
+  // 把同一笔权益入一次账（双发钱/双入包）。客户端据此「只为 first=true 的条目入账」。
   if (p === '/order/ack' && request.method === 'POST') {
     let b;
     try { b = await request.json(); } catch (_) { return new Response('请求体不是合法 JSON', { status: 400, headers: cors }); }
     const row = await readOrder(String(b.id));
-    if (!row) return new Response(JSON.stringify({ ok: true, deleted: true }), { headers: { ...cors, 'Content-Type': 'application/json' } }); // 已被另一边删掉，幂等
+    if (!row) return new Response(JSON.stringify({ ok: true, deleted: true, first: false }), { headers: { ...cors, 'Content-Type': 'application/json' } }); // 已被另一边删掉，幂等（且非首次：权益早被领走）
     // side 与 项 都必须**显式合法**：拼错或缺席不得静默按 poster 处理（那会替发单人把成品位置上）
     const side = b.side;
     if (side !== 'maker' && side !== 'poster') return new Response('side 须为 maker 或 poster', { status: 400, headers: cors });
@@ -776,7 +782,12 @@ async function handleOrder(url, request, env, cors) {
     // —— 那笔钱就凭空消失了。所以空单的 maker 侧必须领不了。
     if (String(b.who ?? '').trim() !== (side === 'maker' ? row.maker : row.poster))
       return new Response('不是该订单的当事人', { status: 400, headers: cors });
-    await withRetry(() => env.MARKET_DB.prepare(`UPDATE orders SET ${列} = 1, updated = ? WHERE id = ?`).bind(Date.now(), row.id).run());
+    // 条件置位：该位已是 1（另一标签页刚领过）→ 改 0 行 → first:false，客户端不再入账。
+    // 与 accept 的 status 守卫同一手法：UPDATE 的 meta.changes 就是并发仲裁信号。
+    const upd = await withRetry(() =>
+      env.MARKET_DB.prepare(`UPDATE orders SET ${列} = 1, updated = ? WHERE id = ? AND ${列} = 0`).bind(Date.now(), row.id).run(),
+    );
+    const first = changesOf(upd) > 0;
     const after = await readOrder(row.id);
     // 只有**终态**、且该状态应领的项**全部**置位才删行。
     // 非终态（待接单/已接单/已交付）一律不删：权益还在陆续产生（交付产成品、验收产尾款），
@@ -788,7 +799,7 @@ async function handleOrder(url, request, env, cors) {
     const 欠 = 终态 ? 应领(after) : [];
     const deleted = 欠.length > 0 && 欠.every(k => after[ACK_KEY_COL[k]] === 1);
     if (deleted) await withRetry(() => env.MARKET_DB.prepare(`DELETE FROM orders WHERE id = ?`).bind(row.id).run());
-    return new Response(JSON.stringify({ ok: true, deleted }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+    return new Response(JSON.stringify({ ok: true, deleted, first }), { headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
   return new Response('未知的订单操作', { status: 404, headers: cors });
