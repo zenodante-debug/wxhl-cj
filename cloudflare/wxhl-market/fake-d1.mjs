@@ -62,9 +62,9 @@ const ORDER_ADVANCE_SQL =
   /^UPDATE orders SET status = \?, updated = \? WHERE id = \? AND status = \?$/i;
 const ORDER_ADVANCE_ITEM_SQL =
   /^UPDATE orders SET status = \?, updated = \?, item_json = \? WHERE id = \? AND status = \?$/i;
-/** ACK：只把某一方的 ack 位置 1。两方各锚一句，免得把当事人的位认错 */
-const ORDER_ACK_POSTER_SQL = /^UPDATE orders SET poster_ack = 1, updated = \? WHERE id = \?$/i;
-const ORDER_ACK_MAKER_SQL = /^UPDATE orders SET maker_ack = 1, updated = \? WHERE id = \?$/i;
+/** ACK：把某一**项**的 ack 位置 1。列名限定为按项 ACK 的三个合法列 —— 拼错列名即炸，不静默放过 */
+const ORDER_ACK_SQL =
+  /^UPDATE orders SET (maker_deposit_ack|maker_final_ack|poster_ack) = 1, updated = \? WHERE id = \?$/i;
 /** 双方 ACK 完删行 */
 const ORDER_DELETE_SQL = /^DELETE FROM orders WHERE id = \?$/i;
 
@@ -289,8 +289,10 @@ export function makeFakeD1() {
             orders.set(id, {
               id, poster, maker: null, spec_json,
               deposit: Number(deposit), final: Number(final), status,
-              // 本轮不写的列也照真表 schema 补上，行形状与真 D1 一致（后续段要用）
-              item_json: null, rating: null, comp_json: null, poster_ack: 0, maker_ack: 0,
+              // 本轮不写的列也照真表 schema 补上，行形状与真 D1 一致（后续段要用）。
+              // Ruling I：ack 位按项三个（订金 / 尾款(含退回成品) / 成品），不再是每侧一个。
+              item_json: null, rating: null, comp_json: null,
+              maker_deposit_ack: 0, maker_final_ack: 0, poster_ack: 0,
               created: Number(created), updated: Number(updated),
             });
             return ok(1);
@@ -326,13 +328,13 @@ export function makeFakeD1() {
             row.updated = Number(updated);
             return ok(1);
           }
-          // ———— 工坊订单：ACK 记某一方已领取（重复 ACK 只是再写一次 1）————
-          if (ORDER_ACK_POSTER_SQL.test(oneLine(sql)) || ORDER_ACK_MAKER_SQL.test(oneLine(sql))) {
-            const 列 = ORDER_ACK_MAKER_SQL.test(oneLine(sql)) ? 'maker_ack' : 'poster_ack';
+          // ———— 工坊订单：ACK 记某一项已领取（重复 ACK 只是再写一次 1）————
+          const ackM = oneLine(sql).match(ORDER_ACK_SQL);
+          if (ackM) {
             const [updated, id] = st._a;
             const row = orders.get(id);
             if (!row) return ok(0);
-            row[列] = 1;
+            row[ackM[1]] = 1;
             row.updated = Number(updated);
             return ok(1);
           }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import worker, { checkPrice } from './worker.js';
+import worker, { checkPrice, 应领 } from './worker.js';
 import { makeFakeD1 } from './fake-d1.mjs';
 
 // ================================================================
@@ -375,7 +375,7 @@ describe('订单 · 交付与验收', () => {
 
     const mine = await (await call(env, `/order/mine?who=${encodeURIComponent('甲')}`)).json();
     expect(mine.asPoster[0].status).toBe('已交付');
-    expect(mine.claim.item.名称).toBe('狼牙短剑');   // 发单人待领成品
+    expect(mine.claim.items[0].item.名称).toBe('狼牙短剑');   // 发单人待领成品
 
     expect((await call(env, '/order/confirm', postJson({ id, poster: '甲' }))).status).toBe(200);
     const after = await (await call(env, `/order/mine?who=${encodeURIComponent('乙')}`)).json();
@@ -412,49 +412,74 @@ describe('订单 · 交付与验收', () => {
 
     const makerMine = await (await call(env, `/order/mine?who=${encodeURIComponent('乙')}`)).json();
     expect(makerMine.asMaker[0].status).toBe('已取消');
-    expect(makerMine.claim.item.名称).toBe('剑');   // 退回的成品
+    expect(makerMine.claim.items[0].item.名称).toBe('剑');   // 退回的成品
     expect(makerMine.claim.deposit).toBe(300);      // 订金仍是接单者的（未领则仍待领）——「不退」指发单人拿不回去
 
     const posterMine = await (await call(env, `/order/mine?who=${encodeURIComponent('甲')}`)).json();
     expect(posterMine.claim.deposit).toBe(0);       // 发单人永远拿不回订金
     expect(posterMine.claim.final).toBe(0);         // 退货不付尾款
-    expect(posterMine.claim.item).toBeNull();       // 成品已退回，发单人不再持有
+    expect(posterMine.claim.items).toHaveLength(0);       // 成品已退回，发单人不再持有
   });
 });
+
+// ———— 订单领取的公共小工具（ACK 用例共用）————
+/** 走完整链路：发布 → 接单 → 交付 → 验收，停在「已完成」（终态）；返回订单 id */
+async function 到已完成(env, item = { 名称: '剑', 数量: 1 }, over = {}) {
+  const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700, ...over }))).json();
+  await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+  await call(env, '/order/deliver', postJson({ id, maker: '乙', item }));
+  await call(env, '/order/confirm', postJson({ id, poster: '甲' }));
+  return id;
+}
+/** 按项领取：Ruling I 起 body 带 `项`（订金 / 尾款 / 成品） */
+const 领 = (env, id, who, side, 项) => call(env, '/order/ack', postJson({ id, who, side, 项 }));
+/** 直接数行：删行与否的最终判据 */
+const 行数 = async (env, id) =>
+  (await env.MARKET_DB.prepare(`SELECT * FROM orders WHERE id = ?`).bind(id).all()).results.length;
+/** 取某人的待领取汇总 */
+const 待领 = async (env, who) => (await call(env, `/order/mine?who=${encodeURIComponent(who)}`)).json();
 
 describe('订单 · 待领取与 ACK（Review Focus 3/4）', () => {
   it('双方 ACK 后 orders 表无该行', async () => {
     const env = { MARKET_DB: makeFakeD1() };
-    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
-    // 先接单：ACK 要求 who 逐字等于该侧当事人，未接单时 maker 为 NULL、乙领不了（见下一条回归用例）。
-    // 走完整的「接单 → 双方各领一侧」才是真实流程。
-    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    // 必须是**终态**才谈得上删行：走到「已完成」，三项应领（接单者订金/尾款、发单人成品）才齐全。
+    const id = await 到已完成(env);
 
-    const a1 = await (await call(env, '/order/ack', postJson({ id, who: '甲', side: 'poster' }))).json();
-    expect(a1.deleted).toBe(false);                 // 只有一方领了，行还在
+    const a1 = await (await 领(env, id, '甲', 'poster', '成品')).json();
+    expect(a1.deleted).toBe(false);                 // 只领了一项，行还在
+    const a2 = await (await 领(env, id, '乙', 'maker', '订金')).json();
+    expect(a2.deleted).toBe(false);                 // 尾款还没领，仍不删
+    const a3 = await (await 领(env, id, '乙', 'maker', '尾款')).json();
+    expect(a3.deleted).toBe(true);                  // 应领项全齐 → 删行
 
-    const a2 = await (await call(env, '/order/ack', postJson({ id, who: '乙', side: 'maker' }))).json();
-    expect(a2.deleted).toBe(true);                  // 双方领完 → 删行
-
-    const { results } = await env.MARKET_DB.prepare(`SELECT * FROM orders WHERE id = ?`).bind(id).all();
-    expect(results).toHaveLength(0);
+    expect(await 行数(env, id)).toBe(0);
   });
 
   it('未接单的单没有 maker 当事人：按 maker 侧 ACK 必须 400 且不删行（Ruling G 回归）', async () => {
     const env = { MARKET_DB: makeFakeD1() };
     const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
-    const r = await call(env, '/order/ack', postJson({ id, who: '乙', side: 'maker' }));
+    const r = await 领(env, id, '乙', 'maker', '订金');
     expect(r.status).toBe(400);
+    // 拦在**当事人校验**上，而不是恰好被 payload 校验（side/项 错配）顺手挡掉 —— 否则这条回归用例是假绿的
+    expect(await r.text()).toContain('当事人');
     // 放行会让第三方把这单删掉：订金已在发单人客户端扣掉，却没有接单人 gainUP 补上 → 钱凭空消失
-    const { results } = await env.MARKET_DB.prepare(`SELECT * FROM orders WHERE id = ?`).bind(id).all();
-    expect(results).toHaveLength(1);
+    expect(await 行数(env, id)).toBe(1);
   });
 
   it('重复领取是幂等的：ACK 两次不报错，且不会让行消失两次', async () => {
     const env = { MARKET_DB: makeFakeD1() };
-    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
-    expect((await call(env, '/order/ack', postJson({ id, who: '甲', side: 'poster' }))).status).toBe(200);
-    expect((await call(env, '/order/ack', postJson({ id, who: '甲', side: 'poster' }))).status).toBe(200);
+    const id = await 到已完成(env);
+    expect((await 领(env, id, '甲', 'poster', '成品')).status).toBe(200);
+    const again = await (await 领(env, id, '甲', 'poster', '成品')).json();
+    expect(again.deleted).toBe(false);              // 同一项再领一次只是把 1 再写一遍，行不该消失
+    await 领(env, id, '乙', 'maker', '订金');
+    expect((await (await 领(env, id, '乙', 'maker', '尾款')).json()).deleted).toBe(true);
+
+    // 行已被删：再 ACK 不该报错（幂等），也不该把它「删第二次」
+    const 死后 = await 领(env, id, '乙', 'maker', '尾款');
+    expect(死后.status).toBe(200);
+    expect((await 死后.json()).deleted).toBe(true); // 当作已领完
+    expect(await 行数(env, id)).toBe(0);
   });
 
   it('接单者待领订金（接单后），领取前重复查询仍能看到', async () => {
@@ -466,5 +491,106 @@ describe('订单 · 待领取与 ACK（Review Focus 3/4）', () => {
     expect(m1.claim.deposit).toBe(300);
     const m2 = await (await call(env, `/order/mine?who=${encodeURIComponent('乙')}`)).json();
     expect(m2.claim.deposit).toBe(300);             // 没 ACK 就还在
+  });
+});
+
+// ================================================================
+// Ruling I：ACK 按项。
+// 旧设计是**每侧一个位管终身**，各项 claim 全门控在「该侧尚未 ACK」——
+// 接单者权益却分阶段产生（订金在接单、尾款在验收、退回成品在退货），
+// 故领了订金就永久领不到尾款/退回成品，而对方 ACK 后行被删 → 钱凭空蒸发。
+// 下列用例是这条裁定的反证：旧设计下它们必然红。
+// ================================================================
+describe('订单 · 按项领取（Ruling I）', () => {
+  it('接单时领走订金，验收完成仍能领到尾款（单一位设计下这一步领不到）', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+
+    // 接单当下就领走订金 —— 这一步在旧设计里会把「接单者已领」那个位永久置 1
+    const d = await (await 领(env, id, '乙', 'maker', '订金')).json();
+    expect(d.deleted).toBe(false);                  // 已接单但非终态：不删
+    expect((await 待领(env, '乙')).claim.deposit).toBe(0);
+
+    // 交付 → 验收：尾款**此时才产生**
+    await call(env, '/order/deliver', postJson({ id, maker: '乙', item: { 名称: '剑', 数量: 1 } }));
+    expect((await call(env, '/order/confirm', postJson({ id, poster: '甲' }))).status).toBe(200);
+
+    const mine = await 待领(env, '乙');
+    expect(mine.asMaker[0].status).toBe('已完成');
+    expect(mine.claim.final).toBe(700);             // ← 回归点：领过订金也必须看得见尾款
+
+    expect((await (await 领(env, id, '乙', 'maker', '尾款')).json()).deleted).toBe(false); // 发单人未领成品
+    expect((await 待领(env, '乙')).claim.final).toBe(0);
+    expect((await (await 领(env, id, '甲', 'poster', '成品')).json()).deleted).toBe(true);
+    expect(await 行数(env, id)).toBe(0);
+  });
+
+  it('退货（已取消）后接单者能领回退回的成品（与尾款共用一位，不互相锁死）', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    await 领(env, id, '乙', 'maker', '订金');        // 先领订金：旧设计里退回的成品从此就领不到了
+    await call(env, '/order/deliver', postJson({ id, maker: '乙', item: { 名称: '剑', 数量: 1 } }));
+    await call(env, '/order/reject', postJson({ id, poster: '甲' }));
+
+    const mine = await 待领(env, '乙');
+    expect(mine.asMaker[0].status).toBe('已取消');
+    expect(mine.claim.items).toHaveLength(1);
+    expect(mine.claim.items[0].id).toBe(id);        // 待领项带订单 id，客户端才知道该 ACK 哪张单
+    expect(mine.claim.items[0].item.名称).toBe('剑');
+    expect(mine.claim.final).toBe(0);               // 退货不付尾款
+
+    const r = await (await 领(env, id, '乙', 'maker', '尾款')).json(); // 退回的成品走「尾款」位
+    expect(r.deleted).toBe(true);                   // 已取消的应领项＝订金＋退回成品，都领完了
+    expect(await 行数(env, id)).toBe(0);
+  });
+
+  it('非终态的单，双方领完当下应领项也不删行（后续还会产生尾款）', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    expect((await (await 领(env, id, '乙', 'maker', '订金')).json()).deleted).toBe(false);
+    await call(env, '/order/deliver', postJson({ id, maker: '乙', item: { 名称: '剑', 数量: 1 } }));
+
+    // 此刻双方手上能领的都领了（接单者订金、发单人成品），但状态是「已交付」——
+    // 旧设计（双方各领一侧即删）会在这里删行，随后验收产生的尾款就没了着落。
+    expect((await (await 领(env, id, '甲', 'poster', '成品')).json()).deleted).toBe(false);
+    expect(await 行数(env, id)).toBe(1);
+
+    await call(env, '/order/confirm', postJson({ id, poster: '甲' }));
+    expect((await 待领(env, '乙')).claim.final).toBe(700);   // 行还在 → 尾款领得到
+  });
+
+  it('side / 项 非法（缺席、大小写错、错配）→ 400，且不误置任何位', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+
+    expect((await call(env, '/order/ack', postJson({ id, who: '乙', 项: '订金' }))).status).toBe(400);                 // side 缺席
+    expect((await call(env, '/order/ack', postJson({ id, who: '乙', side: 'Maker', 项: '订金' }))).status).toBe(400);  // 大小写错
+    expect((await call(env, '/order/ack', postJson({ id, who: '乙', side: 'maker' }))).status).toBe(400);              // 项 缺席
+    expect((await call(env, '/order/ack', postJson({ id, who: '乙', side: 'maker', 项: '成品' }))).status).toBe(400);   // maker 领 成品
+    expect((await call(env, '/order/ack', postJson({ id, who: '甲', side: 'poster', 项: '订金' }))).status).toBe(400);  // poster 领 订金
+
+    // 当事人校验对两侧对称：发单人也不能冒名把接单者的权益位置上
+    const 冒名 = await 领(env, id, '乙', 'poster', '成品');
+    expect(冒名.status).toBe(400);
+    expect(await 冒名.text()).toContain('当事人');
+
+    const { results } = await env.MARKET_DB.prepare(`SELECT * FROM orders WHERE id = ?`).bind(id).all();
+    expect(results[0].poster_ack).toBe(0);          // 旧代码会把缺席的 side 静默当 poster 并置位
+    expect(results[0].maker_deposit_ack).toBe(0);
+    expect(results[0].maker_final_ack).toBe(0);
+  });
+
+  it('应领(行)：只认终态，非终态一项都不算（删行判据的数据源）', () => {
+    const 行 = (status, maker = '乙') => ({ status, maker });
+    expect(应领(行('待接单', null))).toEqual(['poster']);        // 撤销/无人接：只有发单人有权领回
+    expect(应领(行('已取消', null))).toEqual(['poster']);
+    expect(应领(行('已完成'))).toEqual(['maker_deposit', 'maker_final', 'poster']);
+    expect(应领(行('已取消'))).toEqual(['maker_deposit', 'maker_final']);
+    expect(应领(行('已弃单'))).toEqual([]);                      // v4b 才有弃单赔偿口径
+    for (const s of ['待接单', '已接单', '已交付']) expect(应领(行(s))).toEqual([]);  // 非终态：不删行
   });
 });

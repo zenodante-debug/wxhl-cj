@@ -467,8 +467,9 @@ async function ensureOrderSchema(env) {
          item_json TEXT,
          rating REAL,
          comp_json TEXT,
+         maker_deposit_ack INTEGER NOT NULL DEFAULT 0,
+         maker_final_ack INTEGER NOT NULL DEFAULT 0,
          poster_ack INTEGER NOT NULL DEFAULT 0,
-         maker_ack INTEGER NOT NULL DEFAULT 0,
          created INTEGER NOT NULL,
          updated INTEGER NOT NULL
        )`,
@@ -477,6 +478,22 @@ async function ensureOrderSchema(env) {
     env.MARKET_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_poster ON orders (poster)`),
     env.MARKET_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_maker ON orders (maker)`),
   ]);
+  // 迁移：给**已存在的旧表**补新列（CREATE TABLE IF NOT EXISTS 不会改老表结构）。
+  // 2026-09-23 Ruling I：原 `maker_ack`/`poster_ack` 两个「每侧一个位」换成按项三列
+  // （接单者的权益分阶段产生，一个位会把尾款与退回成品永久锁死）。`poster_ack` 两版同名，
+  // 只需补两个新列；老表里遗留的 `maker_ack` 变成死列，代码不再读写它。
+  // 列已存在时 ALTER 会报错，属预期，吞掉即可（与市场那段补 op_json 的写法一致）。
+  const orderMigrations = [
+    `ALTER TABLE orders ADD COLUMN maker_deposit_ack INTEGER NOT NULL DEFAULT 0`,
+    `ALTER TABLE orders ADD COLUMN maker_final_ack INTEGER NOT NULL DEFAULT 0`,
+  ];
+  for (const sql of orderMigrations) {
+    try {
+      await env.MARKET_DB.prepare(sql).run();
+    } catch (_) {
+      /* 列已存在 */
+    }
+  }
   orderSchemaReady = true;
 }
 
@@ -484,6 +501,43 @@ async function ensureOrderSchema(env) {
 const ORDER_ITEM_MAX = 4096;
 
 const 订单状态 = { 待接单: '待接单', 已接单: '已接单', 已交付: '已交付', 已完成: '已完成', 已取消: '已取消', 已弃单: '已弃单' };
+
+// ———— 按项 ACK：接单者的权益是**分阶段产生**的，不能每侧只留一个位 ————
+// 旧设计（每侧一个 `maker_ack`/`poster_ack`）会把后来才产生的权益永久锁死：
+//   客户端在**接单时**领走订金 → 该位永久置 1 → 尾款与退回成品从此都被「该侧已领」挡住领不到，
+//   而发单人一侧 ACK 后行被删 —— 发单人已 spendUP 扣掉的尾款、接单者应得的退回成品凭空消失。
+//   （与 Ruling G 是同一类经济损失：钱在客户端结算，服务器只留记录，删行即蒸发。）
+// 所以改成三个位：订金（接单即可领）、尾款/退回成品（互斥，共用一个位）、成品（发单人）。
+/** ACK 项键 → 列名 */
+const ACK_KEY_COL = {
+  maker_deposit: 'maker_deposit_ack',
+  maker_final: 'maker_final_ack',
+  poster: 'poster_ack',
+};
+/** 入参 (side, 项) → 列名。表中没有的组合视为非法，调用方回 400（不静默落到 poster） */
+const ACK_COLS = {
+  maker: { 订金: 'maker_deposit_ack', 尾款: 'maker_final_ack' },
+  poster: { 成品: 'poster_ack' },
+};
+
+/**
+ * 这张单**此刻**欠哪几项待领（键名同 ACK_KEY_COL）—— 也就是「删行前必须全部领完」的那份清单。
+ *
+ * 要点：**非终态一律返回空**。权益是随状态推进陆续产生的（订婚金 → 交付产成品 → 验收产尾款），
+ * 若在「已交付」就因双方领了当下这两项而删行，随后验收产生的尾款、或退货产生的退回成品就没了着落。
+ * 只有终态（已完成 / 已取消 / 已弃单）才谈得上「权益已全部产生」。
+ *
+ * 已弃单（v4b）本表暂无口径 → 空清单；按裁定「终态 AND 应领项全部置位」，空清单是**空真**，
+ * 故任何一方 ACK 即删行（v4a 走不到这个状态；v4b 落地弃单赔偿时**必须**先在此补上它的应领项，
+ * 否则那笔赔偿会随第一次 ACK 蒸发）。无接单人（v4c 撤销）只有发单人有权领回。
+ */
+export function 应领(row) {
+  if (!row.maker) return ['poster'];
+  if (row.status === 订单状态.已完成) return ['maker_deposit', 'maker_final', 'poster'];
+  // 已取消（交付后退货）：接单者领订金 + 退回的成品（成品走 maker_final 位），发单人什么都没有
+  if (row.status === 订单状态.已取消) return ['maker_deposit', 'maker_final'];
+  return [];
+}
 
 function newOrderId() {
   return String(Date.now()).padStart(15, '0') + '-' + Math.random().toString(36).slice(2, 8);
@@ -639,19 +693,21 @@ async function handleOrder(url, request, env, cors) {
       `SELECT * FROM orders WHERE poster = ? OR maker = ? ORDER BY updated DESC LIMIT 200`,
     ).bind(who, who).all();
     const rows = results ?? [];
-    const claim = { deposit: 0, final: 0, item: null, comp: null };
+    const claim = { deposit: 0, final: 0, items: [], comp: null };
     for (const r of rows) {
-      const 已领 = { poster: r.poster_ack === 1, maker: r.maker_ack === 1 };
-      // 订金：接单后归接单者（除「已取消且从未接单」的情形——那种订单 maker 为 NULL，不会走到这里）
-      // 发单人**任何状态都不加**，这就是「订金不退」在服务端的全部含义。
-      if (r.maker === who && r.status !== 订单状态.待接单 && !已领.maker) claim.deposit += r.deposit;
-      // 尾款：验收完成后归接单者
-      if (r.maker === who && r.status === 订单状态.已完成 && !已领.maker) claim.final += r.final;
+      // 订金：接单后归接单者（`maker` 非空即已接单）；发单人**任何状态都不加** —— 「订金不退」的全部含义。
+      // 门控在**订金那一个位**上，而不是「整侧已领」：否则一领订金，尾款与退回成品就永远看不见了。
+      if (r.maker === who && r.maker_deposit_ack !== 1) claim.deposit += r.deposit;
+      // 尾款：验收完成后归接单者（门控在**尾款那一个位**上，与订金互不影响）
+      if (r.maker === who && r.status === 订单状态.已完成 && r.maker_final_ack !== 1) claim.final += r.final;
       // 成品：交付后归发单人（**验收完成后仍归发单人**，直到他 ACK 领走）；退货后归接单者。
       // 已完成不能漏：发单人验收了却没领，成品还是他的，丢了就凭空蒸发。
-      if ((r.status === 订单状态.已交付 || r.status === 订单状态.已完成) && r.poster === who && !已领.poster && r.item_json)
-        claim.item = JSON.parse(r.item_json);
-      if (r.status === 订单状态.已取消 && r.maker === who && !已领.maker && r.item_json) claim.item = JSON.parse(r.item_json);
+      // 用**数组**而非单槽：同时有多件待领时单槽互相覆盖会丢件，且带着订单 id 客户端才知道该 ACK 哪张单。
+      if ((r.status === 订单状态.已交付 || r.status === 订单状态.已完成) && r.poster === who && r.poster_ack !== 1 && r.item_json)
+        claim.items.push({ id: r.id, item: JSON.parse(r.item_json) });
+      // 退货退回的成品同样挂在 `maker_final` 位上（尾款与退回成品互斥：已完成只付尾款、已取消只退成品）
+      if (r.status === 订单状态.已取消 && r.maker === who && r.maker_final_ack !== 1 && r.item_json)
+        claim.items.push({ id: r.id, item: JSON.parse(r.item_json) });
     }
     return new Response(JSON.stringify({
       asPoster: rows.filter(r => r.poster === who).map(toOrderDto),
@@ -660,16 +716,21 @@ async function handleOrder(url, request, env, cors) {
     }), { headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
-  // POST /order/ack  { id, who, side }  →  { ok, deleted }
-  // 标记某一方已领取；双方都领完 → 删行（这是"服务器不撑爆"的关键）。
-  // 幂等：行已被另一边删掉就当「已领完」返回 deleted:true；
-  // 同一方重复 ACK 只是把 1 再写一遍，第二次读到的双方位仍不齐，不会重复删。
+  // POST /order/ack  { id, who, side, 项 }  →  { ok, deleted }
+  // 按**项**标记领取：maker 领 订金/尾款（尾款位同时承载退货后的退回成品），poster 领 成品。
+  // 该单应领的项全部置位、且订单已到终态 → 删行（这是"服务器不撑爆"的关键）。
+  // 幂等：行已被另一边删掉就当「已领完」返回 deleted:true；同一项重复 ACK 只是把 1 再写一遍。
   if (p === '/order/ack' && request.method === 'POST') {
     let b;
     try { b = await request.json(); } catch (_) { return new Response('请求体不是合法 JSON', { status: 400, headers: cors }); }
     const row = await readOrder(String(b.id));
     if (!row) return new Response(JSON.stringify({ ok: true, deleted: true }), { headers: { ...cors, 'Content-Type': 'application/json' } }); // 已被另一边删掉，幂等
-    const side = b.side === 'maker' ? 'maker' : 'poster';
+    // side 与 项 都必须**显式合法**：拼错或缺席不得静默按 poster 处理（那会替发单人把成品位置上）
+    const side = b.side;
+    if (side !== 'maker' && side !== 'poster') return new Response('side 须为 maker 或 poster', { status: 400, headers: cors });
+    const sideCols = ACK_COLS[side];
+    const 列 = Object.prototype.hasOwnProperty.call(sideCols, b.项) ? sideCols[b.项] : null;
+    if (!列) return new Response('side 与 项 不匹配（maker 领 订金/尾款，poster 领 成品）', { status: 400, headers: cors });
     // 当事人校验：`who` 必须**逐字**等于该侧的当事人，不等即 400。
     // 这里**不给「该侧尚无当事人」留放行分支**（待接单的单 maker 为 NULL）：
     // 发单人的订金是他在客户端 spendUP 扣掉的、服务器只留记录，
@@ -677,10 +738,13 @@ async function handleOrder(url, request, env, cors) {
     // —— 那笔钱就凭空消失了。所以空单的 maker 侧必须领不了。
     if (String(b.who ?? '').trim() !== (side === 'maker' ? row.maker : row.poster))
       return new Response('不是该订单的当事人', { status: 400, headers: cors });
-    const 列 = side === 'maker' ? 'maker_ack' : 'poster_ack';
     await withRetry(() => env.MARKET_DB.prepare(`UPDATE orders SET ${列} = 1, updated = ? WHERE id = ?`).bind(Date.now(), row.id).run());
     const after = await readOrder(row.id);
-    const deleted = !!after && after.poster_ack === 1 && after.maker_ack === 1;
+    // 只有**终态**、且该状态应领的项**全部**置位才删行。
+    // 非终态（待接单/已接单/已交付）一律不删：权益还在陆续产生（交付产成品、验收产尾款），
+    // 此刻把行删掉，随后产生的尾款或退回成品就没了着落 —— 与 Ruling G 同类，钱会凭空蒸发。
+    const 终态 = !!after && (after.status === 订单状态.已完成 || after.status === 订单状态.已取消 || after.status === 订单状态.已弃单);
+    const deleted = 终态 && 应领(after).every(k => after[ACK_KEY_COL[k]] === 1);
     if (deleted) await withRetry(() => env.MARKET_DB.prepare(`DELETE FROM orders WHERE id = ?`).bind(row.id).run());
     return new Response(JSON.stringify({ ok: true, deleted }), { headers: { ...cors, 'Content-Type': 'application/json' } });
   }
