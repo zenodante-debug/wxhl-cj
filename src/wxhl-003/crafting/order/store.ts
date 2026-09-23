@@ -4,7 +4,8 @@
 //
 // 钱是怎么走的（读懂这一句再看代码）：服务器只当中转与账本（订单行 + 按项 ACK 位），
 // **UP 与物品全部在客户端结算** —— 发单人 spendUP 扣订金/尾款、接单者 gainUP 收订金/尾款、
-// 成品在两边各自出入包。所以这里的每一个分支都要问两个问题：
+// 成品在两边各自出入包；弃单时接单者 spendUP 赔订金×3，发单人经 claimAll 的「赔偿」条目收这笔钱。
+// 所以这里的每一个分支都要问两个问题：
 //   ① 钱没到位时，会不会仍然把权益领走（= 凭空生钱）？
 //   ② 钱到位了、权益却领不到（= 玩家白干）？
 // 服务器侧那几条裁定（Ruling G/I/L/M）堵的都是这两个方向，客户端这一层不得把它们重新打开：
@@ -332,7 +333,10 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
     _.set(rr.mvu, ['stat_data', '契约者', '经济', 'UP'], 余UP);
     await commit(rr.mvu, rr.mid, [[['stat_data', '契约者', '经济', 'UP'], 余UP]]);
 
-    const shop = readShopName(rr.c);
+    // −5 的归属与 confirm/reject 同口径：跟着**接单时绑定的店铺快照**（单.maker_shop）走 ——
+    // 接单后改名（spec §2：改名 = 新店从 0）或关店再弃单，都不能把罚分甩给无辜新店或让它落空。
+    // 老订单没有 maker_shop（接单发生在 v4b 之前）→ 回退当前店铺。
+    const shop = 单.maker_shop ?? readShopName(rr.c);
     if (shop) {
       try { await reportShopScore(shop, 弃单扣分()); }
       catch (e) { console.warn('[订单] 店铺分数上报失败', e); }
@@ -403,7 +407,7 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
     let 已领件 = 0;
     busy.value = true; lastError.value = '';
     try {
-      // ① 先逐条回执（side 由 `项` 唯一决定：成品归发单人，订金/尾款归接单者）。
+      // ① 先逐条回执（side 由 `项` 唯一决定：成品/赔偿归发单人，订金/尾款归接单者）。
       //    回执成功 ≠ 该入账：`first=false` 是另一标签页已入过账的重复回执，本页不得再入一次（I-1 双发闸）。
       const 待领 = c.待领;
       const 已回执 = new Set<string>();

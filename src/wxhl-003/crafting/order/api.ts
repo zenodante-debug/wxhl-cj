@@ -37,7 +37,9 @@ export interface 待领取 {
   final: number;
   /** 汇总数字（赔偿合计，弃单产生）—— 同上，仅供显示；没有就是 null */
   comp: number | null;
+  /** 待领的成品：`id` 与该成品的 `待领` 条目（`项='成品'`，或退货退回时的 `项='尾款'`）同 id */
   items: { id: string; item: MarketItemSnapshot }[];
+  /** 服务器给出的领取清单：客户端照此逐条 ACK，**不要**从汇总或订单列表反推 */
   待领: 待领项[];
 }
 
