@@ -129,6 +129,34 @@ check('购买道具 200', r.status === 200);
 r = await call(get('/market/mine?client=c9'));
 check('总价 750 挂账（15×50）', (await r.json()).pending === 750);
 
+// —— 部分购买：同一个挂单可以只买走一部分，剩余继续挂着 ——
+r = await call(post('/market/buy', { id: potion.id, buyer: '测试丁', client: 'c4', qty: 2 }));
+j = await r.json();
+check('部分购买 2/5 → 200 且回 bought=2', r.status === 200 && j.bought === 2, JSON.stringify(j));
+r = await call(get('/market/listings'));
+check('部分购买后挂单剩 3 件', (await r.json()).listings.find(x => x.id === potion.id)?.qty === 3);
+r = await call(get('/market/mine?client=c9'));
+check('货款按买走数量累计（750 + 50×2 = 850）', (await r.json()).pending === 850);
+
+r = await call(post('/market/buy', { id: potion.id, buyer: '测试戊', client: 'c5', qty: 99 }));
+check('买超过剩余 → 409（并发仲裁）', r.status === 409, await r.clone().text());
+r = await call(get('/market/listings'));
+check('被拒后数量不动（仍 3 件）', (await r.json()).listings.find(x => x.id === potion.id)?.qty === 3);
+r = await call(get('/market/mine?client=c9'));
+check('被拒后货款也不动（仍 850）', (await r.json()).pending === 850);
+
+r = await call(post('/market/buy', { id: potion.id, buyer: '测试戊', client: 'c5', qty: 3 }));
+check('买光剩余 3 件 → 200', r.status === 200);
+r = await call(get('/market/listings'));
+check('卖光后挂单消失', !(await r.json()).listings.some(x => x.id === potion.id));
+r = await call(get('/market/mine?client=c9'));
+check('货款 = 750+100+150 = 1000', (await r.json()).pending === 1000);
+r = await call(get('/market/sales?client=c9'));
+check(
+  '同一挂单两笔成交各自留记录，不互相覆盖',
+  (await r.json()).sales.filter(s => s.item.名称 === '蓝色药剂').length === 2,
+);
+
 console.log('=== 9. 下架 ===');
 r = await call(post('/market/list', 披风));
 const l2 = await r.json();
@@ -138,6 +166,18 @@ r = await call(post('/market/cancel', { id: l2.id, client: 'c1' }));
 check('卖家下架 200', r.status === 200);
 r = await call(get('/market/listings'));
 check('下架后市集无此单', !(await r.json().then(x => x.listings)).some(x => x.id === l2.id));
+
+// 部分成交后下架：返回的是**剩余**数量，不是当初上架的数量
+r = await call(post('/market/list', {
+  client: 'c9', seller: '测试甲', tier: '一阶', kind: 'goods',
+  item: { 名称: '散装弹药', 品质: '白色', 阶位: '一阶', 描述: 'x', 数量: 10 },
+  qty: 10, price: 15,
+}));
+const 散装 = await r.json();
+await call(post('/market/buy', { id: 散装.id, buyer: '测试乙', client: 'c2', qty: 4 }));
+r = await call(post('/market/cancel', { id: 散装.id, client: 'c9' }));
+j = await r.json();
+check('部分成交后下架，回传剩余 6 件', j.returned === 6, JSON.stringify(j));
 
 console.log('=== 10. 运营通道（0 UP 福利）===');
 check('无密钥时 0 UP 被拒', !checkPrice('goods', { 数量: 1, 品质: '白色', 阶位: '一阶' }, '一阶', 0).ok);
@@ -161,7 +201,17 @@ check('蓝武二阶 参考[400,800] → 允许[200,1600]',
   checkPrice('equip', { 品质: '蓝色', 类型: '武器', 阶位: '二阶' }, '一阶', 200).ok &&
   checkPrice('equip', { 品质: '蓝色', 类型: '武器', 阶位: '二阶' }, '一阶', 1600).ok &&
   !checkPrice('equip', { 品质: '蓝色', 类型: '武器', 阶位: '二阶' }, '一阶', 199).ok);
-check('白/银装拒绝', !checkPrice('equip', { 品质: '白色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok && !checkPrice('equip', { 品质: '银色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok);
+check('白装拒绝（回廊不收录）', !checkPrice('equip', { 品质: '白色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok);
+// 银色 2026-09-23 放开：基准价 = 同表紫色 × 10 → 一阶银武器参考[15000,30000]，允许[7500,60000]
+const 银武 = { 品质: '银色', 类型: '武器', 阶位: '一阶' };
+check('银装放行：一阶 [7500,60000]',
+  checkPrice('equip', 银武, '一阶', 7500).ok &&
+  checkPrice('equip', 银武, '一阶', 60000).ok &&
+  !checkPrice('equip', 银武, '一阶', 7499).ok &&
+  !checkPrice('equip', 银武, '一阶', 60001).ok);
+check('银色道具走武器表（同银武器价）',
+  checkPrice('goods', { 品质: '银色', 阶位: '一阶', 数量: 1 }, '一阶', 7500).ok &&
+  !checkPrice('goods', { 品质: '银色', 阶位: '一阶', 数量: 1 }, '一阶', 7499).ok);
 check('道具缺品质拒绝', !checkPrice('goods', { 数量: 5, 阶位: '一阶' }, '一阶', 100).ok);
 
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);

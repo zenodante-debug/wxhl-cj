@@ -30,10 +30,12 @@ export interface PriceCheck {
 
 /** 一阶基准价表 [下限, 上限]（经济系统·恒定物价体系）；与 worker.js 同步
  *  export 供 crafting/blueprint 的图纸定价表做交叉断言（防两表手抄漂移） */
+// 银色 2026-09-23 放开售卖准入：**基准价 = 同表紫色 × 10**（仍是"银装数值等同紫装"，
+// 但作为副本唯一剧情物品，价格按溢价一档走）。与 worker.js 的 BASE 必须同步。
 export const BASE: Record<EquipCategory, Record<EquipQuality, [number, number]>> = {
-  武器: { 白色: [30, 60], 蓝色: [100, 200], 金色: [400, 800], 紫色: [1500, 3000], 银色: [1500, 3000] },
-  防具: { 白色: [15, 40], 蓝色: [50, 150], 金色: [250, 600], 紫色: [1000, 2000], 银色: [1000, 2000] },
-  饰品: { 白色: [20, 40], 蓝色: [60, 150], 金色: [300, 700], 紫色: [1200, 2500], 银色: [1200, 2500] },
+  武器: { 白色: [30, 60], 蓝色: [100, 200], 金色: [400, 800], 紫色: [1500, 3000], 银色: [15000, 30000] },
+  防具: { 白色: [15, 40], 蓝色: [50, 150], 金色: [250, 600], 紫色: [1000, 2000], 银色: [10000, 20000] },
+  饰品: { 白色: [20, 40], 蓝色: [60, 150], 金色: [300, 700], 紫色: [1200, 2500], 银色: [12000, 25000] },
 };
 
 /**
@@ -185,10 +187,10 @@ export function checkPrice(kind: MarketKind, item: MarketItemSnapshot, sellerTie
   if (kind === 'goods') {
     const qty = Number(item.数量 ?? 1);
     if (!Number.isInteger(qty) || qty < 1 || qty > 999) return fail('数量须为 1~999 的整数');
-    // 道具按所填品质查武器基准；缺品质/不可识别 → 要求补全（玩家在上架界面填写）
+    // 道具按所填品质查武器表（银色同武器银色）；缺品质/不可识别 → 要求补全（玩家在上架界面填写）
     const parsed = parseQuality(item.品质);
-    if (!parsed || parsed.quality === '银色')
-      return fail('道具需填写品质（白色/蓝色/金色/紫色）——请在上架界面补全后再挂单');
+    if (!parsed)
+      return fail('道具需填写品质（白色/蓝色/金色/紫色/银色）——请在上架界面补全后再挂单');
     const base = BASE[GOODS_BASE_CATEGORY][parsed.quality];
     const min = Math.floor(base[0] * f * PRICE_FLOOR_RATE);
     const max = Math.floor(base[1] * f * PRICE_CEIL_RATE);
@@ -203,7 +205,6 @@ export function checkPrice(kind: MarketKind, item: MarketItemSnapshot, sellerTie
   if (!parsed || !category || !BASE[category]?.[parsed.quality])
     return fail('装备缺少可定价的品质/类型字段');
   if (parsed.quality === '白色') return fail('白色装备没有市场，回廊不收录');
-  if (parsed.quality === '银色') return fail('银色装备有价无市，只走剧情，不进入市场');
   const ref = refRange(parsed.quality, category, 阶位);
   if (!ref) return fail('阶位无法识别');
   const min = Math.floor(ref.min * PRICE_FLOOR_RATE);

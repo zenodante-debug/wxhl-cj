@@ -173,9 +173,50 @@ describe('checkPrice · equip（允许区间 = 参考价 50% ~ 200%）', () => {
     expect(checkPrice('equip', 紫饰品, '一阶', 45001).ok).toBe(false);
   });
 
-  it('白装/银装拒绝上架', () => {
+  it('白装仍拒绝上架（回廊不收录）', () => {
     expect(checkPrice('equip', { 名称: '铁剑', 品质: '白色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
-    expect(checkPrice('equip', { 名称: '圣剑', 品质: '银色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
+  });
+
+  // ———— 银色 2026-09-23 放开售卖准入：基准价 = 同表紫色 × 10 ————
+  it('银武器一阶：参考 [15000,30000] → 允许 [7500,60000]', () => {
+    const 银武 = { 名称: '圣剑', 品质: '银色', 类型: '武器', 阶位: '一阶' };
+    expect(checkPrice('equip', 银武, '一阶', 7500).ok).toBe(true);
+    expect(checkPrice('equip', 银武, '一阶', 60000).ok).toBe(true);
+    expect(checkPrice('equip', 银武, '一阶', 7499).ok).toBe(false);
+    expect(checkPrice('equip', 银武, '一阶', 60001).ok).toBe(false);
+  });
+
+  it('银防具 / 银饰品各按自己那张表 ×10', () => {
+    const 银防 = { 名称: '圣铠', 品质: '银色', 类型: '防具', 阶位: '一阶' };
+    expect(checkPrice('equip', 银防, '一阶', 5000).ok).toBe(true); // 10000×50%
+    expect(checkPrice('equip', 银防, '一阶', 40000).ok).toBe(true); // 20000×200%
+    const 银饰 = { 名称: '圣环', 品质: '银色', 类型: '饰品', 阶位: '一阶' };
+    expect(checkPrice('equip', 银饰, '一阶', 6000).ok).toBe(true); // 12000×50%
+    expect(checkPrice('equip', 银饰, '一阶', 50000).ok).toBe(true); // 25000×200%
+  });
+
+  it('银武器五阶：参考 ×25 → 允许 [187500, 1500000]', () => {
+    const 银武五 = { 名称: '圣剑', 品质: '银色', 类型: '武器', 阶位: '五阶' };
+    expect(checkPrice('equip', 银武五, '五阶', 187500).ok).toBe(true);
+    expect(checkPrice('equip', 银武五, '五阶', 1500000).ok).toBe(true);
+    expect(checkPrice('equip', 银武五, '五阶', 187499).ok).toBe(false);
+    expect(checkPrice('equip', 银武五, '五阶', 1500001).ok).toBe(false);
+  });
+
+  it('银色道具走武器表 → 与银武器同价 [7500,60000]', () => {
+    const 银道具 = { 名称: '圣水', 品质: '银色', 阶位: '一阶', 数量: 1 };
+    expect(checkPrice('goods', 银道具, '一阶', 7500).ok).toBe(true);
+    expect(checkPrice('goods', 银道具, '一阶', 60000).ok).toBe(true);
+    expect(checkPrice('goods', 银道具, '一阶', 7499).ok).toBe(false);
+    expect(checkPrice('goods', 银道具, '一阶', 60001).ok).toBe(false);
+  });
+
+  it('银色比紫色贵 10 倍：同一价位在紫装合法、银装反而过低', () => {
+    const 紫武 = { 名称: '龙牙', 品质: '紫色', 类型: '武器', 阶位: '一阶' };
+    const 银武 = { 名称: '圣剑', 品质: '银色', 类型: '武器', 阶位: '一阶' };
+    expect(checkPrice('equip', 紫武, '一阶', 3000).ok).toBe(true);
+    expect(checkPrice('equip', 银武, '一阶', 7500).ok).toBe(true); // 银装下限
+    expect(checkPrice('equip', 银武, '一阶', 3000).ok).toBe(false); // 紫装价买不到银装
   });
 
   it('物品缺阶位时按卖家阶位算（蓝武 三阶卖家 → [450,3600]）', () => {

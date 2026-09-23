@@ -35,7 +35,11 @@ export interface Listing {
   op?: { tier: string; rp: number; up: number };
 }
 
-/** 挂单成交总价（单价 × 数量） */
+/**
+ * 挂单成交总价（单价 × 数量）。
+ * 注意：**金额一律走 `buyQty.ts` 的 `buyTotals`**（它同时给总价/手续费/实付，且数量已夹取）。
+ * 这里保留只是为了不打断外部引用，新代码别再单独用它拼金额。
+ */
 export function totalPrice(l: Pick<Listing, 'price' | 'qty'>): number {
   return Number(l.price) * Number(l.qty);
 }
@@ -80,11 +84,16 @@ export function createListing(p: {
   return post('/market/list', { client: getClientId(), ...p });
 }
 
-export function buyListing(id: string, buyer: string): Promise<void> {
-  return post('/market/buy', { id, buyer, client: getClientId() });
+/** 购买：只买走 `qty` 件（部分购买，剩余继续挂在市场上）。服务器按单价×qty 给卖家记账 */
+export function buyListing(id: string, buyer: string, qty: number): Promise<{ ok: boolean; bought: number }> {
+  return post('/market/buy', { id, buyer, client: getClientId(), qty });
 }
 
-export function cancelListing(id: string): Promise<void> {
+/**
+ * 下架取回。回传服务端此刻的**剩余数量** —— 部分成交后本地缓存那份挂单的 qty 是陈旧的，
+ * 按它往背包加会让卖家多拿回物品，所以必须用服务器这个数。
+ */
+export function cancelListing(id: string): Promise<{ ok: boolean; returned: number }> {
   return post('/market/cancel', { id, client: getClientId() });
 }
 

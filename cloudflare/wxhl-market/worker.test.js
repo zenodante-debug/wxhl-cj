@@ -34,19 +34,34 @@ describe('checkPrice · 与前端同规则', () => {
     expect(checkPrice('equip', w, '一阶', 199).ok).toBe(false);
     expect(checkPrice('equip', w, '一阶', 1601).ok).toBe(false);
   });
-  it('白装/银装拒绝', () => {
+  it('白装拒绝（回廊不收录）', () => {
     expect(checkPrice('equip', { 品质: '白色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
-    expect(checkPrice('equip', { 品质: '银色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
+  });
+  // 银色 2026-09-23 放开：基准 = 同表紫色 × 10
+  it('银武一阶：参考[15000,30000] → 允许[7500,60000]', () => {
+    const w = { 品质: '银色', 类型: '武器', 阶位: '一阶' };
+    expect(checkPrice('equip', w, '一阶', 7500).ok).toBe(true);
+    expect(checkPrice('equip', w, '一阶', 60000).ok).toBe(true);
+    expect(checkPrice('equip', w, '一阶', 7499).ok).toBe(false);
+    expect(checkPrice('equip', w, '一阶', 60001).ok).toBe(false);
+  });
+  it('银防具 [5000,40000] / 银饰品 [6000,50000]', () => {
+    expect(checkPrice('equip', { 品质: '银色', 类型: '防具', 阶位: '一阶' }, '一阶', 5000).ok).toBe(true);
+    expect(checkPrice('equip', { 品质: '银色', 类型: '防具', 阶位: '一阶' }, '一阶', 40000).ok).toBe(true);
+    expect(checkPrice('equip', { 品质: '银色', 类型: '饰品', 阶位: '一阶' }, '一阶', 6000).ok).toBe(true);
+    expect(checkPrice('equip', { 品质: '银色', 类型: '饰品', 阶位: '一阶' }, '一阶', 50000).ok).toBe(true);
+    expect(checkPrice('equip', { 品质: '银色', 类型: '饰品', 阶位: '一阶' }, '一阶', 5999).ok).toBe(false);
   });
   it('道具与武器同表：蓝品质一阶 = [50,400]', () => {
     expect(checkPrice('goods', { 品质: '蓝色', 数量: 5, 阶位: '一阶' }, '一阶', 50).ok).toBe(true);
     expect(checkPrice('goods', { 品质: '蓝色', 数量: 5, 阶位: '一阶' }, '一阶', 400).ok).toBe(true);
     expect(checkPrice('goods', { 品质: '蓝色', 数量: 5, 阶位: '一阶' }, '一阶', 15).ok).toBe(false);
   });
-  it('道具缺品质/银色 → 拒绝（要求补全）', () => {
+  it('道具缺品质/品质不可识别 → 拒绝（要求补全）；银色已放行', () => {
     expect(checkPrice('goods', { 数量: 5, 阶位: '一阶' }, '一阶', 100).ok).toBe(false);
     expect(checkPrice('goods', { 品质: '特殊', 数量: 5, 阶位: '一阶' }, '一阶', 100).ok).toBe(false);
-    expect(checkPrice('goods', { 品质: '银色', 数量: 5, 阶位: '一阶' }, '一阶', 5000).ok).toBe(false);
+    expect(checkPrice('goods', { 品质: '银色', 数量: 5, 阶位: '一阶' }, '一阶', 7500).ok).toBe(true);
+    expect(checkPrice('goods', { 品质: '银色', 数量: 5, 阶位: '一阶' }, '一阶', 7499).ok).toBe(false);
   });
   it('白品质道具一阶 = [15,120]（弹药等便宜消耗品）', () => {
     const ammo = { 品质: '白色', 数量: 50, 阶位: '一阶' };
@@ -140,6 +155,47 @@ describe('market/list · 上架与拒绝', () => {
     );
     expect(noQ.status).toBe(400);
     expect(await noQ.text()).toContain('品质');
+  });
+
+  // ———— 银色 2026-09-23 放开售卖准入（全链路：上架 → 落库） ————
+  const 银武 = {
+    client: 'cSilver', seller: '圣殿', tier: '一阶', kind: 'equip',
+    item: {
+      名称: '圣裁之刃', 类型: '武器', 品质: '银色', 阶位: '一阶', 数量: 1,
+      伤害骰: '2d20', 倍率: 2, 主属性: 'STR', 副属性: 'AGI', 主属性加成: 3, 副属性加成: 1,
+      装备防御: 0, 装备闪避: 0, 负重: 3, 强化等级: 0, 穿戴门槛: 'STR≥10',
+      效果: { 圣裁: '对黑暗属性目标伤害提升。', 断罪: '暴击时附加圣焰。' },
+      描述: '副本唯一的银装核心',
+    },
+    qty: 1, price: 10000,
+  };
+
+  it('银装可上架（紫×10 区间 [7500,60000] 内）', async () => {
+    const e = env();
+    const res = await worker.fetch(post('/market/list', 银武), e);
+    expect(res.status, await res.clone().text()).toBe(200);
+    const { id } = await res.json();
+    const browse = await (await worker.fetch(get('/market/listings'), e)).json();
+    const l = browse.listings.find(x => x.id === id);
+    expect(l.kind).toBe('equip');
+    expect(l.item.品质).toBe('银色');
+  });
+
+  it('银装低于下限被拒（7499），按紫装价（3000）更是被拒', async () => {
+    const e = env();
+    expect((await worker.fetch(post('/market/list', { ...银武, client: 'cS2', price: 7499 }), e)).status).toBe(400);
+    expect((await worker.fetch(post('/market/list', { ...银武, client: 'cS3', price: 3000 }), e)).status).toBe(400);
+  });
+
+  it('银色道具可上架（走武器表同价）', async () => {
+    const e = env();
+    const 银道具 = {
+      client: 'cS4', seller: '圣殿', tier: '一阶', kind: 'goods',
+      item: { 名称: '圣水原液', 品质: '银色', 阶位: '一阶', 描述: '副本唯一', 数量: 1 },
+      qty: 1, price: 8000,
+    };
+    expect((await worker.fetch(post('/market/list', 银道具), e)).status).toBe(200);
+    expect((await worker.fetch(post('/market/list', { ...银道具, client: 'cS5', price: 7499 }), e)).status).toBe(400);
   });
 });
 

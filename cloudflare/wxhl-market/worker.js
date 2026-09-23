@@ -26,12 +26,14 @@
 //   它自带 ensureRankSchema, 不经过市场那套建表 —— 两边互不波及。
 
 // ———— 价格表 [下限, 上限]（经济系统·恒定物价体系） ————
+// 银色 2026-09-23 放开售卖准入：**基准价 = 同表紫色 × 10**（银装数值仍等同紫装，
+// 但作为副本唯一剧情物品按溢价一档定价）。与 src/wxhl-003/market/priceTable.ts 必须同步。
 const BASE = {
-  武器: { 白色: [30, 60], 蓝色: [100, 200], 金色: [400, 800], 紫色: [1500, 3000], 银色: [1500, 3000] },
-  防具: { 白色: [15, 40], 蓝色: [50, 150], 金色: [250, 600], 紫色: [1000, 2000], 银色: [1000, 2000] },
-  饰品: { 白色: [20, 40], 蓝色: [60, 150], 金色: [300, 700], 紫色: [1200, 2500], 银色: [1200, 2500] },
+  武器: { 白色: [30, 60], 蓝色: [100, 200], 金色: [400, 800], 紫色: [1500, 3000], 银色: [15000, 30000] },
+  防具: { 白色: [15, 40], 蓝色: [50, 150], 金色: [250, 600], 紫色: [1000, 2000], 银色: [10000, 20000] },
+  饰品: { 白色: [20, 40], 蓝色: [60, 150], 金色: [300, 700], 紫色: [1200, 2500], 银色: [12000, 25000] },
 };
-const PREMIUM = { 白色: 1, 蓝色: 1.0, 金色: 1.5, 紫色: 2.0, 银色: 2.0 };
+// 注：原 PREMIUM（品质溢价表）自 2026-09-23 起作废，已删除。
 // 允许挂单区间（2026-09-23 用户定稿）：参考价 = 基准价 × 阶位²（系统一）
 //   最低 = 参考价下限 × 50%，最高 = 参考价上限 × 200%（原品质溢价表作废）
 const PRICE_FLOOR_RATE = 0.5;
@@ -134,8 +136,7 @@ export function checkPrice(kind, item, sellerTier, price, opsKey, welfareKey) {
     const qty = Number(item?.数量 ?? 1);
     if (!Number.isInteger(qty) || qty < 1 || qty > 999) return fail('数量须为 1~999 的整数');
     const q = parseQuality(item?.品质);
-    if (!q || q.quality === '银色')
-      return fail('道具需填写品质（白色/蓝色/金色/紫色）——请在上架界面补全后再挂单');
+    if (!q) return fail('道具需填写品质（白色/蓝色/金色/紫色/银色）——请在上架界面补全后再挂单');
     const base = BASE[GOODS_BASE_CATEGORY][q.quality];
     const min = Math.floor(base[0] * f * PRICE_FLOOR_RATE);
     const max = Math.floor(base[1] * f * PRICE_CEIL_RATE);
@@ -148,7 +149,6 @@ export function checkPrice(kind, item, sellerTier, price, opsKey, welfareKey) {
   const category = parseCategory(item);
   if (!q || !category || !BASE[category][q.quality]) return fail('装备缺少可定价的品质/类型字段');
   if (q.quality === '白色') return fail('白色装备没有市场，回廊不收录');
-  if (q.quality === '银色') return fail('银色装备有价无市，只走剧情，不进入市场');
   const ref = BASE[category][q.quality];
   const min = Math.floor(ref[0] * f * PRICE_FLOOR_RATE);
   const max = Math.floor(ref[1] * f * PRICE_CEIL_RATE);
@@ -358,6 +358,15 @@ async function withRetry(fn, tries = 3) {
   throw lastErr;
 }
 
+/**
+ * D1 的 `run()` / `batch()` 把变更行数放在 **`meta.changes`**，不是顶层 `changes`。
+ * 2026-09-22 踩过：读到 undefined 后 `?? 0` 兜底，导致管理的删除计数恒为 0
+ * —— 明明删掉了却报「删了 0 条」。这里不设顶层回退，免得把同类错误再藏起来。
+ *
+ * 市场与排行榜共用：市场的部分购买拿它当**并发仲裁信号**（UPDATE 影响 0 行 = 没买到）。
+ */
+const changesOf = r => Number(r?.meta?.changes ?? 0);
+
 // ════════════════════════════════════════════════════════════════════════════
 // 玩家排行榜
 //
@@ -432,13 +441,6 @@ async function ensureRankSchema(env) {
 
 const RANK_COLS = `name, lv, title, job, updated`;
 const countRanks = async db => Number((await db.prepare(`SELECT COUNT(*) AS n FROM ranks`).first())?.n ?? 0);
-
-/**
- * D1 的 `run()` 把变更行数放在 **`meta.changes`**，不是顶层 `changes`。
- * 2026-09-22 踩过：读到 undefined 后 `?? 0` 兜底，导致管理的删除计数恒为 0
- * —— 明明删掉了却报「删了 0 条」。这里不设顶层回退，免得把同类错误再藏起来。
- */
-const changesOf = r => Number(r?.meta?.changes ?? 0);
 
 /** 名次 = 排在我前面的行数 + 1 */
 async function rankOf(db, row) {
@@ -685,50 +687,73 @@ export default {
       }
     }
 
-    // POST /market/buy  { id, buyer, client }  →  { ok }
-    //   给卖家挂账后删除挂单（买家付款在买家本地结算，服务器只记账）。
-    //   成交价 = 单价 × 数量，与前端一致。
+    // POST /market/buy  { id, buyer, client, qty }  →  { ok, bought }
+    //   支持**部分购买**：只买走 qty 件，剩余继续挂在市场上（买家付款在买家本地结算，
+    //   手续费也是买家本地扣的，服务器只按 单价 × 买走数量 给卖家记账）。
+    //   并发仲裁：四条语句都带 `qty >= ?` 守卫，库存不够时**一条都不动**；
+    //   看 UPDATE 那步的 meta.changes 就知道有没有成交（0 = 被别人抢先，回 409）。
+    //   整个 batch 是一个事务，不存在「扣了库存没记账」的中间态。
     if (url.pathname === '/market/buy' && request.method === 'POST') {
       try {
-        const { id, buyer, client } = await request.json();
-        const row = await env.MARKET_DB.prepare(`SELECT * FROM listings WHERE id = ?`).bind(String(id ?? '')).first();
+        const { id, buyer, client, qty } = await request.json();
+        const lid = String(id ?? '');
+        const row = await env.MARKET_DB.prepare(`SELECT client, qty FROM listings WHERE id = ?`).bind(lid).first();
         if (!row) return new Response('not found', { status: 404, headers: cors });
         if (client && String(client).slice(0, 64) === row.client) {
           return new Response('own listing', { status: 403, headers: cors });
         }
-        const total = Number(row.price) * Number(row.qty);
+        // 不传 qty = 买光剩余（旧客户端/旧 dist 包的原有行为，别把它们弄瘸）；
+        // 显式传了就必须是 ≥1 的整数。JSON 里 qty:null 视为非法，不当作「没传」。
+        const want = qty === undefined ? Number(row.qty) : Number(qty);
+        if (!Number.isInteger(want) || want < 1) {
+          return new Response('购买数量须为 1 以上的整数', { status: 400, headers: cors });
+        }
         const now = Date.now();
-        await withRetry(() =>
+        // 每笔成交一个**唯一** id：同一挂单多次成交不能互相覆盖（旧代码用挂单 id 作主键会顶掉）
+        const saleId = `${lid}-${now.toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
+        const results = await withRetry(() =>
           env.MARKET_DB.batch([
-            env.MARKET_DB.prepare(
-              `INSERT INTO earnings (client, amount) VALUES (?, ?)
-               ON CONFLICT(client) DO UPDATE SET amount = amount + excluded.amount`,
-            ).bind(row.client, total),
-            // 出售记录：买家名写入，卖家可在「我的」查看
+            // 1) 条件记出售记录（库存够才记）
             env.MARKET_DB.prepare(
               `INSERT OR REPLACE INTO sales (id, client, buyer, item_json, qty, price, created)
-               VALUES (?, ?, ?, ?, ?, ?, ?)`,
-            ).bind(row.id, row.client, String(buyer ?? '匿名').slice(0, 24), row.item_json, row.qty, row.price, now),
-            env.MARKET_DB.prepare(`DELETE FROM listings WHERE id = ?`).bind(row.id),
+               SELECT ?, client, ?, item_json, ?, price, ? FROM listings WHERE id = ? AND qty >= ?`,
+            ).bind(saleId, String(buyer ?? '匿名').slice(0, 24), want, now, lid, want),
+            // 2) 条件记账货款（单价 × 买走数量）。SELECT 形式下 WHERE 用来消解 ON 的歧义
+            env.MARKET_DB.prepare(
+              `INSERT INTO earnings (client, amount)
+               SELECT client, price * ? FROM listings WHERE id = ? AND qty >= ?
+               ON CONFLICT(client) DO UPDATE SET amount = amount + excluded.amount`,
+            ).bind(want, lid, want),
+            // 3) 原子扣减 —— 并发仲裁点
+            env.MARKET_DB.prepare(`UPDATE listings SET qty = qty - ? WHERE id = ? AND qty >= ?`).bind(want, lid, want),
+            // 4) 卖光了才删挂单
+            env.MARKET_DB.prepare(`DELETE FROM listings WHERE id = ? AND qty <= 0`).bind(lid),
           ]),
         );
-        return json({ ok: true }, cors);
-      } catch {
+        if (changesOf(results[2]) === 0) {
+          return new Response('库存不足：这件挂单的剩余数量已经变了，请刷新后再买', { status: 409, headers: cors });
+        }
+        return json({ ok: true, bought: want }, cors);
+      } catch (e) {
+        console.error('[wxhl-market] buy 失败', String(e));
         return new Response('bad request', { status: 400, headers: cors });
       }
     }
 
-    // POST /market/cancel  { id, client }  →  卖家下架取回挂单
+    // POST /market/cancel  { id, client }  →  { ok, returned }  卖家下架取回
+    //   回传**服务端此刻的剩余数量**：部分成交后客户端缓存的那份 qty 是陈旧的，
+    //   按它往背包加会让卖家多拿回物品。
+    //   删除影响 0 行 = 这单已经被别人下架/买光 → 404，避免并发下架把物品加回两次。
     if (url.pathname === '/market/cancel' && request.method === 'POST') {
       try {
         const { id, client } = await request.json();
-        const row = await env.MARKET_DB.prepare(`SELECT client FROM listings WHERE id = ?`).bind(String(id ?? '')).first();
+        const lid = String(id ?? '');
+        const row = await env.MARKET_DB.prepare(`SELECT client, qty FROM listings WHERE id = ?`).bind(lid).first();
         if (!row) return new Response('not found', { status: 404, headers: cors });
-        if (row.client !== String(client).slice(0, 64)) return new Response('forbidden', { status: 403, headers: cors });
-        await withRetry(() =>
-          env.MARKET_DB.prepare(`DELETE FROM listings WHERE id = ?`).bind(String(id)).run(),
-        );
-        return json({ ok: true }, cors);
+        if (row.client !== String(client ?? '').slice(0, 64)) return new Response('forbidden', { status: 403, headers: cors });
+        const del = await withRetry(() => env.MARKET_DB.prepare(`DELETE FROM listings WHERE id = ?`).bind(lid).run());
+        if (changesOf(del) === 0) return new Response('not found', { status: 404, headers: cors });
+        return json({ ok: true, returned: Number(row.qty) }, cors);
       } catch {
         return new Response('bad request', { status: 400, headers: cors });
       }

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { fakeD1 } from './fake-d1.js';
+import { makeFakeD1 } from './fake-d1.mjs';
 import worker from './worker.js';
 
 // ================================================================
@@ -12,7 +12,7 @@ import worker from './worker.js';
 //       同名后来者顶掉先前者；Lv.10 起才能参与，等级无上限。
 // ================================================================
 
-const env = (extra = {}) => ({ MARKET_DB: fakeD1(), ...extra });
+const env = (extra = {}) => ({ MARKET_DB: makeFakeD1(), ...extra });
 const post = (path, body) =>
   new Request('https://test.local' + path, {
     method: 'POST',

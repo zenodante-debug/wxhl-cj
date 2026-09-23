@@ -269,12 +269,29 @@
         </div>
 
         <div class="md-line dim">卖家：{{ detailOpen.seller }} · {{ detailOpen.tier }} · 上架于 {{ timeAgo(detailOpen.created) }}</div>
+
+        <!-- 部分购买：只买走一部分，剩余继续挂在市场上 -->
+        <div v-if="detailOpen.client !== myClient" class="md-qty">
+          <span class="md-qty-label">购买数量</span>
+          <button class="qty-btn" :disabled="buyQty <= 1" @click="stepQty(-1)">−</button>
+          <input class="qty-input" type="number" min="1" :max="detailOpen.qty" :value="buyQty" @input="onQtyInput" />
+          <button class="qty-btn" :disabled="buyQty >= detailOpen.qty" @click="stepQty(1)">＋</button>
+          <button
+            class="qty-all"
+            :disabled="buyQty >= detailOpen.qty"
+            @click="buyQty = clampQty(detailOpen.qty, detailOpen.qty)"
+          >
+            全买
+          </button>
+          <span class="md-qty-max">共 {{ detailOpen.qty }} 件</span>
+        </div>
+
         <div class="md-total">
-          单价 <b>{{ detailOpen.price }} UP</b> × {{ detailOpen.qty }} = <b class="big">{{ detailOpen.price * detailOpen.qty }} UP</b>
+          单价 <b>{{ detailOpen.price }} UP</b> × {{ shownQty }} = <b class="big">{{ buyMath.total }} UP</b>
         </div>
         <div v-if="detailOpen.client !== myClient" class="md-line dim">
-          购买手续费(10%)：{{ buyerFee }} UP ｜ 实付 <b>{{ detailOpen.price * detailOpen.qty + buyerFee }} UP</b>
-          ｜ 支付后持有 {{ store.playerUP }} → {{ store.playerUP - detailOpen.price * detailOpen.qty - buyerFee }} UP
+          购买手续费(10%)：{{ buyMath.fee }} UP ｜ 实付 <b>{{ buyMath.pay }} UP</b>
+          ｜ 支付后持有 {{ store.playerUP }} → {{ store.playerUP - buyMath.pay }} UP
         </div>
 
         <div class="md-actions">
@@ -322,6 +339,7 @@ import {
 import { validateEquip } from './equipRules';
 import type { Bag } from './settle';
 import { useMarketStore, type SellPrep } from './store';
+import { DEFAULT_QTY, buyTotals, clampQty } from './buyQty';
 
 const emit = defineEmits<{ close: [] }>();
 const store = useMarketStore();
@@ -334,7 +352,8 @@ const TABS = [
 const tab = ref<(typeof TABS)[number]['key']>('browse');
 const myClient = getClientId();
 
-const QUALITY_OPTIONS = ['白色', '蓝色', '金色', '紫色'] as const;
+// 银色 2026-09-23 起可售卖（基准价 = 紫装 × 10）
+const QUALITY_OPTIONS = ['白色', '蓝色', '金色', '紫色', '银色'] as const;
 const TIER_OPTIONS = ['一阶', '二阶', '三阶', '四阶', '五阶'] as const;
 
 // ============ 逛市场 ============
@@ -343,6 +362,7 @@ const FILTERS = [
   { key: '蓝色', label: '蓝' },
   { key: '金色', label: '金' },
   { key: '紫色', label: '紫' },
+  { key: '银色', label: '银' },
 ] as const;
 const filter = ref<(typeof FILTERS)[number]['key']>('all');
 
@@ -381,12 +401,35 @@ function openNotices() {
   store.markAllRead();
 }
 
-/** 购买手续费（与 store 同规则：总价 10% 向上取整） */
-const buyerFee = computed(() => (detailOpen.value ? store.buyerFeeFor(detailOpen.value.price * detailOpen.value.qty) : 0));
+/** 详情弹层里选定的购买数量（部分购买）。打开弹层时重置为默认 1 */
+const buyQty = ref(DEFAULT_QTY);
+watch(detailOpen, l => {
+  buyQty.value = clampQty(DEFAULT_QTY, l ? l.qty : DEFAULT_QTY);
+});
+
+/** 金额按「实际会买的件数」算：别人的挂单用选定的数量，自己的挂单用剩余全量 */
+const shownQty = computed(() => {
+  const l = detailOpen.value;
+  if (!l) return DEFAULT_QTY;
+  return l.client === myClient ? l.qty : buyQty.value;
+});
+/** 总价 / 手续费 / 实付（规则与测试在 buyQty.ts） */
+const buyMath = computed(() => buyTotals(detailOpen.value?.price ?? 0, shownQty.value));
+
+function stepQty(delta: number) {
+  if (!detailOpen.value) return;
+  buyQty.value = clampQty(buyQty.value + delta, detailOpen.value.qty);
+}
+
+/** 手输数量：立刻夹到 [1, 剩余]，清空也不会变成 NaN */
+function onQtyInput(e: Event) {
+  if (!detailOpen.value) return;
+  buyQty.value = clampQty((e.target as HTMLInputElement).value as unknown as number, detailOpen.value.qty);
+}
 
 async function doBuy() {
   if (!detailOpen.value) return;
-  const ok = await store.buy(detailOpen.value);
+  const ok = await store.buy(detailOpen.value, buyQty.value);
   if (ok) detailOpen.value = null;
 }
 
@@ -458,8 +501,8 @@ function selectedRow(name: string) {
 }
 
 function defaultQuality(item: MarketItemSnapshot): string {
-  const q = parseQuality(item.品质)?.quality;
-  return q && q !== '银色' ? q : '白色';
+  // 银色已可售卖，不再回落成白色（回落会按白装价挂上去，严重低估）
+  return parseQuality(item.品质)?.quality ?? '白色';
 }
 
 function toggleSel(name: string, item: MarketItemSnapshot & { 数量: number }) {
@@ -1064,6 +1107,75 @@ watch(
   line-height: 1.6;
   white-space: pre-wrap;
   word-break: break-word;
+}
+.md-qty {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 6px 0;
+  border-top: 1px solid rgba(80, 40, 20, 0.35);
+  font-size: 12px;
+  color: var(--chalk, #d8cdbd);
+}
+.md-qty-label {
+  flex-shrink: 0;
+  color: var(--amber-d, #b08a4f);
+}
+.qty-btn {
+  width: 26px;
+  height: 24px;
+  border: 1px solid rgba(160, 120, 60, 0.5);
+  border-radius: 4px;
+  background: rgba(90, 62, 28, 0.5);
+  color: var(--amber, #d8b36a);
+  font-size: 14px;
+  line-height: 1;
+  cursor: pointer;
+  flex-shrink: 0;
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+.qty-input {
+  width: 54px;
+  height: 24px;
+  box-sizing: border-box;
+  border: 1px solid rgba(160, 120, 60, 0.5);
+  border-radius: 4px;
+  background: rgba(20, 14, 10, 0.8);
+  color: var(--chalk, #d8cdbd);
+  text-align: center;
+  font-size: 12px;
+  /* 数字输入框的上下箭头在窄弹层里很挤，去掉 */
+  -moz-appearance: textfield;
+  appearance: textfield;
+  &::-webkit-outer-spin-button,
+  &::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+}
+.qty-all {
+  height: 24px;
+  padding: 0 8px;
+  border: 1px solid rgba(160, 120, 60, 0.5);
+  border-radius: 4px;
+  background: transparent;
+  color: var(--amber-d, #b08a4f);
+  font-size: 11px;
+  cursor: pointer;
+  flex-shrink: 0;
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+.md-qty-max {
+  margin-left: auto;
+  color: #7a6448;
+  font-size: 11px;
+  flex-shrink: 0;
 }
 .md-total {
   font-size: 12px;

@@ -1,4 +1,5 @@
 import { bagAdd, bagRemove, gainUP, spendUP, type Bag } from './settle';
+import { buyTotals, clampQty } from './buyQty';
 import {
   buyListing,
   cancelListing,
@@ -7,7 +8,6 @@ import {
   fetchListings,
   fetchMine,
   fetchSales,
-  totalPrice,
   type Listing,
   type SaleRecord,
 } from './api';
@@ -394,52 +394,48 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     return succeeded.length > 0;
   }
 
-  // ==================== 购买（含 10% 手续费） ====================
+  // ==================== 购买（支持部分购买，含 10% 手续费） ====================
 
-  /** 购买单价的 10% 手续费（回廊创收），向上取整 */
-  function buyerFeeFor(total: number): number {
-    return Math.ceil(total * 0.1);
-  }
-
-  /** 购买：本地先校验余额（含手续费，不足则不动服务器）→ 服务器销账 → 本地扣 UP 入包。双击防护 */
-  async function buy(l: Listing): Promise<boolean> {
+  /** 购买：本地先校验余额（含手续费，不足则不动服务器）→ 服务器按 qty 销账 → 本地扣 UP 入包。双击防护 */
+  async function buy(l: Listing, qty: number): Promise<boolean> {
     if (purchasing.value) return false;
     purchasing.value = true;
     try {
-      return await doBuy(l);
+      return await doBuy(l, qty);
     } finally {
       purchasing.value = false;
     }
   }
 
-  async function doBuy(l: Listing): Promise<boolean> {
+  async function doBuy(l: Listing, qty: number): Promise<boolean> {
     lastError.value = '';
     const r = readContractor();
     if (!r) {
       lastError.value = '读不到存档变量';
       return false;
     }
-    const total = totalPrice(l);
-    const fee = buyerFeeFor(total); // 购买手续费 10%
+    // 再夹一次：服务器也会夹，但金额必须按**实际会买到的数量**算，不能按界面上可能残留的值
+    const 买 = clampQty(qty, l.qty);
+    const { fee, pay } = buyTotals(l.price, 买);
     const up = Number(r.c.经济?.UP ?? 0);
     try {
-      spendUP(up, total + fee);
+      spendUP(up, pay);
     } catch (e: any) {
       lastError.value = e.message;
       toastr.error(e.message);
       return false;
     }
     try {
-      await buyListing(l.id, playerName.value);
+      await buyListing(l.id, playerName.value, 买);
     } catch (e: any) {
       lastError.value = e?.message || '购买失败';
       toastr.error('购买失败: ' + lastError.value);
       return false;
     }
-    _.set(r.mvu, ['stat_data', '契约者', '经济', 'UP'], up - total - fee);
-    _.set(r.mvu, ['stat_data', '契约者', '背包'], bagAdd((r.c.背包 ?? {}) as Bag, l.item, l.qty));
-    await commit(r.mvu, r.mid, [[['stat_data', '契约者', '经济', 'UP'], up - total - fee]]);
-    toastr.success(`购得「${l.item.名称}」×${l.qty}，实付 ${total + fee} UP（含手续费 ${fee}）`);
+    _.set(r.mvu, ['stat_data', '契约者', '经济', 'UP'], up - pay);
+    _.set(r.mvu, ['stat_data', '契约者', '背包'], bagAdd((r.c.背包 ?? {}) as Bag, l.item, 买));
+    await commit(r.mvu, r.mid, [[['stat_data', '契约者', '经济', 'UP'], up - pay]]);
+    toastr.success(`购得「${l.item.名称}」×${买}，实付 ${pay} UP（含手续费 ${fee}）`);
     await refresh();
     return true;
   }
@@ -472,8 +468,11 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
       );
       if (!ok) return false;
     }
+    // 取回数量以**服务端此刻的剩余**为准：部分成交后本地缓存那份 qty 是陈旧的，
+    // 按它加回背包会让卖家多拿回物品。
+    let returned = 0;
     try {
-      await cancelListing(l.id);
+      returned = (await cancelListing(l.id)).returned;
     } catch (e: any) {
       lastError.value = e?.message || '下架失败';
       toastr.error(lastError.value);
@@ -481,10 +480,10 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     }
     const r = readContractor();
     if (r) {
-      _.set(r.mvu, ['stat_data', '契约者', '背包'], bagAdd((r.c.背包 ?? {}) as Bag, l.item, l.qty));
+      _.set(r.mvu, ['stat_data', '契约者', '背包'], bagAdd((r.c.背包 ?? {}) as Bag, l.item, returned));
       await commit(r.mvu, r.mid, []);
     }
-    toastr.success(`「${l.item.名称}」已取回${前世 ? '（来自旧存档）' : ''}`);
+    toastr.success(`「${l.item.名称}」已取回 ×${returned}${前世 ? '（来自旧存档）' : ''}`);
     await refresh();
     return true;
   }
@@ -556,7 +555,6 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     refresh,
     prepareSell,
     commitSell,
-    buyerFeeFor,
     buy,
     cancel,
     collect,
