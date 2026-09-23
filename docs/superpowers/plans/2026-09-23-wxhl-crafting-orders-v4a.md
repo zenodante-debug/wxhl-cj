@@ -336,7 +336,7 @@ describe('订单 · 交付与验收', () => {
     expect((await call(env2, '/order/deliver', postJson({ id: id2, maker: '乙', item }))).status).toBe(400);
   });
 
-  it('退货：状态变为已取消，成品回到接单者待领，订金不退', async () => {
+  it('退货：状态变为已取消，成品回到接单者待领，订金【不退还发单人】', async () => {
     const env = { MARKET_DB: makeFakeD1() };
     const id = await 发布并接单(env);
     const item = { 名称: '剑', 数量: 1 };
@@ -346,7 +346,12 @@ describe('订单 · 交付与验收', () => {
     const makerMine = await (await call(env, `/order/mine?who=${encodeURIComponent('乙')}`)).json();
     expect(makerMine.asMaker[0].status).toBe('已取消');
     expect(makerMine.claim.item.名称).toBe('剑');   // 退回的成品
-    expect(makerMine.claim.deposit).toBe(0);        // 订金早在接单时领过，这里不再出现
+    expect(makerMine.claim.deposit).toBe(300);      // 订金仍是接单者的（未领则仍待领）——「不退」指发单人拿不回去
+
+    const posterMine = await (await call(env, `/order/mine?who=${encodeURIComponent('甲')}`)).json();
+    expect(posterMine.claim.deposit).toBe(0);       // 发单人永远拿不回订金
+    expect(posterMine.claim.final).toBe(0);         // 退货不付尾款
+    expect(posterMine.claim.item).toBeNull();       // 成品已退回，发单人不再持有
   });
 });
 
@@ -462,8 +467,9 @@ describe('订单 · 待领取与 ACK（Review Focus 3/4）', () => {
       if (r.maker === who && r.status !== 订单状态.待接单 && !已领.maker) claim.deposit += r.deposit;
       // 尾款：验收完成后归接单者
       if (r.maker === who && r.status === 订单状态.已完成 && !已领.maker) claim.final += r.final;
-      // 成品：交付后归发单人；退货后归接单者
-      if (r.status === 订单状态.已交付 && r.poster === who && !已领.poster && r.item_json) claim.item = JSON.parse(r.item_json);
+      // 成品：交付后归发单人（**验收完成后仍归发单人**，直到他 ACK 领走）；退货后归接单者
+      if ((r.status === 订单状态.已交付 || r.status === 订单状态.已完成) && r.poster === who && !已领.poster && r.item_json)
+        claim.item = JSON.parse(r.item_json);
       if (r.status === 订单状态.已取消 && r.maker === who && !已领.maker && r.item_json) claim.item = JSON.parse(r.item_json);
     }
     return new Response(JSON.stringify({
@@ -554,13 +560,17 @@ describe('需求单 schema', () => {
 });
 
 describe('需求单摘要（列表与卡片共用，必须稳定）', () => {
-  it('装备：品质/阶位/子类缺省时不留空档', () => {
+  it('装备：子类/品质/阶位齐全', () => {
     expect(需求单摘要(需求单Schema.parse({ 名称: '狼牙短剑', 成品类型: '装备', 装备子类: '武器', 品质: '金色', 阶位: 2 })))
-      .toBe('狼牙短剑｜金色·二阶·武器');
+      .toBe('狼牙短剑｜装备·武器·金色·二阶');
   });
   it('不限品质阶位时只留名称与类型', () => {
     expect(需求单摘要(需求单Schema.parse({ 名称: '随便什么', 成品类型: '道具' })))
       .toBe('随便什么｜道具');
+  });
+  it('只填了部分细节时不留空档', () => {
+    expect(需求单摘要(需求单Schema.parse({ 名称: 'x', 成品类型: '装备', 装备子类: '饰品' })))
+      .toBe('x｜装备·饰品');
   });
 });
 
@@ -601,13 +611,15 @@ export type 需求单 = z.infer<typeof 需求单Schema>;
 /** 阶梯名（0 = 不限时不显示） */
 const 阶位名 = ['', '一阶', '二阶', '三阶', '四阶', '五阶'];
 
-/** 摘要：大厅卡片与我的订单共用，缺省项不留空档 */
+/**
+ * 摘要：大厅卡片与我的订单共用。
+ * 格式 `名称｜成品类型·子类·品质·阶位`，空项跳过；例：
+ *   `狼牙短剑｜装备·武器·金色·二阶`、`随便什么｜道具`
+ */
 export function 需求单摘要(s: 需求单): string {
-  const 段 = [s.名称, s.成品类型];
-  if (s.装备子类) 段.push(s.装备子类);
-  const 档 = [s.品质, 阶位名[s.阶位] ?? ''].filter(Boolean);
-  if (档.length) 段.push(档.join('·'));
-  return 段.join('｜');
+  const 细节 = [s.装备子类, s.品质, 阶位名[s.阶位] ?? ''].filter(Boolean);
+  const 主 = 细节.length ? `${s.成品类型}·${细节.join('·')}` : s.成品类型;
+  return `${s.名称}｜${主}`;
 }
 
 /** 成品 JSON 体积上限：与市场同一口径，服务端会二次校验 */
