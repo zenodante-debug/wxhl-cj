@@ -10,6 +10,8 @@
     <div class="ord-subtabs">
       <button class="ord-subtab" :class="{ active: sub === 'hall' }" @click="sub = 'hall'">订单大厅</button>
       <button class="ord-subtab" :class="{ active: sub === 'mine' }" @click="sub = 'mine'">我的</button>
+      <!-- eslint-disable-next-line better-tailwindcss/no-unknown-classes -->
+      <button class="ord-subtab" :class="{ active: sub === 'rank' }" @click="切排行">店铺排行</button>
     </div>
 
     <!-- ============ 订单大厅 ============ -->
@@ -78,7 +80,7 @@
     </template>
 
     <!-- ============ 我的 ============ -->
-    <template v-else>
+    <template v-else-if="sub === 'mine'">
       <!-- 待领取：服务器账本里已归属、还没领回本地的钱与物 -->
       <div v-if="有待领" class="ord-card ord-claim">
         <div class="oc-head">
@@ -99,10 +101,15 @@
         <div v-if="o.spec.效果要求" class="oc-line">效果要求：{{ o.spec.效果要求 }}</div>
         <div v-if="o.spec.说明" class="oc-line ord-desc">{{ o.spec.说明 }}</div>
         <div class="oc-line">订金 {{ o.deposit }} UP ＋ 尾款 {{ o.final }} UP</div>
-        <div class="oc-line">接单者：{{ o.maker ?? '暂无' }}</div>
+        <div class="oc-line">接单者：{{ o.maker_shop ?? o.maker ?? '暂无' }}</div>
         <div v-if="o.status === '已交付'" class="oc-foot">
           <span v-if="!可验收(o)" class="ord-hint">尾款不足（需 {{ o.final }} UP）</span>
-          <span v-else class="oc-meta">{{ o.maker }} 已交付成品</span>
+          <span v-else class="oc-meta">{{ o.maker_shop ?? o.maker }} 已交付成品</span>
+          <!-- eslint-disable-next-line better-tailwindcss/no-unknown-classes -->
+          <select v-model="rateSel[o.id]" class="ord-ratesel" title="给对面店铺打分；跳过则只 +1 完成分">
+            <option value="">跳过评分（+1）</option>
+            <option v-for="n in [0, 1, 2, 3, 4, 5]" :key="n" :value="n">评 {{ n }} 分（共 +{{ n + 1 }}）</option>
+          </select>
           <button class="ord-mini" :disabled="store.busy || !可验收(o)" @click="验收(o.id)">验收</button>
           <button class="ord-mini ord-mini-dang" :disabled="store.busy" @click="store.reject(o.id)">退货</button>
         </div>
@@ -131,12 +138,44 @@
           <div class="oc-foot">
             <span v-if="!bagNames.length" class="ord-hint">背包里没有可交付的物品</span>
             <button class="ord-mini" :disabled="store.busy || !deliverSel[o.id]" @click="交付(o.id)">交付</button>
-            <!-- v4a：弃单按钮存在但禁用（v4b 才实现），先给玩家一个明确预期 -->
-            <button class="ord-mini ord-mini-dang" disabled title="弃单功能即将开放">弃单（即将开放）</button>
+            <button class="ord-mini ord-mini-dang" :disabled="store.busy" @click="弃单(o)">
+              {{ abandonArm[o.id] ? `确认弃单？赔 ${o.deposit * 3} UP 且店铺 −5 分` : '弃单' }}
+            </button>
           </div>
         </template>
         <div v-else-if="o.status === '已交付'" class="ord-hint">等待发单人验收</div>
       </div>
+
+      <!-- 订单记录块：均为既有 ord-*/oc-* 组件类（scoped style 定义），tailwind 规则不认识属既有口径，新增出现处一并豁免 -->
+      <!-- eslint-disable better-tailwindcss/no-unknown-classes -->
+      <div class="ord-sect">订单记录（{{ 记录列表.length }}）</div>
+      <div v-if="!记录列表.length" class="ord-empty">暂无记录（完成/退货/弃单后会记在这里）</div>
+      <div v-for="(r, i) in 记录列表" :key="r.订单id + i" class="ord-card">
+        <div class="oc-head">
+          <span class="oc-name">{{ r.摘要 }}</span>
+          <span class="oc-tag">{{ r.结果 }}</span>
+        </div>
+        <div class="oc-line">{{ r.角色 }} · 对方：{{ r.对方 }}<template v-if="r.分数变动 !== null"> · 店铺分数 {{ r.分数变动 > 0 ? '+' : '' }}{{ r.分数变动 }}</template></div>
+        <div class="oc-line oc-meta">{{ new Date(r.时间).toLocaleString() }}</div>
+      </div>
+      <!-- eslint-enable better-tailwindcss/no-unknown-classes -->
+    </template>
+
+    <!-- ============ 店铺排行 ============ -->
+    <template v-else-if="sub === 'rank'">
+      <!-- eslint-disable better-tailwindcss/no-unknown-classes -->
+      <div class="ord-sect">店铺排行榜（共 {{ store.shopBoard.total }} 家）</div>
+      <div v-if="!store.shopName" class="ord-hint">你还未开店：开店接单后即可上榜（完成 +1，验收评分 0–5，退货 −2，弃单 −5）</div>
+      <div v-if="!店铺榜行.length" class="ord-empty">{{ store.loading ? '加载中…' : '暂无店铺上榜' }}</div>
+      <div v-for="(row, i) in 店铺榜行" :key="i" class="ord-rankrow" :class="{ mine: row.kind === 'entry' && row.mine }">
+        <span v-if="row.kind === 'gap'" class="ord-gap">⋯</span>
+        <template v-else>
+          <span class="ord-rk">#{{ row.rank }}</span>
+          <span class="ord-rn">{{ row.entry.name }}</span>
+          <span class="ord-rs">{{ row.entry.score }} 分</span>
+        </template>
+      </div>
+      <!-- eslint-enable better-tailwindcss/no-unknown-classes -->
     </template>
   </div>
 </template>
@@ -145,13 +184,15 @@
 import { computed, onMounted, reactive, ref } from 'vue';
 import { useCraftingStore } from '../store';
 import type { 订单 } from './api';
+import { loadHistory, type 订单记录 } from './rep/history';
+import { shopBoardRows } from './rep/shop';
 import { 需求单Schema, 需求单摘要 } from './spec';
 import { useOrderStore, 可交付候选 } from './store';
 
 const store = useOrderStore();
 const craft = useCraftingStore();
 
-const sub = ref<'hall' | 'mine'>('hall');
+const sub = ref<'hall' | 'mine' | 'rank'>('hall');
 
 // ---------------- R1：部分领取的常驻提示条 ----------------
 // store.claimAll 的 ACK 循环非原子：回执失败的条目**不入账**、仍留在服务器待领清单里。
@@ -212,9 +253,16 @@ function 可验收(o: 订单): boolean {
 // 「尾款不足」禁用态读 craft.playerUP、交付下拉读 craft.bag，而订单动作直接写 MVU——
 // 不回同步的话，按钮状态要等切页签（onMounted 的 syncFromMvu）才刷新。
 // 四个写 MVU 的动作（发布/交付/验收/领取）await 完都 sync 一次；sync 只是重读存档，失败也无害。
+// ---------------- 验收评分（可选，跳过只 +1 保底） ----------------
+/** 每张「已交付」单的评分选择（订单 id → '' 跳过 | 0..5） */
+const rateSel = reactive<Record<string, number | ''>>({});
+
 async function 验收(id: string): Promise<void> {
-  await store.confirm(id); // 验收扣了尾款（其余「已交付」单的余额判定要跟着刷新）
+  const v = rateSel[id];
+  await store.confirm(id, v === '' || v === undefined ? null : Number(v)); // 验收扣了尾款（其余「已交付」单的余额判定要跟着刷新）
+  delete rateSel[id];
   craft.syncFromMvu();
+  记录刷新.value++; // 验收写了一条本地记录
 }
 
 /** 交付物品下拉候选：背包里数量 > 0 且不是图纸的物品名（Ruling N：图纸是生产资料，
@@ -232,6 +280,23 @@ async function 交付(id: string): Promise<void> {
   craft.syncFromMvu(); // 交付从背包取走了一件：下拉候选要看到新背包
 }
 
+// ---------------- 弃单（两段确认：先亮代价，再执行） ----------------
+// 不用 confirm() 弹窗（移动端兼容差）：第一次点击武装，按钮文案变成代价确认；第二次才执行。
+// 武装态不落任何数据，切单/刷新即自然失效。
+const abandonArm = reactive<Record<string, boolean>>({});
+
+async function 弃单(o: 订单): Promise<void> {
+  if (!abandonArm[o.id]) {
+    for (const k of Object.keys(abandonArm)) delete abandonArm[k]; // 同时只武装一张单，避免多点
+    abandonArm[o.id] = true;
+    return;
+  }
+  delete abandonArm[o.id];
+  await store.abandon(o.id);
+  craft.syncFromMvu(); // 弃单扣了赔偿：余额判定要看到新 UP
+  记录刷新.value++;
+}
+
 /** 待领取汇总行：钱按「订金 X + 尾款 Y UP」、物按「N 件物品」（口径与 store.claimAll 的成功播报一致） */
 const 待领汇总 = computed(() => {
   const c = store.claim;
@@ -245,6 +310,21 @@ const 有待领 = computed(() => (store.claim.待领?.length ?? 0) > 0);
 async function 领取(): Promise<void> {
   await store.claimAll(); // 结果（含部分领取）经 store.lastError 走顶部常驻提示条/错误条
   craft.syncFromMvu();    // 领取可能加了 UP/入了包（first=true 的条目）：余额判定与交付下拉要看到新值
+  记录刷新.value++;       // 领取可能记了「完成」记录
+}
+
+// ---------------- 订单记录（localStorage；动作后 bump 计数重读） ----------------
+const 记录刷新 = ref(0);
+const 记录列表 = computed<订单记录[]>(() => {
+  void 记录刷新.value;
+  return loadHistory().slice().reverse(); // 新的在前
+});
+
+// ---------------- 店铺排行 ----------------
+const 店铺榜行 = computed(() => shopBoardRows(store.shopBoard));
+async function 切排行(): Promise<void> {
+  sub.value = 'rank';
+  await store.refreshShopRank();
 }
 
 function timeAgo(ts: number): string {
@@ -321,4 +401,13 @@ onMounted(() => {
 .ord-deliver { display: flex; justify-content: space-between; align-items: center; gap: 8px; margin-top: 6px; font-size: 12px; }
 .ord-deliver select { max-width: 65%; }
 .ord-deliverhint { font-size: 11px; opacity: 0.65; margin-top: 2px; }
+
+/* 店铺排行 */
+.ord-rankrow { display: flex; align-items: center; gap: 8px; padding: 5px 8px; border-radius: 6px; font-size: 12px; }
+.ord-rankrow.mine { background: rgba(184, 134, 11, 0.15); font-weight: 700; }
+.ord-rk { width: 34px; opacity: 0.7; }
+.ord-rn { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ord-rs { font-variant-numeric: tabular-nums; }
+.ord-gap { text-align: center; flex: 1; opacity: 0.5; }
+.ord-ratesel { max-width: 46%; font-size: 12px; }
 </style>
