@@ -493,6 +493,9 @@ async function ensureOrderSchema(env) {
   const orderMigrations = [
     `ALTER TABLE orders ADD COLUMN maker_deposit_ack INTEGER NOT NULL DEFAULT 0`,
     `ALTER TABLE orders ADD COLUMN maker_final_ack INTEGER NOT NULL DEFAULT 0`,
+    // v4b：接单人店铺名（评分归属）与赔偿款 ACK 位（弃单时发单人领取订金×3）
+    `ALTER TABLE orders ADD COLUMN maker_shop TEXT`,
+    `ALTER TABLE orders ADD COLUMN poster_comp_ack INTEGER NOT NULL DEFAULT 0`,
   ];
   for (const sql of orderMigrations) {
     try {
@@ -520,11 +523,12 @@ const ACK_KEY_COL = {
   maker_deposit: 'maker_deposit_ack',
   maker_final: 'maker_final_ack',
   poster: 'poster_ack',
+  poster_comp: 'poster_comp_ack',
 };
 /** 入参 (side, 项) → 列名。表中没有的组合视为非法，调用方回 400（不静默落到 poster） */
 const ACK_COLS = {
   maker: { 订金: 'maker_deposit_ack', 尾款: 'maker_final_ack' },
-  poster: { 成品: 'poster_ack' },
+  poster: { 成品: 'poster_ack', 赔偿: 'poster_comp_ack' },
 };
 
 /**
@@ -534,9 +538,9 @@ const ACK_COLS = {
  * 若在「已交付」就因双方领了当下这两项而删行，随后验收产生的尾款、或退货产生的退回成品就没了着落。
  * 只有终态（已完成 / 已取消 / 已弃单）才谈得上「权益已全部产生」。
  *
- * 已弃单（v4b）本表暂无口径 → 空清单（v4a 走不到这个状态）。空清单即「无可删依据」：
- * 删行条件另有 `应领(行).length > 0` 兜底，故此类行**不删、滞留**（宁可滞留也不静默删行）。
- * v4b 落地弃单赔偿时**必须**先在此补上它的应领项，否则那笔赔偿永远不会被算作「已领」而滞留。
+ * 已弃单（v4b）：接单者领订金（弃单不退订金），发单人领赔偿款（订金×3，走 poster_comp 位）。
+ * 空清单即「无可删依据」：删行条件另有 `应领(行).length > 0` 兜底，空清单的终态行**不删、滞留**
+ * （宁可滞留也不静默删行）。新增终态时**必须**先在此补上它的应领项，否则那笔权益永远不会被算作「已领」而滞留。
  * 无接单人（v4c 撤销）只有发单人有权领回。
  */
 export function 应领(row) {
@@ -544,6 +548,8 @@ export function 应领(row) {
   if (row.status === 订单状态.已完成) return ['maker_deposit', 'maker_final', 'poster'];
   // 已取消（交付后退货）：接单者领订金 + 退回的成品（成品走 maker_final 位），发单人什么都没有
   if (row.status === 订单状态.已取消) return ['maker_deposit', 'maker_final'];
+  // 已弃单（v4b）：接单者领订金（弃单不退订金），发单人领赔偿款（订金×3，走 poster_comp 位）
+  if (row.status === 订单状态.已弃单) return ['maker_deposit', 'poster_comp'];
   return [];
 }
 
@@ -576,6 +582,8 @@ function 待领项(r, who) {
   // 成品：交付后归发单人（**验收完成后仍归发单人**，直到他 ACK 领走 —— 已完成不能漏，否则验收完反而丢了成品）
   if (r.poster === who && (r.status === 订单状态.已交付 || r.status === 订单状态.已完成) && r.poster_ack !== 1 && r.item_json)
     出.push({ 项: '成品', 金额: 0, 成品: true });
+  // 赔偿：弃单后归发单人（金额恒为订金×3，不占任何既有位）
+  if (r.poster === who && r.status === 订单状态.已弃单 && r.poster_comp_ack !== 1) 出.push({ 项: '赔偿', 金额: r.deposit * 3, 成品: false });
   return 出;
 }
 
@@ -586,7 +594,7 @@ function newOrderId() {
 /** 行 → 前端形状（spec_json 解回对象） */
 function toOrderDto(row) {
   return {
-    id: row.id, poster: row.poster, maker: row.maker,
+    id: row.id, poster: row.poster, maker: row.maker, maker_shop: row.maker_shop ?? null,
     spec: JSON.parse(row.spec_json),
     deposit: row.deposit, final: row.final, status: row.status,
     created: row.created, updated: row.updated,
@@ -646,17 +654,21 @@ async function handleOrder(url, request, env, cors) {
     });
   }
 
-  // POST /order/accept  { id, maker }  →  { ok: true }
+  // POST /order/accept  { id, maker, maker_shop }  →  { ok: true }
   // 原子接单：WHERE 带上 status，受影响 0 行即说明已被别人接走或被撤销。
+  // maker_shop 必填：评分跟着店铺走，没店就没有评分归属 —— 客户端有开店闸门，这里再挡一道。
   if (p === '/order/accept' && request.method === 'POST') {
     let b;
     try { b = await request.json(); } catch (_) { return new Response('请求体不是合法 JSON', { status: 400, headers: cors }); }
     const maker = String(b.maker ?? '').trim();
     if (!maker) return new Response('缺少接单人姓名', { status: 400, headers: cors });
+    const maker_shop = String(b.maker_shop ?? '').trim();
+    if (!maker_shop) return new Response('缺少店铺名（未开店不能接单）', { status: 400, headers: cors });
+    if (maker_shop.length > 32) return new Response('店铺名过长（上限 32 字）', { status: 400, headers: cors });
     const res = await withRetry(() =>
       env.MARKET_DB.prepare(
-        `UPDATE orders SET maker = ?, status = ?, updated = ? WHERE id = ? AND status = ?`,
-      ).bind(maker, 订单状态.已接单, Date.now(), String(b.id), 订单状态.待接单).run(),
+        `UPDATE orders SET maker = ?, maker_shop = ?, status = ?, updated = ? WHERE id = ? AND status = ?`,
+      ).bind(maker, maker_shop, 订单状态.已接单, Date.now(), String(b.id), 订单状态.待接单).run(),
     );
     const changed = changesOf(res);
     if (changed === 0) return new Response('手慢了，这单已被接走', { status: 400, headers: cors });
@@ -725,6 +737,20 @@ async function handleOrder(url, request, env, cors) {
     return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
+  // POST /order/abandon  { id, maker }  —— 弃单（订金不退归接单者；发单人待领赔偿 订金×3）
+  // 赔偿款由接单者客户端在收到成功后本地 spendUP 扣除（信义模型，服务端碰不到存档）。
+  // 仅「已接单」可弃：已交付后成品在托管里，退路是发单人验收/退货，不许接单者一弃了之。
+  if (p === '/order/abandon' && request.method === 'POST') {
+    let b;
+    try { b = await request.json(); } catch (_) { return new Response('请求体不是合法 JSON', { status: 400, headers: cors }); }
+    const row = await readOrder(String(b.id));
+    if (!row || row.status !== 订单状态.已接单) return new Response('订单不存在或不在可弃单状态', { status: 400, headers: cors });
+    if (String(b.maker ?? '').trim() !== row.maker) return new Response('只有接单人本人能弃单', { status: 400, headers: cors });
+    if (!(await advance(row.id, 订单状态.已接单, 订单状态.已弃单)))
+      return new Response('弃单失败：订单状态已变', { status: 400, headers: cors });
+    return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+
   // GET /order/mine?who=<姓名>  →  { asPoster, asMaker, claim }
   // claim 是该用户名下所有订单的待领**汇总**；领取本身发生在客户端，领完调 /order/ack。
   // 一旦 ACK 过（该项的 ack 位为 1），该项就不再出现在 claim 里 —— 汇总与「已领」互斥。
@@ -747,6 +773,7 @@ async function handleOrder(url, request, env, cors) {
       for (const p of 待领项(r, who)) {
         if (p.成品) claim.items.push({ id: r.id, item: JSON.parse(r.item_json) });
         else if (p.项 === '订金') claim.deposit += p.金额;
+        else if (p.项 === '赔偿') claim.comp = (claim.comp ?? 0) + p.金额;
         else claim.final += p.金额;
         // Ruling M：条目自带**逐项金额**。客户端必须「先回执、后入账，只为回执成功的条目入账」——
         // 若 ACK 失败而钱已入账，服务器下次仍会列出该项，只有条目自带金额才能让客户端认出
@@ -781,7 +808,7 @@ async function handleOrder(url, request, env, cors) {
     if (side !== 'maker' && side !== 'poster') return new Response('side 须为 maker 或 poster', { status: 400, headers: cors });
     const sideCols = ACK_COLS[side];
     const 列 = Object.prototype.hasOwnProperty.call(sideCols, b.项) ? sideCols[b.项] : null;
-    if (!列) return new Response('side 与 项 不匹配（maker 领 订金/尾款，poster 领 成品）', { status: 400, headers: cors });
+    if (!列) return new Response('side 与 项 不匹配（maker 领 订金/尾款，poster 领 成品/赔偿）', { status: 400, headers: cors });
     // 当事人校验：`who` 必须**逐字**等于该侧的当事人，不等即 400。
     // 这里**不给「该侧尚无当事人」留放行分支**（待接单的单 maker 为 NULL）：
     // 发单人的订金是他在客户端 spendUP 扣掉的、服务器只留记录，

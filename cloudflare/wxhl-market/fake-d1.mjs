@@ -52,7 +52,7 @@ const ORDER_HALL_SQL =
   /^SELECT \* FROM orders WHERE status = \? AND poster != \? ORDER BY created DESC LIMIT 100$/i;
 /** 接单：WHERE 带 status 守卫，受影响 0 行即「已被接走」—— 并发仲裁点 */
 const ORDER_ACCEPT_SQL =
-  /^UPDATE orders SET maker = \?, status = \?, updated = \? WHERE id = \? AND status = \?$/i;
+  /^UPDATE orders SET maker = \?, maker_shop = \?, status = \?, updated = \? WHERE id = \? AND status = \?$/i;
 /** 发布：maker 是显式 NULL，所以占位符比列数少一个 */
 const ORDER_INSERT_SQL =
   /^INSERT INTO orders \(id, poster, maker, spec_json, deposit, final, status, created, updated\) VALUES \(\?, \?, NULL, \?, \?, \?, \?, \?, \?\)$/i;
@@ -76,7 +76,7 @@ const ORDER_ADVANCE_ITEM_SQL =
 /** ACK：把某一**项**的 ack 位置 1。列名限定为按项 ACK 的三个合法列 —— 拼错列名即炸，不静默放过。
  *  WHERE 带 `\1 = 0`（与 worker 的双发闸同形）：该位已是 1 → 改 0 行，worker 据此回 first:false */
 const ORDER_ACK_SQL =
-  /^UPDATE orders SET (maker_deposit_ack|maker_final_ack|poster_ack) = 1, updated = \? WHERE id = \? AND \1 = 0$/i;
+  /^UPDATE orders SET (maker_deposit_ack|maker_final_ack|poster_ack|poster_comp_ack) = 1, updated = \? WHERE id = \? AND \1 = 0$/i;
 /** 双方 ACK 完删行 */
 const ORDER_DELETE_SQL = /^DELETE FROM orders WHERE id = \?$/i;
 
@@ -133,6 +133,7 @@ export function makeFakeD1() {
     }
     return evalSimpleWhere(row, whereStr, args);
   }
+  /** 通用筛选 + 排序 + LIMIT/OFFSET；order 省略则不排序 */
   function page(rows, sql, args, order) {
     const whereStr = whereOf(sql);
     const consumed = whereStr ? whereStr.split(/\?/).length - 1 : 0;
@@ -333,8 +334,8 @@ export function makeFakeD1() {
               deposit: Number(deposit), final: Number(final), status,
               // 本轮不写的列也照真表 schema 补上，行形状与真 D1 一致（后续段要用）。
               // Ruling I：ack 位按项三个（订金 / 尾款(含退回成品) / 成品），不再是每侧一个。
-              item_json: null, rating: null, comp_json: null,
-              maker_deposit_ack: 0, maker_final_ack: 0, poster_ack: 0,
+              item_json: null, rating: null, comp_json: null, maker_shop: null,
+              maker_deposit_ack: 0, maker_final_ack: 0, poster_ack: 0, poster_comp_ack: 0,
               created: Number(created), updated: Number(updated),
             });
             return ok(1);
@@ -343,10 +344,11 @@ export function makeFakeD1() {
           // WHERE 里的 status 就是「还是待接单吗」的守卫：状态不符则一行都不动，
           // 返回 meta.changes = 0，worker 据此回「手慢了」。
           if (ORDER_ACCEPT_SQL.test(oneLine(sql))) {
-            const [maker, status, updated, id, need] = st._a;
+            const [maker, maker_shop, status, updated, id, need] = st._a;
             const row = orders.get(id);
             if (!row || row.status !== need) return ok(0);
             row.maker = maker;
+            row.maker_shop = maker_shop;
             row.status = status;
             row.updated = Number(updated);
             return ok(1);
@@ -383,6 +385,8 @@ export function makeFakeD1() {
           }
           if (/^CREATE/i.test(sql)) return ok(0);
           if (/^DELETE/i.test(sql)) return runDelete(sql, st._a);
+          // 迁移语句：假件的行本来就带全部列，ALTER 对它恒为 no-op —— 但要是改了别的形态照样炸
+          if (/^ALTER TABLE orders ADD COLUMN (maker_shop TEXT|poster_comp_ack INTEGER NOT NULL DEFAULT 0|maker_deposit_ack INTEGER NOT NULL DEFAULT 0|maker_final_ack INTEGER NOT NULL DEFAULT 0)$/i.test(oneLine(sql))) return ok(0);
           throw new Error(`fakeD1 不认识的 SQL: 「${sql.slice(0, 60)}…」`);
         },
       };

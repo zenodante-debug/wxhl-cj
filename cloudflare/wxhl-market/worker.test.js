@@ -345,10 +345,10 @@ describe('订单 · 接单竞态（Review Focus 1）', () => {
     const env = { MARKET_DB: makeFakeD1() };
     const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
 
-    const first = await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    const first = await call(env, '/order/accept', postJson({ id, maker: '乙', maker_shop: '测试铺' }));
     expect(first.status).toBe(200);
 
-    const second = await call(env, '/order/accept', postJson({ id, maker: '丙' }));
+    const second = await call(env, '/order/accept', postJson({ id, maker: '丙', maker_shop: '测试铺' }));
     expect(second.status).toBe(400);
     expect(await second.text()).toContain('已被接走');
 
@@ -362,14 +362,14 @@ describe('订单 · 接单竞态（Review Focus 1）', () => {
 
   it('接不存在的单 → 400', async () => {
     const env = { MARKET_DB: makeFakeD1() };
-    expect((await call(env, '/order/accept', postJson({ id: 'nope', maker: '乙' }))).status).toBe(400);
+    expect((await call(env, '/order/accept', postJson({ id: 'nope', maker: '乙', maker_shop: '测试铺' }))).status).toBe(400);
   });
 });
 
 describe('订单 · 交付与验收', () => {
   async function 发布并接单(env, over = {}) {
     const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700, ...over }))).json();
-    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    await call(env, '/order/accept', postJson({ id, maker: '乙', maker_shop: '测试铺' }));
     return id;
   }
 
@@ -434,7 +434,7 @@ describe('订单 · 交付与验收', () => {
 /** 走完整链路：发布 → 接单 → 交付 → 验收，停在「已完成」（终态）；返回订单 id */
 async function 到已完成(env, item = { 名称: '剑', 数量: 1 }, over = {}) {
   const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700, ...over }))).json();
-  await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+  await call(env, '/order/accept', postJson({ id, maker: '乙', maker_shop: '测试铺' }));
   await call(env, '/order/deliver', postJson({ id, maker: '乙', item }));
   await call(env, '/order/confirm', postJson({ id, poster: '甲' }));
   return id;
@@ -525,7 +525,7 @@ describe('订单 · 待领取与 ACK（Review Focus 3/4）', () => {
   it('接单者待领订金（接单后），领取前重复查询仍能看到', async () => {
     const env = { MARKET_DB: makeFakeD1() };
     const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
-    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    await call(env, '/order/accept', postJson({ id, maker: '乙', maker_shop: '测试铺' }));
 
     const m1 = await (await call(env, `/order/mine?who=${encodeURIComponent('乙')}`)).json();
     expect(m1.claim.deposit).toBe(300);
@@ -545,7 +545,7 @@ describe('订单 · 按项领取（Ruling I）', () => {
   it('接单时领走订金，验收完成仍能领到尾款（单一位设计下这一步领不到）', async () => {
     const env = { MARKET_DB: makeFakeD1() };
     const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
-    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    await call(env, '/order/accept', postJson({ id, maker: '乙', maker_shop: '测试铺' }));
 
     // 接单当下就领走订金 —— 这一步在旧设计里会把「接单者已领」那个位永久置 1
     const d = await (await 领(env, id, '乙', 'maker', '订金')).json();
@@ -569,7 +569,7 @@ describe('订单 · 按项领取（Ruling I）', () => {
   it('退货（已取消）后接单者能领回退回的成品（与尾款共用一位，不互相锁死）', async () => {
     const env = { MARKET_DB: makeFakeD1() };
     const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
-    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    await call(env, '/order/accept', postJson({ id, maker: '乙', maker_shop: '测试铺' }));
     await 领(env, id, '乙', 'maker', '订金');        // 先领订金：旧设计里退回的成品从此就领不到了
     await call(env, '/order/deliver', postJson({ id, maker: '乙', item: { 名称: '剑', 数量: 1 } }));
     await call(env, '/order/reject', postJson({ id, poster: '甲' }));
@@ -589,7 +589,7 @@ describe('订单 · 按项领取（Ruling I）', () => {
   it('非终态的单，双方领完当下应领项也不删行（后续还会产生尾款）', async () => {
     const env = { MARKET_DB: makeFakeD1() };
     const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
-    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    await call(env, '/order/accept', postJson({ id, maker: '乙', maker_shop: '测试铺' }));
     expect((await (await 领(env, id, '乙', 'maker', '订金')).json()).deleted).toBe(false);
     await call(env, '/order/deliver', postJson({ id, maker: '乙', item: { 名称: '剑', 数量: 1 } }));
 
@@ -605,7 +605,7 @@ describe('订单 · 按项领取（Ruling I）', () => {
   it('side / 项 非法（缺席、大小写错、错配）→ 400，且不误置任何位', async () => {
     const env = { MARKET_DB: makeFakeD1() };
     const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
-    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    await call(env, '/order/accept', postJson({ id, maker: '乙', maker_shop: '测试铺' }));
 
     expect((await call(env, '/order/ack', postJson({ id, who: '乙', 项: '订金' }))).status).toBe(400);                 // side 缺席
     expect((await call(env, '/order/ack', postJson({ id, who: '乙', side: 'Maker', 项: '订金' }))).status).toBe(400);  // 大小写错
@@ -624,18 +624,18 @@ describe('订单 · 按项领取（Ruling I）', () => {
     expect(results[0].maker_final_ack).toBe(0);
   });
 
-  it('应领为空集的终态行（v4b 弃单）即使双方都 ACK，也滞留不删（滞留可救、丢失不可救）', async () => {
+  it('弃单终态：订金与无关项（成品）都 ACK 了也不删行 —— 赔偿（poster_comp）未领前滞留（滞留可救、丢失不可救）', async () => {
     const env = { MARKET_DB: makeFakeD1() };
     const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
-    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    await call(env, '/order/accept', postJson({ id, maker: '乙', maker_shop: '测试铺' }));
     // v4a 没有弃单路由：这里用 worker 自己的推进语句（与 confirm/reject 同形）把行推到 v4b 的终态。
-    // 目的只有一个 —— 构造出「终态 且 应领(行) 为空集」这一行，钉住删行的兜底守卫。
+    // 目的只有一个 —— 构造出「已弃单」终态行，钉住删行的应领守卫。
     await env.MARKET_DB.prepare(`UPDATE orders SET status = ?, updated = ? WHERE id = ? AND status = ?`)
       .bind('已弃单', Date.now(), id, '已接单').run();
-    expect(应领({ status: '已弃单', maker: '乙' })).toEqual([]);      // 前提：应领真是空集
+    expect(应领({ status: '已弃单', maker: '乙' })).toEqual(['maker_deposit', 'poster_comp']);  // 前提：弃单的应领口径
 
-    // 双方各领一项：`.every()` 对空集空真 → 若没有 length>0 守卫，这里会把行静默删掉，
-    // 而 v4b 的弃单赔偿还没定口径 —— 那笔钱就凭空没了着落。
+    // 接单者领订金、发单人错领「成品」（不在已弃单的应领清单里，只是一次无效置位）：
+    // 只要 poster_comp 没置位，行就不许删 —— 否则那笔赔偿款凭空没了着落。
     expect((await (await 领(env, id, '乙', 'maker', '订金')).json()).deleted).toBe(false);
     expect((await (await 领(env, id, '甲', 'poster', '成品')).json()).deleted).toBe(false);
     expect(await 行数(env, id)).toBe(1);                            // 宁可滞留（v4c 的 purge 兜底）
@@ -647,7 +647,7 @@ describe('订单 · 按项领取（Ruling I）', () => {
     expect(应领(行('已取消', null))).toEqual(['poster']);
     expect(应领(行('已完成'))).toEqual(['maker_deposit', 'maker_final', 'poster']);
     expect(应领(行('已取消'))).toEqual(['maker_deposit', 'maker_final']);
-    expect(应领(行('已弃单'))).toEqual([]);                      // v4b 才有弃单赔偿口径
+    expect(应领(行('已弃单'))).toEqual(['maker_deposit', 'poster_comp']);  // v4b：订金归接单者 + 赔偿归发单人
     for (const s of ['待接单', '已接单', '已交付']) expect(应领(行(s))).toEqual([]);  // 非终态：不删行
   });
 });
@@ -665,7 +665,7 @@ describe('订单 · 待领清单（Ruling L）', () => {
   it('接单后只列「订金」；领掉订金并验收后才列出「尾款」', async () => {
     const env = { MARKET_DB: makeFakeD1() };
     const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
-    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    await call(env, '/order/accept', postJson({ id, maker: '乙', maker_shop: '测试铺' }));
 
     // 还没完成：**只能**领订金。清单里若出现「尾款」，客户端照 ACK 就会把尾款位提前置 1（永久锁死）
     expect(项集(await 待领(env, '乙'), id)).toEqual(['订金']);
@@ -684,8 +684,8 @@ describe('订单 · 待领清单（Ruling L）', () => {
     const env = { MARKET_DB: makeFakeD1() };
     const a = (await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json()).id;
     const b = (await (await call(env, '/order/create', postJson({ poster: '丙', spec: 需求单, deposit: 200, final: 100 }))).json()).id;
-    await call(env, '/order/accept', postJson({ id: a, maker: '乙' }));
-    await call(env, '/order/accept', postJson({ id: b, maker: '乙' }));
+    await call(env, '/order/accept', postJson({ id: a, maker: '乙', maker_shop: '测试铺' }));
+    await call(env, '/order/accept', postJson({ id: b, maker: '乙', maker_shop: '测试铺' }));
 
     let mine = await 待领(env, '乙');
     expect(mine.claim.deposit).toBe(500);                       // 300 + 200：两条都在清单里，总数才对得上
@@ -702,7 +702,7 @@ describe('订单 · 待领清单（Ruling L）', () => {
   it('成品也进清单：发单人「成品」；退货后接单者的「尾款」条目给的是**物**不是钱', async () => {
     const env = { MARKET_DB: makeFakeD1() };
     const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
-    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    await call(env, '/order/accept', postJson({ id, maker: '乙', maker_shop: '测试铺' }));
     await call(env, '/order/deliver', postJson({ id, maker: '乙', item: { 名称: '剑', 数量: 1 } }));
 
     // 已交付：发单人列「成品」，且与 `items` 同源（同一条 = 同一个 id）
@@ -735,7 +735,7 @@ describe('订单 · 待领逐项金额（Ruling M）', () => {
   /** 建单 → 接单，返回 id（其余状态由用例自己推进） */
   async function 建单接单(env, poster, deposit, final) {
     const { id } = await (await call(env, '/order/create', postJson({ poster, spec: 需求单, deposit, final }))).json();
-    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    await call(env, '/order/accept', postJson({ id, maker: '乙', maker_shop: '测试铺' }));
     return id;
   }
 
@@ -933,5 +933,78 @@ describe('店铺分数段', () => {
       const r = await worker.fetch(post('/shop/score', body), env());
       expect(r.status).toBe(400);
     }
+  });
+});
+
+describe('订单段 v4b：店铺名 / 弃单 / 赔偿', () => {
+  const 需求单 = { 名称: '狼牙短剑', 成品类型: '装备', 装备子类: '武器', 品质: '', 阶位: 0, 效果要求: '', 说明: '' };
+  const 建单 = (e, over = {}) =>
+    worker.fetch(post('/order/create', { poster: '甲', spec: 需求单, deposit: 100, final: 200, ...over }), e).then(r => r.json());
+  const mine = (e, who) => worker.fetch(get('/order/mine?who=' + encodeURIComponent(who)), e).then(r => r.json());
+
+  it('接单必须带店铺名；DTO 带 maker_shop', async () => {
+    const e = env();
+    const { id } = await 建单(e);
+    const bad = await worker.fetch(post('/order/accept', { id, maker: '乙' }), e);
+    expect(bad.status).toBe(400);
+    const ok = await worker.fetch(post('/order/accept', { id, maker: '乙', maker_shop: '乙的铁匠铺' }), e);
+    expect(ok.status).toBe(200);
+    const m = await mine(e, '甲');
+    expect(m.asPoster[0].maker_shop).toBe('乙的铁匠铺');
+  });
+
+  it('弃单：仅已接单可弃、仅本人可弃；弃单后发单人有赔偿待领（订金×3），接单者订金照领', async () => {
+    const e = env();
+    const { id } = await 建单(e);
+    // 待接单不能弃
+    expect((await worker.fetch(post('/order/abandon', { id, maker: '乙' }), e)).status).toBe(400);
+    await worker.fetch(post('/order/accept', { id, maker: '乙', maker_shop: '铺' }), e);
+    // 非本人不能弃
+    expect((await worker.fetch(post('/order/abandon', { id, maker: '丙' }), e)).status).toBe(400);
+    const ok = await worker.fetch(post('/order/abandon', { id, maker: '乙' }), e);
+    expect(ok.status).toBe(200);
+    const mp = await mine(e, '甲');
+    expect(mp.claim.comp).toBe(300);
+    expect(mp.claim.待领).toContainEqual({ id, 项: '赔偿', 金额: 300 });
+    const mm = await mine(e, '乙');
+    expect(mm.claim.deposit).toBe(100);
+  });
+
+  it('赔偿 ACK：maker 侧 ACK 赔偿 → 400；只 ACK 订金不删行；订金+赔偿都 ACK 才删行', async () => {
+    const e = env();
+    const { id } = await 建单(e);
+    await worker.fetch(post('/order/accept', { id, maker: '乙', maker_shop: '铺' }), e);
+    await worker.fetch(post('/order/abandon', { id, maker: '乙' }), e);
+    // maker 侧不许 ACK 赔偿
+    expect((await worker.fetch(post('/order/ack', { id, who: '乙', side: 'maker', 项: '赔偿' }), e)).status).toBe(400);
+    // 接单者领订金
+    const a1 = await worker.fetch(post('/order/ack', { id, who: '乙', side: 'maker', 项: '订金' }), e).then(r => r.json());
+    expect(a1.first).toBe(true);
+    expect(a1.deleted).toBe(false);          // 赔偿还没领，不许删行（空真陷阱防线）
+    // 发单人领赔偿
+    const a2 = await worker.fetch(post('/order/ack', { id, who: '甲', side: 'poster', 项: '赔偿' }), e).then(r => r.json());
+    expect(a2.first).toBe(true);
+    expect(a2.deleted).toBe(true);           // 应领全部置位 → 删行
+    // 幂等：行已删再 ACK → deleted:true, first:false
+    const a3 = await worker.fetch(post('/order/ack', { id, who: '甲', side: 'poster', 项: '赔偿' }), e).then(r => r.json());
+    expect(a3).toEqual({ ok: true, deleted: true, first: false });
+  });
+
+  it('已交付后不许弃单', async () => {
+    const e = env();
+    const { id } = await 建单(e);
+    await worker.fetch(post('/order/accept', { id, maker: '乙', maker_shop: '铺' }), e);
+    await worker.fetch(post('/order/deliver', { id, maker: '乙', item: { 名称: '剑', 数量: 1 } }), e);
+    expect((await worker.fetch(post('/order/abandon', { id, maker: '乙' }), e)).status).toBe(400);
+  });
+
+  it('老订单行（maker_shop 为 null）DTO 回退 null，不炸', async () => {
+    const e = env();
+    const { id } = await 建单(e);
+    // 直接改 fake 行模拟老数据：接单但不带店铺名列（fake 的 accept 总会写 maker_shop，
+    // 这里改为直接断言未接单行的 DTO）
+    const hall = await worker.fetch(get('/order/list?exclude='), e).then(r => r.json());
+    expect(hall.orders[0].maker_shop).toBeNull();
+    expect(hall.orders[0].id).toBe(id);
   });
 });
