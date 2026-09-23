@@ -18,6 +18,9 @@ import { useOrderStore } from '../store';
  *   ④ Ruling L：`claimAll` 只准照服务器的 `待领` 清单逐条 ACK。**遍历自己的订单对每项都 ACK**
  *      会把尚不存在的权益提前置位（订单还在「已接单」就 ACK 尾款 → `maker_final_ack=1`），
  *      该单真正完成时尾款**永久领不到** —— 这是连堵三轮的同类漏洞，故用「待领为空时一个 ACK 都不许发」钉死。
+ *   ⑤ Ruling M：**先回执、后入账，且只为回执成功的条目入账**。反过来的话 ACK 失败（网络抖动即可）时
+ *      钱已到玩家手上而服务器仍列着该项 → 下次刷新**再发一遍**（无限刷钱）。故这里钉「ACK 失败 ⇒ 一分不入」
+ *      与「部分成功只入成功的那些」；金额一律取条目自带的 `金额`，汇总数字在用例里故意写错以证明没被读。
  *
  * 注：**`vi.mock` 的相对路径从本文件所在目录解析**。API 模块是 `'../api'`（本文件在 order/__tests__/，
  * `../` 到 order/）。写错层级会**静默注册一个不存在的模块**、store 照旧加载真模块 ——
@@ -205,9 +208,10 @@ describe('交付 · 从背包取出一件并上传', () => {
 });
 
 // ================================================================
-// ④ 领取（Ruling L）：只准照服务器的 `待领` 清单逐条 ACK
+// ④ 领取：Ruling L（只准照服务器的 `待领` 清单逐条 ACK）
+//          + Ruling M（先回执、后入账，只为回执成功的条目入账 —— 否则 ACK 失败会重复发钱）
 // ================================================================
-describe('claimAll · 严格照服务器的待领清单逐条 ACK（不得从订单列表反推）', () => {
+describe('claimAll · 照待领清单逐条 ACK（Ruling L）+ 先回执后入账（Ruling M）', () => {
   it('「待领」为空时一个 ACK 都不发 —— 哪怕订单列表里有一堆单（防遍历订单逐项 ACK）', async () => {
     // 名下有「待接单」「已接单」「已交付」三张单，此刻一项权益都还没产生
     备好我的({
@@ -226,7 +230,8 @@ describe('claimAll · 严格照服务器的待领清单逐条 ACK（不得从订
   it('已接单的单：只 ACK 订金（尾款此刻尚不存在，ACK 它会让尾款永久领不到）', async () => {
     备好我的({
       asMaker: [造单({ id: 'A', status: '已接单', deposit: 300, final: 700 })],
-      claim: { deposit: 300, final: 0, items: [], 待领: [{ id: 'A', 项: '订金' }] },
+      // 汇总数字**故意写错**：Ruling M 起入账只认条目自带的 `金额`，再读 `deposit`/`final` 就是错的
+      claim: { deposit: 99999, final: 99999, items: [], 待领: [{ id: 'A', 项: '订金', 金额: 300 }] },
     });
     const s = useOrderStore();
     await s.refresh();
@@ -234,7 +239,7 @@ describe('claimAll · 严格照服务器的待领清单逐条 ACK（不得从订
     expect(mocks.ackOrder).toHaveBeenCalledTimes(1);
     expect(mocks.ackOrder).toHaveBeenCalledWith('A', '老狼', 'maker', '订金');
     expect(mocks.ackOrder).not.toHaveBeenCalledWith('A', '老狼', 'maker', '尾款');
-    expect(当前UP()).toBe(20300); // 订金入账
+    expect(当前UP()).toBe(20300); // 订金入账（300，而不是汇总里的 99999）
     expect(落档次数).toBe(1);
   });
 
@@ -242,9 +247,13 @@ describe('claimAll · 严格照服务器的待领清单逐条 ACK（不得从订
     const 成品 = { 名称: '狼牙短剑', 描述: 'd', 数量: 1 };
     备好我的({
       claim: {
-        deposit: 300, final: 700,
+        deposit: 99999, final: 99999, // 同上：汇总仅供显示，入账按条目金额
         items: [{ id: 'B', item: 成品 }],
-        待领: [{ id: 'A', 项: '订金' }, { id: 'B', 项: '尾款' }, { id: 'B', 项: '成品' }],
+        待领: [
+          { id: 'A', 项: '订金', 金额: 300 },
+          { id: 'B', 项: '尾款', 金额: 700 },
+          { id: 'B', 项: '成品', 金额: 0 },
+        ],
       },
     });
     const s = useOrderStore();
@@ -255,38 +264,121 @@ describe('claimAll · 严格照服务器的待领清单逐条 ACK（不得从订
       ['B', '老狼', 'maker', '尾款'],
       ['B', '老狼', 'poster', '成品'],
     ]);
-    // 金额只认汇总（服务器由同一函数派生，两者必然一致）
-    expect(当前UP()).toBe(21000); // 20000 + 300 + 700
-    expect(Number(当前背包()['狼牙短剑'].数量)).toBe(1);
+    expect(当前UP()).toBe(21000); // 20000 + 300 + 700（成品那条金额 0）
+    expect(Number(当前背包()['狼牙短剑'].数量)).toBe(1); // 成品那条回执成功 → 入包
     expect(落档次数).toBe(1); // 资金与物品一次落档
   });
 
-  it('入账落档失败 → 不发 ACK、不写钱、错误条留得住（回执绝不能先于入账）', async () => {
-    (globalThis as any).Mvu.replaceMvuData = async () => {
-      throw new Error('Mvu 写不进去');
-    };
-    备好我的({ claim: { deposit: 300, final: 0, items: [], 待领: [{ id: 'A', 项: '订金' }] } });
-    const s = useOrderStore();
-    await s.refresh();
-    await s.claimAll();
-    // 回执若先于入账发出：位已置而钱没到手 → 这笔订金永久领不到（「丢失不可救」）
-    expect(mocks.ackOrder).not.toHaveBeenCalled();
-    expect(当前UP()).toBe(20000);
-    expect(s.lastError).toContain('Mvu 写不进去'); // 随后的 refresh 不许把它抹掉
-    expect(提示.some(m => m.includes('Mvu 写不进去'))).toBe(true);
-  });
-
-  it('回执失败只影响回执：本地已入账，且如实告知玩家（不静默）', async () => {
-    mocks.ackOrder.mockRejectedValue(new Error('网络断了'));
+  it('Ruling M 核心：回执失败的条目一律不入账 —— 该条的钱不进 UP、其成品不入包', async () => {
+    // A 回执成功；C（尾款的钱）与 B（成品）回执失败 —— 必须只入 A 的账
+    mocks.ackOrder.mockImplementation(async (id: string) => {
+      if (id === 'A') return { deleted: false };
+      throw new Error('网络断了');
+    });
+    const 成品 = { 名称: '狼牙短剑', 描述: 'd', 数量: 1 };
     备好我的({
-      claim: { deposit: 300, final: 0, items: [], 待领: [{ id: 'A', 项: '订金' }] },
+      claim: {
+        deposit: 99999, final: 99999, // 汇总故意写错：入账只认条目金额，且只认回执成功的那些
+        items: [{ id: 'B', item: 成品 }],
+        待领: [
+          { id: 'A', 项: '订金', 金额: 300 },
+          { id: 'C', 项: '尾款', 金额: 700 },
+          { id: 'B', 项: '成品', 金额: 0 },
+        ],
+      },
     });
     const s = useOrderStore();
     await s.refresh();
     await s.claimAll();
-    expect(当前UP()).toBe(20300); // 钱已入账
-    expect(s.lastError).toContain('回执');
+    // 旧写法（先入账、按汇总发钱）在这里会给出 20000+99999+99999；而且 C 的 700 下次刷新还会再发一遍
+    expect(当前UP()).toBe(20300); // 只有 A 的 300
+    expect(当前背包()['狼牙短剑']).toBeUndefined(); // B 的成品没回执 → 不入包（否则下次刷新会再入一遍）
+    expect(落档次数).toBe(1);
+    expect(s.lastError).toContain('未入账');
+    expect(提示.some(m => m.includes('未入账'))).toBe(true); // 玩家看得到，不静默
+  });
+
+  it('全部回执失败：一次落档都不发生，且不许报「已领取」', async () => {
+    mocks.ackOrder.mockRejectedValue(new Error('网络断了'));
+    备好我的({
+      claim: { deposit: 0, final: 0, items: [], 待领: [{ id: 'A', 项: '订金', 金额: 300 }] },
+    });
+    const s = useOrderStore();
+    await s.refresh();
+    await s.claimAll();
+    expect(当前UP()).toBe(20000);
+    expect(落档次数).toBe(0);
+    expect(成功).toEqual([]); // 什么都没发出去，就不许报「已领取」
     expect(提示.some(m => m.includes('回执'))).toBe(true);
+  });
+
+  it('部分成功：两单里只有回执成功的那张单入账', async () => {
+    mocks.ackOrder.mockImplementation(async (id: string) => {
+      if (id === 'B') throw new Error('网络断了');
+      return { deleted: false };
+    });
+    备好我的({
+      claim: {
+        deposit: 0, final: 0, items: [],
+        待领: [{ id: 'A', 项: '订金', 金额: 300 }, { id: 'B', 项: '尾款', 金额: 700 }],
+      },
+    });
+    const s = useOrderStore();
+    await s.refresh();
+    await s.claimAll();
+    expect(mocks.ackOrder).toHaveBeenCalledTimes(2); // 两条都试过
+    expect(当前UP()).toBe(20300); // 只有 A 的 300 入账，B 的 700 留在服务器待领里
+    expect(落档次数).toBe(1);
+    expect(s.lastError).toContain('部分领取未完成');
+    expect(提示.some(m => m.includes('未入账'))).toBe(true);
+  });
+
+  it('退货退回的成品（项=尾款、金额 0）：回执成功后成品入包，且一分钱都不发', async () => {
+    const 退回的成品 = { 名称: '狼牙短剑', 描述: 'd', 数量: 1 };
+    备好我的({
+      claim: {
+        deposit: 0, final: 0,
+        items: [{ id: 'C', item: 退回的成品 }],
+        待领: [{ id: 'C', 项: '尾款', 金额: 0 }], // 同一个位两用：已完成给钱、已取消退物
+      },
+    });
+    const s = useOrderStore();
+    await s.refresh();
+    await s.claimAll();
+    expect(mocks.ackOrder).toHaveBeenCalledWith('C', '老狼', 'maker', '尾款');
+    expect(Number(当前背包()['狼牙短剑'].数量)).toBe(1);
+    expect(当前UP()).toBe(20000); // 金额 0：退回的是物不是钱
+    expect(落档次数).toBe(1);
+  });
+
+  it('条目缺少可用金额 → 一个 ACK 都不发（先校验后回执：ACK 一发即算已领，算不出钱就白丢）', async () => {
+    备好我的({
+      claim: { deposit: 0, final: 0, items: [], 待领: [{ id: 'A', 项: '订金' } as any] },
+    });
+    const s = useOrderStore();
+    await s.refresh();
+    await s.claimAll();
+    expect(mocks.ackOrder).not.toHaveBeenCalled();
+    expect(当前UP()).toBe(20000);
+    expect(落档次数).toBe(0);
+    expect(提示[0]).toContain('金额');
+  });
+
+  it('残余（Ruling M 已接受）：回执已送达但本地落档失败 → 大声报错、不静默', async () => {
+    (globalThis as any).Mvu.replaceMvuData = async () => {
+      throw new Error('Mvu 写不进去');
+    };
+    备好我的({ claim: { deposit: 0, final: 0, items: [], 待领: [{ id: 'A', 项: '订金', 金额: 300 }] } });
+    const s = useOrderStore();
+    await s.refresh();
+    await s.claimAll();
+    // 回执已发（这是 Ruling M 换来的顺序，代价就是这一条残余）：服务器认为已领，本地却没入账
+    expect(mocks.ackOrder).toHaveBeenCalledTimes(1);
+    expect(当前UP()).toBe(20000); // 本地确实没写进去
+    // 必须报得出来：既说清「回执已送达」也说清「本地入账失败」，且常驻错误条不被随后的刷新抹掉
+    expect(s.lastError).toContain('本地入账失败');
+    expect(s.lastError).toContain('回执已送达');
+    expect(提示.some(m => m.includes('本地入账失败'))).toBe(true);
   });
 });
 

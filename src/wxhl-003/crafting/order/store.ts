@@ -7,7 +7,9 @@
 // 成品在两边各自出入包。所以这里的每一个分支都要问两个问题：
 //   ① 钱没到位时，会不会仍然把权益领走（= 凭空生钱）？
 //   ② 钱到位了、权益却领不到（= 玩家白干）？
-// 服务器侧四条裁定（Ruling G/I/L 等）堵的都是这两个方向，客户端这一层不得把它们重新打开。
+// 服务器侧那几条裁定（Ruling G/I/L/M）堵的都是这两个方向，客户端这一层不得把它们重新打开：
+//   L —— 只准照服务器给的 `待领` 清单逐条 ACK（不许遍历自己的订单，那会提前置位尚不存在的权益）；
+//   M —— 先回执、后入账，且只为回执成功的条目入账（反过来 ACK 失败会重复发钱）。
 //
 // MVU 读写纪律（与 crafting/store.ts / market/store.ts 同一套）：
 //   楼层探测 → _.set → replaceMvuData → 回读校验；**只写 `契约者.背包` 与 `契约者.经济.UP`**。
@@ -19,7 +21,7 @@ import type { MarketItemSnapshot } from '../../market/priceTable';
 import {
   ackOrder, acceptOrder, confirmOrder, createOrder, deliverOrder,
   fetchHall, fetchMine, rejectOrder,
-  type 订单, type 待领取,
+  type 订单, type 待领取, type 待领项,
 } from './api';
 import { 成品体积检查, type 需求单 } from './spec';
 
@@ -55,6 +57,20 @@ async function commit(mvu: any, mid: number | 'latest', checks: [string[], unkno
 }
 
 const 空待领: 待领取 = { deposit: 0, final: 0, items: [], 待领: [] };
+
+/**
+ * 某件成品该不该入包：它由 `待领` 里**同 id** 的那条承载 —— 正常交付是 `项='成品'` 那条，
+ * 退货退回的成品是 `项='尾款'` 且 `金额=0` 那条（尾款那个位两用：已完成给钱、已取消退物）。
+ * 两条同时存在时以 `成品` 那条为准（服务器不会这样下发，但判定必须唯一）。
+ *
+ * 判定还要求该条**回执成功**：没回执到的成品不入包 —— 否则该条仍留在服务器的 `待领` 里，
+ * 下次刷新会**再入一遍**（复制物品）。形状异常（找不到承载条目）同样不入：宁可滞留，也不发没回执的东西。
+ */
+function 成品已回执(待领: 待领项[], 已回执: Set<string>, id: string): boolean {
+  const 同单 = 待领.filter(t => t.id === id);
+  const 载体 = 同单.find(t => t.项 === '成品') ?? 同单.find(t => t.项 === '尾款' && Number(t.金额) === 0);
+  return !!载体 && 已回执.has(`${载体.id}|${载体.项}`);
+}
 
 export const useOrderStore = defineStore('wxhl003-order', () => {
   const hall = ref<订单[]>([]);
@@ -220,15 +236,21 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
   }
 
   /**
-   * 领取全部待领物并逐项 ACK。
+   * 领取待领物并逐项 ACK。两条裁定叠在一起，顺序不能动：
    *
-   * **必须照服务器给的 `待领` 清单逐条 ACK** —— 不要遍历 `asPoster`/`asMaker` 对每张单每个项都 ACK：
-   * 那会**提前置位尚不存在的权益**（如订单还在「已接单」就 ACK 尾款 → `maker_final_ack=1`），
-   * 等该单真正完成时尾款**永久领不到**。这是 Ruling L 明确禁止的写法，`待领` 就是为它而生的。
-   * （清单与汇总金额、`items` 在服务器上由同一个函数派生，故「有金额必有条目」，客户端无需自己核对。）
+   * **Ruling L（ACK 哪几项）**：必须照服务器给的 `待领` 清单逐条 ACK —— 不要遍历 `asPoster`/`asMaker`
+   * 对每张单每个项都 ACK：那会**提前置位尚不存在的权益**（订单还在「已接单」就 ACK 尾款 →
+   * `maker_final_ack=1`），等该单真正完成时尾款**永久领不到**。`待领` 就是为它而生的。
    *
-   * 顺序：资金/物品先本地入账（**一次** commit），再逐条回执 —— 反过来先回执后入账，
-   * 一旦入账失败，权益位已置而钱没到手，那是玩家永久白干（「丢失不可救」）。
+   * **Ruling M（先回执还是先入账）**：**先回执、后入账，且只为回执成功的条目入账**。
+   * 反过来（先前我把入账放在前面）会**无限刷钱**：ACK 失败（网络抖动即可）时钱已到玩家手上，
+   * 而服务器仍把该项列在 `待领` 里 → 下次刷新按汇总**再发一遍**。先回执就没有这个口子：
+   * ACK 失败 ⇒ 不记账 ⇒ 那笔钱/那件物仍留在服务器上，下次刷新重试即可（幂等）。
+   * 金额也因此必须取**条目自带的 `金额`** 逐条累加，不再用 `claim.deposit`/`claim.final` 汇总 ——
+   * 只认汇总就认不出「这项是不是已经发过了」。
+   *
+   * 残余风险只剩「回执成功、本地落档失败」（本地写入失败比网络失败罕见得多）：此时服务器已认为
+   * 该项被领走，本地却没入账 —— 只能**大声报错**，绝不静默（Ruling M 明确接受这个残余）。
    */
   async function claimAll(): Promise<void> {
     if (busy.value) return;
@@ -243,54 +265,78 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
       return;
     }
     if (c.待领.length === 0) return;
+    // Ruling M：条目必须自带可用的逐项金额。**这一步必须在任何 ACK 之前**——回执一发出去，
+    // 服务器就认为该项已领；此刻才发现金额缺失，客户端算不出该发多少钱，那笔钱就白丢了。
+    if (!c.待领.every(t => Number.isFinite(Number(t.金额)))) {
+      lastError.value = '待领取条目缺少可用金额（服务器版本过旧？），本次不领取以免算错账';
+      toastr.error(lastError.value);
+      return;
+    }
 
-    let 回执失败 = 0;
     let 出错 = '';
+    let 回执失败 = 0;
+    let 已领钱 = 0;
+    let 已领件 = 0;
     busy.value = true; lastError.value = '';
     try {
-      // ① 资金：订金与尾款都是「我收到钱」（注：退货时 `项='尾款'` 指的是退回的**成品**，
-      //    它不计入 `final` —— 服务器已把两者分开，故此处只管 `deposit + final`）
-      const 进账 = Number(c.deposit ?? 0) + Number(c.final ?? 0);
-      const 新UP = 进账 > 0 ? gainUP(Number(r.c.经济?.UP ?? 0), 进账) : Number(r.c.经济?.UP ?? 0);
-      // ② 物品：逐件入包（`items` 是 `{id, item}[]`）
+      // ① 先逐条回执（side 由 `项` 唯一决定：成品归发单人，订金/尾款归接单者）
+      const 待领 = c.待领;
+      const 已回执 = new Set<string>();
+      for (const t of 待领) {
+        const side = t.项 === '成品' ? 'poster' : 'maker';
+        try { await ackOrder(t.id, playerName.value, side, t.项); 已回执.add(`${t.id}|${t.项}`); }
+        catch (_) { 回执失败++; }        // 失败的条目**不入账**（下称「未领」），仍留在服务器的待领清单里
+      }
+      if (已回执.size === 0) throw new Error(`领取失败：${回执失败} 项回执均未送达服务器，请稍后重试`);
+
+      // ② 只为回执成功的条目入账：钱按条目 `金额` 累加；物品按「其承载条目已回执」入包
+      已领钱 = 待领.reduce((s, t) => (已回执.has(`${t.id}|${t.项}`) ? s + Number(t.金额) : s), 0);
       let 新背包 = (r.c.背包 ?? {}) as Bag;
-      for (const { item } of c.items ?? []) {
+      for (const { id, item } of c.items ?? []) {
+        if (!成品已回执(待领, 已回执, id)) continue;
         const 名 = String((item as any)?.名称 ?? '');
         if (!名) throw new Error('待领成品缺少名称');
         新背包 = bagAdd(新背包, item, Number((item as any).数量 ?? 1));
+        已领件++;
       }
-      // 资金与物品**一次落档**：分两次写的话，第二次失败就变成「钱已入账、物品没进包」，
-      // 而回执还没发 → 下次刷新这笔待领会再领一遍（重复发钱）。一次写就没有这个中间态。
+
+      // ③ 资金与物品**一次落档**：分两次写的话，第二次失败就变成「钱已入账、物品没进包」，
+      //    而回执已经发出去了 —— 那件物品服务器认为已领，玩家却永远拿不到（丢失不可救）。
       const checks: [string[], unknown][] = [];
-      if (进账 > 0) {
+      if (已领钱 > 0) {
+        const 新UP = gainUP(Number(r.c.经济?.UP ?? 0), 已领钱);
         _.set(r.mvu, ['stat_data', '契约者', '经济', 'UP'], 新UP);
         checks.push([['stat_data', '契约者', '经济', 'UP'], 新UP]);
       }
-      if ((c.items ?? []).length > 0) {
+      if (已领件 > 0) {
         _.set(r.mvu, ['stat_data', '契约者', '背包'], 新背包);
         checks.push([['stat_data', '契约者', '背包'], 新背包]);
       }
-      if (checks.length > 0) await commit(r.mvu, r.mid, checks);
-
-      // ③ 照单 ACK（side 由 `项` 唯一决定：成品归发单人，订金/尾款归接单者）
-      for (const t of c.待领) {
-        const side = t.项 === '成品' ? 'poster' : 'maker';
-        try { await ackOrder(t.id, playerName.value, side, t.项); }
-        catch (_) { 回执失败++; }          // 幂等：位已置/行已删服务器都返回 ok，真失败只能下次再试
+      if (checks.length > 0) {
+        try { await commit(r.mvu, r.mid, checks); }
+        catch (e: any) {
+          // Ruling M 的残余：回执已送达 → 服务器已标记这些权益为「已领」，而本地没入账，
+          // 刷新后它们不会再出现在待领里。只能大声报错（不许静默），让玩家知道要找管理员核对。
+          throw new Error(
+            `回执已送达服务器，但本地入账失败（${e?.message ?? e}）：服务器已把这些权益记为已领，请把本条错误报告给管理员核对`,
+          );
+        }
       }
-      toastr.success(`已领取：${进账} UP${(c.items ?? []).length ? ` + ${c.items.length} 件物品` : ''}`);
+      if (已领钱 > 0 || 已领件 > 0) {
+        toastr.success(`已领取：${已领钱} UP${已领件 ? ` + ${已领件} 件物品` : ''}`);
+      }
     } catch (e: any) {
       出错 = e?.message || '领取失败';
       toastr.error(出错);
     } finally { busy.value = false; }
     // 刷新放在**报警之前**：refresh 会清 lastError（顶部常驻错误条），先报后刷等于没报。
     await refresh();
-    if (出错) lastError.value = 出错;   // 入账失败（如 Mvu 写不进去）：常驻错误条上留得住
+    if (出错) lastError.value = 出错;
     if (回执失败 > 0) {
-      // 钱/物已入账、回执没送到：刷新后这些项还会出现在「待领取」里。
-      // 明说「已入账、别重复领」—— 否则玩家会再领一遍，那就真的重复发钱。
-      lastError.value = `有 ${回执失败} 项领取回执未能送达服务器；本地已入账，请勿重复领取`;
-      toastr.warning(lastError.value);
+      // 未领的条目**没有入账**，下次刷新会照旧出现在待领里 —— 重试即可，不会重复发放。
+      const msg = `部分领取未完成：${回执失败} 项回执未送达服务器（这些项未入账，稍后刷新可重试）`;
+      lastError.value = msg;
+      toastr.warning(msg);
     }
   }
 
