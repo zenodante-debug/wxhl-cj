@@ -1433,3 +1433,5 @@ curl -s "https://market.657868.xyz/shop/rank"                                   
 curl -s -X POST https://market.657868.xyz/order/abandon -H "Content-Type: application/json" -d '{}'  # 期望 400
 # 再推前端（用户说「推送」时）：git push origin master:main
 ```
+
+**部署窗口注意（终审 M-A）**：Worker 先部署后、前端推送前，**旧前端接单会 400**（新 Worker 的 accept 强制 maker_shop，旧前端不带）——spec §8「老前端配新 Worker 完全无感」对接单这一点不成立。窗口只有推送间隔的几分钟，接单失败无损（订单仍在大厅，重试即可）；发单/交付/验收/退货/领取在窗口内不受影响。
