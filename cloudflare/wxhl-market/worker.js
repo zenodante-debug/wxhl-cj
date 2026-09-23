@@ -527,9 +527,10 @@ const ACK_COLS = {
  * 若在「已交付」就因双方领了当下这两项而删行，随后验收产生的尾款、或退货产生的退回成品就没了着落。
  * 只有终态（已完成 / 已取消 / 已弃单）才谈得上「权益已全部产生」。
  *
- * 已弃单（v4b）本表暂无口径 → 空清单；按裁定「终态 AND 应领项全部置位」，空清单是**空真**，
- * 故任何一方 ACK 即删行（v4a 走不到这个状态；v4b 落地弃单赔偿时**必须**先在此补上它的应领项，
- * 否则那笔赔偿会随第一次 ACK 蒸发）。无接单人（v4c 撤销）只有发单人有权领回。
+ * 已弃单（v4b）本表暂无口径 → 空清单（v4a 走不到这个状态）。空清单即「无可删依据」：
+ * 删行条件另有 `应领(行).length > 0` 兜底，故此类行**不删、滞留**（宁可滞留也不静默删行）。
+ * v4b 落地弃单赔偿时**必须**先在此补上它的应领项，否则那笔赔偿永远不会被算作「已领」而滞留。
+ * 无接单人（v4c 撤销）只有发单人有权领回。
  */
 export function 应领(row) {
   if (!row.maker) return ['poster'];
@@ -718,7 +719,7 @@ async function handleOrder(url, request, env, cors) {
 
   // POST /order/ack  { id, who, side, 项 }  →  { ok, deleted }
   // 按**项**标记领取：maker 领 订金/尾款（尾款位同时承载退货后的退回成品），poster 领 成品。
-  // 该单应领的项全部置位、且订单已到终态 → 删行（这是"服务器不撑爆"的关键）。
+  // 订单已到终态、`应领(行)` 非空、且其每一项都已置位 → 删行（这是"服务器不撑爆"的关键）。
   // 幂等：行已被另一边删掉就当「已领完」返回 deleted:true；同一项重复 ACK 只是把 1 再写一遍。
   if (p === '/order/ack' && request.method === 'POST') {
     let b;
@@ -744,7 +745,11 @@ async function handleOrder(url, request, env, cors) {
     // 非终态（待接单/已接单/已交付）一律不删：权益还在陆续产生（交付产成品、验收产尾款），
     // 此刻把行删掉，随后产生的尾款或退回成品就没了着落 —— 与 Ruling G 同类，钱会凭空蒸发。
     const 终态 = !!after && (after.status === 订单状态.已完成 || after.status === 订单状态.已取消 || after.status === 订单状态.已弃单);
-    const deleted = 终态 && 应领(after).every(k => after[ACK_KEY_COL[k]] === 1);
+    // `应领(行).length > 0` 是**给未来状态兜底**：新增终态时若忘了在 `应领` 里补上它的应领项，
+    // 空清单会让 `.every()` 空真成立 → 行被静默删掉，还没领的赔偿款凭空丢失。
+    // 宁可让行滞留（由 v4c 的 purge 兜底），也不能静默删行 —— 滞留可救，丢失不可救。
+    const 欠 = 终态 ? 应领(after) : [];
+    const deleted = 欠.length > 0 && 欠.every(k => after[ACK_KEY_COL[k]] === 1);
     if (deleted) await withRetry(() => env.MARKET_DB.prepare(`DELETE FROM orders WHERE id = ?`).bind(row.id).run());
     return new Response(JSON.stringify({ ok: true, deleted }), { headers: { ...cors, 'Content-Type': 'application/json' } });
   }

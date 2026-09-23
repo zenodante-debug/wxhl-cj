@@ -584,6 +584,23 @@ describe('订单 · 按项领取（Ruling I）', () => {
     expect(results[0].maker_final_ack).toBe(0);
   });
 
+  it('应领为空集的终态行（v4b 弃单）即使双方都 ACK，也滞留不删（滞留可救、丢失不可救）', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    // v4a 没有弃单路由：这里用 worker 自己的推进语句（与 confirm/reject 同形）把行推到 v4b 的终态。
+    // 目的只有一个 —— 构造出「终态 且 应领(行) 为空集」这一行，钉住删行的兜底守卫。
+    await env.MARKET_DB.prepare(`UPDATE orders SET status = ?, updated = ? WHERE id = ? AND status = ?`)
+      .bind('已弃单', Date.now(), id, '已接单').run();
+    expect(应领({ status: '已弃单', maker: '乙' })).toEqual([]);      // 前提：应领真是空集
+
+    // 双方各领一项：`.every()` 对空集空真 → 若没有 length>0 守卫，这里会把行静默删掉，
+    // 而 v4b 的弃单赔偿还没定口径 —— 那笔钱就凭空没了着落。
+    expect((await (await 领(env, id, '乙', 'maker', '订金')).json()).deleted).toBe(false);
+    expect((await (await 领(env, id, '甲', 'poster', '成品')).json()).deleted).toBe(false);
+    expect(await 行数(env, id)).toBe(1);                            // 宁可滞留（v4c 的 purge 兜底）
+  });
+
   it('应领(行)：只认终态，非终态一项都不算（删行判据的数据源）', () => {
     const 行 = (status, maker = '乙') => ({ status, maker });
     expect(应领(行('待接单', null))).toEqual(['poster']);        // 撤销/无人接：只有发单人有权领回
