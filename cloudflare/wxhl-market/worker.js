@@ -812,6 +812,114 @@ async function handleOrder(url, request, env, cors) {
   return new Response('未知的订单操作', { status: 404, headers: cors });
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// 店铺评分（v4b）：订单信誉的**分数制**——完成 +1、验收评分 0–5、退货 −2、弃单 −5。
+// 主键是**店铺名**（跟着店名走：改名 = 新店从 0；同名店铺共享一行，用户已确认）。
+// 第四次复制「独立段」组织方式（市场 → 排行榜 → 订单 → 店铺评分）：自带 ensureShopSchema，
+// 排在 fetch 里 ensureSchema(env) **之前**，四方互不波及。照 handleRank 的模子复制。
+// 信义模型：分数由客户端在原子状态转换成功后自报，服务端不校验来源（与赔偿款同一信任级别）。
+// ════════════════════════════════════════════════════════════════════════════
+
+const SHOP_TOP_N = 20;
+const SHOP_NAME_MAX = 32;
+/** 只用来挡数字垃圾，**不是玩法上限** —— 合法 delta ∈ [−5, +6] */
+const SHOP_DELTA_MAX = 100;
+const SHOP_ORDER_SQL = `ORDER BY score DESC, updated ASC, name ASC`;
+/** 排在我前面的行：(分更高) 或 (同分且到得更早) 或 (完全同键但店名更小) */
+const SHOP_AHEAD_SQL = `score > ? OR (score = ? AND updated < ?) OR (score = ? AND updated = ? AND name < ?)`;
+const SHOP_COLS = `name, score, updated`;
+
+/** 店铺评分建表：独立于市场/排行榜/订单，失败只影响本段 */
+let shopSchemaReady = false;
+async function ensureShopSchema(env) {
+  if (shopSchemaReady) return;
+  await env.MARKET_DB.batch([
+    env.MARKET_DB.prepare(
+      `CREATE TABLE IF NOT EXISTS shop_scores (
+         name TEXT PRIMARY KEY,
+         score INTEGER NOT NULL DEFAULT 0,
+         updated INTEGER NOT NULL
+       )`,
+    ),
+    env.MARKET_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_shop_scores ON shop_scores (score DESC, updated ASC, name ASC)`),
+  ]);
+  shopSchemaReady = true;
+}
+
+const countShops = async db => Number((await db.prepare(`SELECT COUNT(*) AS n FROM shop_scores`).first())?.n ?? 0);
+
+/** 名次 = 排在我前面的行数 + 1 */
+async function shopRankOf(db, row) {
+  const r = await db
+    .prepare(`SELECT COUNT(*) AS n FROM shop_scores WHERE ${SHOP_AHEAD_SQL}`)
+    .bind(row.score, row.score, row.updated, row.score, row.updated, row.name)
+    .first();
+  return Number(r?.n ?? 0) + 1;
+}
+
+/** 非店铺路径返回 null，交给下面的市场分支 */
+async function handleShop(url, request, env, cors) {
+  if (!url.pathname.startsWith('/shop/')) return null;
+  const db = env.MARKET_DB;
+
+  try {
+    await ensureShopSchema(env);
+  } catch (e) {
+    return new Response('店铺评分数据库初始化失败: ' + String(e && e.message ? e.message : e), { status: 500, headers: cors });
+  }
+
+  // POST /shop/score  { name, delta }  →  { score }
+  // 信义模型：不校验来源。delta 钳在非零整数且 |delta| ≤ SHOP_DELTA_MAX，只挡数字垃圾。
+  if (url.pathname === '/shop/score' && request.method === 'POST') {
+    let b;
+    try { b = await request.json(); } catch { return new Response('bad request', { status: 400, headers: cors }); }
+    const name = String(b?.name ?? '').trim();
+    if (!name) return new Response('店铺名不能为空', { status: 400, headers: cors });
+    if (name.length > SHOP_NAME_MAX) return new Response(`店铺名过长（上限 ${SHOP_NAME_MAX} 字）`, { status: 400, headers: cors });
+    const delta = Number(b?.delta);
+    if (!Number.isInteger(delta) || delta === 0 || Math.abs(delta) > SHOP_DELTA_MAX)
+      return new Response(`delta 必须是非零整数且 |delta| ≤ ${SHOP_DELTA_MAX}`, { status: 400, headers: cors });
+    await withRetry(() =>
+      db.prepare(
+        `INSERT INTO shop_scores (name, score, updated) VALUES (?, ?, ?)
+         ON CONFLICT(name) DO UPDATE SET score = score + excluded.score, updated = excluded.updated`,
+      ).bind(name, delta, Date.now()).run(),
+    );
+    const row = await db.prepare(`SELECT score FROM shop_scores WHERE name = ?`).bind(name).first();
+    return json({ score: Number(row?.score ?? delta) }, cors);
+  }
+
+  // GET /shop/rank?name=<店铺名>  →  { list: 前 20, total, me, near }
+  // 不传 name 就只出榜单（me 为 null）。形状与 /rank/top 完全一致。
+  if (url.pathname === '/shop/rank' && request.method === 'GET') {
+    const name = String(url.searchParams.get('name') ?? '').trim().slice(0, SHOP_NAME_MAX);
+    const rows = await db.prepare(`SELECT ${SHOP_COLS} FROM shop_scores ${SHOP_ORDER_SQL} LIMIT ?`).bind(SHOP_TOP_N).all();
+    const list = rows.results ?? [];
+    const total = await countShops(db);
+
+    let me = null;
+    let near = [];
+    if (name) {
+      const mine = await db.prepare(`SELECT ${SHOP_COLS} FROM shop_scores WHERE name = ?`).bind(name).first();
+      if (mine) {
+        const rank = await shopRankOf(db, mine);
+        me = { rank, entry: mine };
+        if (rank > SHOP_TOP_N) {
+          const start = Math.max(SHOP_TOP_N + 1, rank - 1);
+          const nb = await db
+            .prepare(`SELECT ${SHOP_COLS} FROM shop_scores ${SHOP_ORDER_SQL} LIMIT ? OFFSET ?`)
+            .bind(rank + 1 - start + 1, start - 1)
+            .all();
+          near = (nb.results ?? []).map((entry, i) => ({ rank: start + i, entry }));
+        }
+      }
+    }
+    return json({ list, total, me, near }, { ...cors, 'Cache-Control': 'no-store' });
+  }
+
+  return new Response('not found', { status: 404, headers: cors });
+}
+
 const RANK_COLS = `name, lv, title, job, updated`;
 const countRanks = async db => Number((await db.prepare(`SELECT COUNT(*) AS n FROM ranks`).first())?.n ?? 0);
 
@@ -990,6 +1098,10 @@ export default {
     // 工坊订单自成一段：自带 ensureOrderSchema，同样排在建表之前，与市场/排行榜三方互不波及。
     const orderRes = await handleOrder(url, request, env, cors);
     if (orderRes) return orderRes;
+
+    // 店铺评分自成一段：同样排在市场建表之前，与市场/排行榜/订单四方互不波及。
+    const shopRes = await handleShop(url, request, env, cors);
+    if (shopRes) return shopRes;
 
     // 建表：只在需要访问数据时初始化（未建好就返回明确原因，而不是 1101）
     try {

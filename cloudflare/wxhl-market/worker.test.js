@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import worker, { checkPrice, 应领 } from './worker.js';
 import { makeFakeD1 } from './fake-d1.mjs';
 
@@ -876,5 +876,62 @@ describe('超脱阶位 · 服务端支持', () => {
     const env = { MARKET_DB: makeFakeD1(), WELFARE_KEY: 'secret' };
     const res = await call(env, '/market/list', postJson(汤姆卡)); // 无 opsKey
     expect(res.status).toBe(400);
+  });
+});
+
+// ================================================================
+// 店铺分数段（v4b）：/shop/score UPSERT 累加 + /shop/rank 榜单
+// ================================================================
+describe('店铺分数段', () => {
+  // brief 的两个便捷助手原样每次调 env() 会拿到**全新**假 D1，累加断言不可能成立；
+  // 这里改成每个 it 共享一份 env（beforeEach 重置），it 体保持逐字不动。
+  let e;
+  beforeEach(() => { e = env(); });
+  const score = (name, delta) => worker.fetch(post('/shop/score', { name, delta }), e);
+  const rank = name => worker.fetch(get('/shop/rank?name=' + encodeURIComponent(name)), e).then(r => r.json());
+
+  it('上报即建行，再次上报按名累加并刷新 updated', async () => {
+    let r = await score('铁匠铺', 1);
+    expect(r.status).toBe(200);
+    expect((await r.json()).score).toBe(1);
+    r = await score('铁匠铺', 4);
+    expect((await r.json()).score).toBe(5);
+    r = await score('铁匠铺', -2);
+    expect((await r.json()).score).toBe(3);
+  });
+
+  it('同名店铺共享一行（两个接单者同名店铺 → 分数累加进同一行）', async () => {
+    await score('同名铺', 2);
+    await score('同名铺', 3);
+    const b = await rank('同名铺');
+    expect(b.total).toBe(1);
+    expect(b.me.entry.score).toBe(5);
+  });
+
+  it('排行：分数高者在前；同分先到先排前', async () => {
+    const e = env();
+    const s = (n, d) => worker.fetch(post('/shop/score', { name: n, delta: d }), e);
+    await s('早到', 5);   // 先达到 5 分
+    await s('晚到', 5);   // 同分，后到
+    await s('高分', 6);
+    const b = await worker.fetch(get('/shop/rank?name='), e).then(r => r.json());
+    expect(b.list.map(x => x.name)).toEqual(['高分', '早到', '晚到']);
+  });
+
+  it('me 与邻居：20 名外给出 rank 与 near', async () => {
+    const e = env();
+    for (let i = 1; i <= 25; i++) await worker.fetch(post('/shop/score', { name: `铺${i}`, delta: 100 - i }), e);
+    await worker.fetch(post('/shop/score', { name: '我', delta: 1 }), e);
+    const b = await worker.fetch(get('/shop/rank?name=' + encodeURIComponent('我')), e).then(r => r.json());
+    expect(b.total).toBe(26);
+    expect(b.me.rank).toBeGreaterThan(20);
+    expect(b.near.some(n => n.entry.name === '我')).toBe(true);
+  });
+
+  it('脏输入：空名 / delta 0 / 非整数 / |delta|>100 一律 400', async () => {
+    for (const body of [{ name: '', delta: 1 }, { name: 'x', delta: 0 }, { name: 'x', delta: 1.5 }, { name: 'x', delta: 101 }, { name: 'x', delta: -101 }]) {
+      const r = await worker.fetch(post('/shop/score', body), env());
+      expect(r.status).toBe(400);
+    }
   });
 });

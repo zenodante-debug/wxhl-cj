@@ -30,6 +30,17 @@ function rankOrder(a, b) {
 const RANK_TIE_WHERE =
   /^lv > \? OR \(lv = \? AND updated < \?\) OR \(lv = \? AND updated = \? AND name < \?\)$/i;
 
+/** shop_scores 的排序键：分数高的在前；同分先到的在前；再同按店名，保证名次可复现 */
+function shopOrder(a, b) {
+  if (a.score !== b.score) return b.score - a.score;
+  if (a.updated !== b.updated) return a.updated - b.updated;
+  return a.name < b.name ? -1 : a.name > b.name ? 1 : 0;
+}
+
+/** 店铺名次统计用的条件（带 OR，得在按 AND 切分之前先认出来） */
+const SHOP_TIE_WHERE =
+  /^score > \? OR \(score = \? AND updated < \?\) OR \(score = \? AND updated = \? AND name < \?\)$/i;
+
 // ———— orders 表的四条语句 ————
 // 订单段的 SQL 形态很少（就下面这几条），所以**整句**锚定而不是拆 WHERE：
 // 这些语句的占位符全是位置参数，拆着认一旦看漏，参数就静默错位（例如把 maker 当 status），
@@ -77,6 +88,8 @@ export function makeFakeD1() {
   const earnings = new Map();
   /** name → { name, lv, title, job, updated }，主键就是姓名 —— 同名写入即顶掉 */
   const ranks = new Map();
+  /** 店铺分数。主键是店铺名 —— 同名店铺共享一行（用户已确认的口径） */
+  const shops = new Map();
   /** 出售记录。主键是**每笔成交各自的 id**（不是挂单 id），同一挂单多次成交互不覆盖 */
   const sales = new Map();
   /** 工坊订单。主键是订单 id；状态是行上的字段（长流程，不是「有行/无行」） */
@@ -109,7 +122,17 @@ export function makeFakeD1() {
     return evalSimpleWhere(row, whereStr, args);
   }
 
-  /** 通用筛选 + 排序 + LIMIT/OFFSET；order 省略则不排序 */
+  function evalShopWhere(row, whereStr, args) {
+    if (SHOP_TIE_WHERE.test(whereStr)) {
+      const [score, , updated, , , name] = args;
+      return (
+        row.score > score ||
+        (row.score === score && row.updated < updated) ||
+        (row.score === score && row.updated === updated && row.name < name)
+      );
+    }
+    return evalSimpleWhere(row, whereStr, args);
+  }
   function page(rows, sql, args, order) {
     const whereStr = whereOf(sql);
     const consumed = whereStr ? whereStr.split(/\?/).length - 1 : 0;
@@ -200,6 +223,17 @@ export function makeFakeD1() {
     if (/FROM sales/i.test(sql)) {
       return { results: page([...sales.values()], sql, args, (a, b) => b.created - a.created).map(r => ({ ...r })) };
     }
+    if (/FROM shop_scores/i.test(sql)) {
+      const whereStr = whereOf(sql);
+      const rows = whereStr ? [...shops.values()].filter(r => evalShopWhere(r, whereStr, args)) : [...shops.values()];
+      if (/COUNT\(\*\)/i.test(sql)) return { results: [], first: { n: rows.length } };
+      const consumed = whereStr ? whereStr.split(/\?/).length - 1 : 0;
+      let out = [...rows].sort(shopOrder);
+      if (/OFFSET/i.test(sql)) out = out.slice(Number(args[consumed + 1]) || 0);
+      const limit = args[consumed];
+      if (typeof limit === 'number') out = out.slice(0, limit);
+      return { results: out.map(r => ({ ...r })) };
+    }
     if (/FROM ranks/i.test(sql)) {
       const whereStr = whereOf(sql);
       const rows = whereStr ? [...ranks.values()].filter(r => evalRankWhere(r, whereStr, args)) : [...ranks.values()];
@@ -273,6 +307,13 @@ export function makeFakeD1() {
             const [name, lv, title, job, updated] = st._a;
             // 无条件覆盖 = 同名后来的顶掉先前的（同一个玩家换新存档也走这条）
             ranks.set(name, { name, lv: Number(lv), title, job, updated: Number(updated) });
+            return ok(1);
+          }
+          // ———— 店铺分数：UPSERT 累加（ON CONFLICT DO UPDATE SET score = score + excluded.score）————
+          if (/^INSERT INTO shop_scores/i.test(sql)) {
+            const [name, delta, updated] = st._a;
+            const cur = shops.get(name);
+            shops.set(name, { name, score: (cur?.score ?? 0) + Number(delta), updated: Number(updated) });
             return ok(1);
           }
           if (/^INSERT INTO listings/i.test(sql)) {
