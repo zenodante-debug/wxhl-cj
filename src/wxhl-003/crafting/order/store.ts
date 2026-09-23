@@ -21,11 +21,14 @@ import { bagAdd, bagRemove, gainUP, spendUP, type Bag } from '../../market/settl
 import type { MarketItemSnapshot } from '../../market/priceTable';
 import { isBlueprintName } from '../recipes';
 import {
-  ackOrder, acceptOrder, confirmOrder, createOrder, deliverOrder,
-  fetchHall, fetchMine, rejectOrder,
+  abandonOrder, ackOrder, acceptOrder, confirmOrder, createOrder, deliverOrder,
+  fetchHall, fetchMine, fetchShopRank, rejectOrder, reportShopScore,
   type 订单, type 待领取, type 待领项,
 } from './api';
-import { 成品体积检查, type 需求单 } from './spec';
+import { appendHistory } from './rep/history';
+import { 弃单扣分, 退货扣分, 验收加分 } from './rep/score';
+import { readShopName, type ShopRankBoard } from './rep/shop';
+import { 成品体积检查, 需求单摘要, type 需求单 } from './spec';
 
 // —— MVU 三助手：与 crafting/store.ts 逐字一致（楼层探测 → _.set → replaceMvuData → 回读校验）——
 function messageId(): number | 'latest' {
@@ -58,7 +61,7 @@ async function commit(mvu: any, mid: number | 'latest', checks: [string[], unkno
   }
 }
 
-const 空待领: 待领取 = { deposit: 0, final: 0, items: [], 待领: [] };
+const 空待领: 待领取 = { deposit: 0, final: 0, comp: null, items: [], 待领: [] };
 
 /**
  * 交付下拉候选（Ruling N 的 UI 侧防线）：背包里数量 > 0 且**不是图纸**的物品名。
@@ -94,6 +97,8 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
   const busy = ref(false);          // 双击防护：所有写操作共用
   const lastError = ref('');
   const playerName = ref('无名契约者');
+  const shopName = ref('');           // 当前店铺名（'' = 未开店）；syncPlayer 时一并刷新
+  const shopBoard = ref<ShopRankBoard>({ list: [], total: 0, me: null, near: [] });
 
   /**
    * 取当前存档的姓名。**每个写动作的入口都要先过它**：
@@ -105,6 +110,7 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
     const r = readContractor();
     if (!r) { lastError.value = '读不到存档变量（契约者不存在）'; return false; }
     playerName.value = String(r.c.头部?.姓名 ?? '无名契约者');
+    shopName.value = readShopName(r.c);
     return true;
   }
 
@@ -161,8 +167,18 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
   async function accept(id: string): Promise<boolean> {
     if (busy.value) return false;
     if (!syncPlayer()) return false;
+    // 开店闸门（spec §5.1）：接单人身份是**店铺**，'无'/空 = 未开店不准接单。
+    // 读店铺名是只读路径，不碰 MVU 写入纪律。
+    const r0 = readContractor();
+    if (!r0) { lastError.value = '读不到存档变量'; return false; }
+    const shop = readShopName(r0.c);
+    if (!shop) {
+      lastError.value = '未开设店铺，不能接单（请先在个人产业中开设店铺）';
+      toastr.error(lastError.value);
+      return false;
+    }
     busy.value = true; lastError.value = '';
-    try { await acceptOrder(id, playerName.value); toastr.success('接单成功，订金已到你名下'); await refresh(); return true; }
+    try { await acceptOrder(id, playerName.value, shop); toastr.success(`接单成功，订金已到你名下（店铺「${shop}」）`); await refresh(); return true; }
     catch (e: any) { lastError.value = e?.message || '接单失败'; toastr.error(lastError.value); return false; }
     finally { busy.value = false; }
   }
@@ -215,7 +231,7 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
   }
 
   /** 验收：先校验尾款（不足则禁用按钮 + 这里兜底），扣款后通知服务器 */
-  async function confirm(id: string): Promise<boolean> {
+  async function confirm(id: string, 评分: number | null): Promise<boolean> {
     if (busy.value) return false;
     if (!syncPlayer()) return false;
     const 单 = asPoster.value.find(o => o.id === id);
@@ -242,6 +258,18 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
     }
     _.set(rr.mvu, ['stat_data', '契约者', '经济', 'UP'], 余UP);
     await commit(rr.mvu, rr.mid, [[['stat_data', '契约者', '经济', 'UP'], 余UP]]);
+    // 店铺分数上报（spec §3）：完成 +1 保底，发单人给了评分就 1+评分。
+    // 防重复靠服务端原子状态转换（confirmOrder 的 status 守卫）——双开标签页只有一个成功，
+    // 走到这里的必然握着那次成功，直接报。上报失败只 warn：分数是荣誉值可丢，钱已落档。
+    // 老订单行没有 maker_shop（评分无归属）→ 跳过，不炸。
+    if (单.maker_shop) {
+      try { await reportShopScore(单.maker_shop, 验收加分(评分)); }
+      catch (e) { console.warn('[订单] 店铺分数上报失败', e); }
+    }
+    appendHistory({
+      订单id: id, 角色: '发单人', 对方: 单.maker_shop ?? 单.maker ?? '',
+      摘要: 需求单摘要(单.spec), 结果: '完成', 分数变动: 0, 时间: Date.now(),
+    });
     toastr.success(`验收完成，已支付尾款 ${单.final} UP`);
     await refresh();
     return true;
@@ -250,10 +278,79 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
   async function reject(id: string): Promise<boolean> {
     if (busy.value) return false;
     if (!syncPlayer()) return false;
+    const 单 = asPoster.value.find(o => o.id === id);
     busy.value = true; lastError.value = '';
-    try { await rejectOrder(id, playerName.value); toastr.warning('已退货，订单取消（订金不退）'); await refresh(); return true; }
+    try { await rejectOrder(id, playerName.value); }
     catch (e: any) { lastError.value = e?.message || '退货失败'; toastr.error(lastError.value); return false; }
     finally { busy.value = false; }
+    // 退货 −2：同样在原子转换成功后上报；老订单无店铺归属则跳过
+    if (单?.maker_shop) {
+      try { await reportShopScore(单.maker_shop, 退货扣分()); }
+      catch (e) { console.warn('[订单] 店铺分数上报失败', e); }
+    }
+    if (单) {
+      appendHistory({
+        订单id: id, 角色: '发单人', 对方: 单.maker_shop ?? 单.maker ?? '',
+        摘要: 需求单摘要(单.spec), 结果: '退货', 分数变动: 0, 时间: Date.now(),
+      });
+    }
+    toastr.warning('已退货，订单取消（订金不退，对方店铺 −2 分）');
+    await refresh();
+    return true;
+  }
+
+  /**
+   * 弃单：赔 订金×3（本地扣、经服务器转发给发单人待领）+ 自己店铺 −5 分。
+   * 守卫顺序与 publish 同款：spendUP 预验抛在**任何写入与任何请求之前** —— 赔不起就不许弃单，
+   * 「拒绝」与「零请求零写入」是同一件事的两面。
+   */
+  async function abandon(id: string): Promise<boolean> {
+    if (busy.value) return false;
+    if (!syncPlayer()) return false;
+    const 单 = asMaker.value.find(o => o.id === id);
+    if (!单) { lastError.value = '找不到该订单'; return false; }
+    const 赔偿 = 单.deposit * 3;
+    const r = readContractor();
+    if (!r) { lastError.value = '读不到存档变量'; return false; }
+    try { spendUP(Number(r.c.经济?.UP ?? 0), 赔偿); }
+    catch (e: any) { lastError.value = `赔偿不足（需 ${赔偿} UP），无法弃单：${e.message}`; toastr.error(lastError.value); return false; }
+
+    busy.value = true; lastError.value = '';
+    try { await abandonOrder(id, playerName.value); }
+    catch (e: any) { lastError.value = e?.message || '弃单失败'; toastr.error(lastError.value); return false; }
+    finally { busy.value = false; }
+
+    // 扣款基准与写入基底取此刻的新读值（同 publish：往返期间市场可能改过 UP）
+    const rr = readContractor() ?? r;
+    let 余UP: number;
+    try { 余UP = spendUP(Number(rr.c.经济?.UP ?? 0), 赔偿); }
+    catch (e: any) {
+      lastError.value = `订单已弃单，但赔偿未能扣除：${e.message}。请核对余额`;
+      toastr.error(lastError.value);
+      return false;
+    }
+    _.set(rr.mvu, ['stat_data', '契约者', '经济', 'UP'], 余UP);
+    await commit(rr.mvu, rr.mid, [[['stat_data', '契约者', '经济', 'UP'], 余UP]]);
+
+    const shop = readShopName(rr.c);
+    if (shop) {
+      try { await reportShopScore(shop, 弃单扣分()); }
+      catch (e) { console.warn('[订单] 店铺分数上报失败', e); }
+    }
+    appendHistory({
+      订单id: id, 角色: '接单人', 对方: 单.poster,
+      摘要: 需求单摘要(单.spec), 结果: '弃单', 分数变动: 弃单扣分(), 时间: Date.now(),
+    });
+    toastr.warning(`已弃单：赔偿 ${赔偿} UP，店铺 −5 分`);
+    await refresh();
+    return true;
+  }
+
+  /** 店铺排行榜：未开店传空也能看榜（me 为 null） */
+  async function refreshShopRank(): Promise<void> {
+    if (!syncPlayer()) return;
+    try { shopBoard.value = await fetchShopRank(shopName.value); }
+    catch (e: any) { lastError.value = '店铺排行读取失败：' + (e?.message ?? e); }
   }
 
   /**
@@ -312,7 +409,7 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
       const 已回执 = new Set<string>();
       const 该入账 = new Set<string>();
       for (const t of 待领) {
-        const side = t.项 === '成品' ? 'poster' : 'maker';
+        const side = t.项 === '成品' || t.项 === '赔偿' ? 'poster' : 'maker';
         try {
           const ack = await ackOrder(t.id, playerName.value, side, t.项);
           已回执.add(`${t.id}|${t.项}`);
@@ -358,6 +455,19 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
           );
         }
       }
+      // 接单人侧的「完成」记录：尾款（钱）条目 first=true 入账才算这单真成了。
+      // 确切分值在发单人客户端（评分是对方给的），本地无从得知 → 分数变动记 null。
+      for (const t of 待领) {
+        if (t.项 === '尾款' && Number(t.金额) > 0 && 该入账.has(`${t.id}|${t.项}`)) {
+          const o = asMaker.value.find(x => x.id === t.id);
+          if (o) {
+            appendHistory({
+              订单id: o.id, 角色: '接单人', 对方: o.poster,
+              摘要: 需求单摘要(o.spec), 结果: '完成', 分数变动: null, 时间: Date.now(),
+            });
+          }
+        }
+      }
       if (已领钱 > 0 || 已领件 > 0) {
         toastr.success(`已领取：${已领钱} UP${已领件 ? ` + ${已领件} 件物品` : ''}`);
       }
@@ -377,5 +487,6 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
   }
 
   return { hall, asPoster, asMaker, claim, loading, busy, lastError, playerName,
-           refresh, publish, accept, deliver, confirm, reject, claimAll };
+           shopName, shopBoard, refreshShopRank,
+           refresh, publish, accept, deliver, confirm, reject, abandon, claimAll };
 });

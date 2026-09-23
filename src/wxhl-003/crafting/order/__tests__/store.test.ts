@@ -471,12 +471,14 @@ describe('claimAll · 照待领清单逐条 ACK（Ruling L）+ 先回执后入�
 // 接单 / 退货：不碰主卡变量（只改服务器状态）
 // ================================================================
 describe('接单 / 退货 · 只动服务器状态', () => {
-  it('accept：带姓名发请求、零落档', async () => {
+  it('accept：带姓名与店铺名发请求、零落档', async () => {
+    // v4b 开店闸门：接单人身份是店铺，存档里得有「个人产业.当前店铺.名称」才放得行
+    mvu.stat_data.契约者.个人产业 = { 当前店铺: { 名称: '老狼铁匠铺' } };
     备好我的({});
     const s = useOrderStore();
     await s.refresh();
     expect(await s.accept('A')).toBe(true);
-    expect(mocks.acceptOrder).toHaveBeenCalledWith('A', '老狼');
+    expect(mocks.acceptOrder).toHaveBeenCalledWith('A', '老狼', '老狼铁匠铺');
     expect(落档次数).toBe(0);
   });
 
