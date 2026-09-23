@@ -236,8 +236,9 @@ if (r.status === 404) {
   r = await call(get('/order/list?exclude=' + encodeURIComponent('测试甲')));
   check('大厅排除自己发的单', !(await r.json()).orders.some(o => o.id === order.id));
 
-  check('乙接单 200', (await call(post('/order/accept', { id: order.id, maker: '测试乙' }))).status === 200);
-  r = await call(post('/order/accept', { id: order.id, maker: '测试丙' }));
+  // v4b 起 accept 必填 maker_shop（评分跟着店铺走）——既有两处调用一并补上，否则会在接单处 400。
+  check('乙接单 200', (await call(post('/order/accept', { id: order.id, maker: '测试乙', maker_shop: '烟测铁匠铺' }))).status === 200);
+  r = await call(post('/order/accept', { id: order.id, maker: '测试丙', maker_shop: '烟测丙的店' }));
   check('丙再抢被拒且明示', r.status === 400 && (await r.clone().text()).includes('已被接走'));
 
   // 接单后：乙只挂订金（尾款要验收后才产生——Ruling L：清单只列当下真实存在的权益）；
@@ -288,6 +289,62 @@ if (r.status === 404) {
   // 本地是内存假库、进程退出即消失；线上滞留由 v4c 的 purge 兜底。明说，不静默。
   if (fail > 段首失败数)
     console.log(`  [注意] 订单段有失败步骤，订单 ${order.id ?? '(未取得 id)'} 可能滞留飞行中（本地内存库随进程消失；线上滞留由 v4c purge 兜底）`);
+}
+
+console.log('=== 13. 店铺评分与弃单赔偿（v4b）===');
+// 店铺分数段独立于订单段：/shop/score 是 shop_scores 表的唯一写入口（信义模型，客户端自报）。
+// 与订单段同款跳过闸：拿本脚本打未部署 v4b 的旧 worker 时整段跳过、计 skipped，不让全场变红。
+r = await call(post('/shop/score', { name: '烟测铁匠铺', delta: 1 }));
+if (r.status === 404) {
+  skipped++;
+  console.log('  [跳过] 店铺评分端点未部署，跳过（待部署后启用）');
+} else {
+  check('店铺分数上报 200', r.status === 200, `status=${r.status}`);
+
+  // —— 店铺分数：上报 → 累加 → 榜单排序 ——
+  await call(post('/shop/score', { name: '烟测铁匠铺', delta: 5 }));
+  await call(post('/shop/score', { name: '烟测另一家', delta: 3 }));
+  r = await call(get('/shop/rank?name=' + encodeURIComponent('烟测铁匠铺')));
+  j = await r.json();
+  check('店铺分数累加（1+5=6）', j.me?.entry?.score === 6, JSON.stringify(j).slice(0, 200));
+  check('店铺榜单排序（6 分压过 3 分）', j.list[0]?.name === '烟测铁匠铺' && j.total >= 2, JSON.stringify(j).slice(0, 200));
+
+  // —— 弃单 + 赔偿：发布 → 接单(带店铺) → 弃单 → 赔偿待领 → 双 ACK 删行 ——
+  const 弃单段首失败数 = fail;
+  r = await call(post('/order/create', { poster: '烟测甲', spec: 冒烟需求单, deposit: 50, final: 50 }));
+  const 弃单 = r.status === 200 ? await r.json() : {};
+  check('弃单段发单 200 且有 id', r.status === 200 && !!弃单.id, JSON.stringify(弃单));
+
+  r = await call(post('/order/accept', { id: 弃单.id, maker: '烟测乙' }));
+  check('接单必须带店铺名（缺 maker_shop → 400）', r.status === 400, `status=${r.status}`);
+  check('带店铺名接单 200', (await call(post('/order/accept', { id: 弃单.id, maker: '烟测乙', maker_shop: '烟测铁匠铺' }))).status === 200);
+  check('乙弃单 200', (await call(post('/order/abandon', { id: 弃单.id, maker: '烟测乙' }))).status === 200);
+
+  // 弃单后：订金不退归接单者；发单人待领赔偿 = 订金×3 = 150
+  r = await call(get('/order/mine?who=' + encodeURIComponent('烟测甲')));
+  j = await r.json();
+  check('弃单赔偿待领 = 订金×3（150）', j.claim.comp === 150 && j.claim.待领.some(t => t.id === 弃单.id && t.项 === '赔偿' && t.金额 === 150), JSON.stringify(j.claim).slice(0, 200));
+
+  // 双 ACK 删行：接单者领订金（行仍在），发单人领赔偿（最后一项 → 删行）
+  const 弃单ack = async (who, side, 项) => {
+    const res = await call(post('/order/ack', { id: 弃单.id, who, side, 项 }));
+    return res.status === 200 ? await res.json() : { ok: false, deleted: false, status: res.status, body: await res.text() };
+  };
+  const 领弃单订金 = await 弃单ack('烟测乙', 'maker', '订金');
+  check('乙领订金（行仍在：赔偿未领）', 领弃单订金.ok === true && 领弃单订金.deleted === false, JSON.stringify(领弃单订金));
+  const 领赔偿 = await 弃单ack('烟测甲', 'poster', '赔偿');
+  check('赔偿 ACK 后删行', 领赔偿.deleted === true, JSON.stringify(领赔偿));
+  const 弃单残行 = (await env.MARKET_DB.prepare(`SELECT * FROM orders WHERE id = ?`).bind(弃单.id).all()).results.length;
+  check('弃单 orders 表已无该行', 弃单残行 === 0, `剩 ${弃单残行} 行`);
+
+  // —— 验收评分闭环：客户端在验收成功后上报「1 + 评分」（这里模拟评 3 分 → +4）——
+  await call(post('/shop/score', { name: '烟测铁匠铺', delta: 4 }));
+  r = await call(get('/shop/rank?name=' + encodeURIComponent('烟测铁匠铺')));
+  j = await r.json();
+  check('验收评分后店铺分数（6+4=10）', j.me?.entry?.score === 10, JSON.stringify(j).slice(0, 160));
+
+  if (fail > 弃单段首失败数)
+    console.log(`  [注意] 弃单段有失败步骤，订单 ${弃单.id ?? '(未取得 id)'} 可能滞留飞行中（本地内存库随进程消失；线上滞留由 v4c purge 兜底）`);
 }
 
 console.log(`\n结果: ${pass} 通过 / ${fail} 失败${skipped ? ` / ${skipped} 跳过` : ''}`);
