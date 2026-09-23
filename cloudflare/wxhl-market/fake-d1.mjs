@@ -1,6 +1,6 @@
 // 假 D1：只实现本 Worker 用到的 SQL 子集
 // （CREATE TABLE/INDEX、INSERT [OR REPLACE]／SELECT…ON CONFLICT、UPDATE 条件扣减、
-//   SELECT+WHERE/ORDER BY/LIMIT/OFFSET、COUNT(*)、DELETE）
+//   SELECT+WHERE/ORDER BY/LIMIT/OFFSET、COUNT(*)、DELETE、orders 表的发布/大厅/接单）
 // 供 smoke.mjs、worker.test.js、rank.test.js、buy.test.js **共用** —— 只有这一份。
 //
 // 2026-09-23 合并：此前仓库里同时存在 fake-d1.js 与 fake-d1.mjs 两份假 D1，各自被不同测试引用。
@@ -29,6 +29,24 @@ function rankOrder(a, b) {
 const RANK_TIE_WHERE =
   /^lv > \? OR \(lv = \? AND updated < \?\) OR \(lv = \? AND updated = \? AND name < \?\)$/i;
 
+// ———— orders 表的三条语句 ————
+// 订单段的 SQL 形态很少（就下面这几条），所以**整句**锚定而不是拆 WHERE：
+// 这些语句的占位符全是位置参数，拆着认一旦看漏，参数就静默错位（例如把 maker 当 status），
+// 测试照样绿。整句锚定后，worker 改了 LIMIT / 排序 / 少了守卫条件，假件立刻炸 —— 宁可炸也不要错位。
+// 比对前先把空白归一，免得被换行与缩进差异绕过。
+const oneLine = sql => sql.replace(/\s+/g, ' ').trim();
+/** 大厅：只出「待接单」且排除自己发的，新的在前，最多 100 条 */
+const ORDER_HALL_SQL =
+  /^SELECT \* FROM orders WHERE status = \? AND poster != \? ORDER BY created DESC LIMIT 100$/i;
+/** 接单：WHERE 带 status 守卫，受影响 0 行即「已被接走」—— 并发仲裁点 */
+const ORDER_ACCEPT_SQL =
+  /^UPDATE orders SET maker = \?, status = \?, updated = \? WHERE id = \? AND status = \?$/i;
+/** 发布：maker 是显式 NULL，所以占位符比列数少一个 */
+const ORDER_INSERT_SQL =
+  /^INSERT INTO orders \(id, poster, maker, spec_json, deposit, final, status, created, updated\) VALUES \(\?, \?, NULL, \?, \?, \?, \?, \?, \?\)$/i;
+/** 断言用：查单行的接单人/状态 */
+const ORDER_BY_ID_SQL = /^SELECT maker, status FROM orders WHERE id = \?$/i;
+
 /** 从语句里取 WHERE 片段（去掉 ORDER BY 之后的部分） */
 const whereOf = sql => (sql.split(/WHERE/i)[1] ?? '').split(/ORDER BY/i)[0].trim();
 
@@ -39,6 +57,8 @@ export function makeFakeD1() {
   const ranks = new Map();
   /** 出售记录。主键是**每笔成交各自的 id**（不是挂单 id），同一挂单多次成交互不覆盖 */
   const sales = new Map();
+  /** 工坊订单。主键是订单 id；状态是行上的字段（长流程，不是「有行/无行」） */
+  const orders = new Map();
 
   /** 求值 `列 比较符 ?` 形式的条件；认不出就抛错（见文件头注释） */
   function evalSimpleWhere(row, whereStr, args) {
@@ -101,6 +121,11 @@ export function makeFakeD1() {
       return ok(doomed.length);
     }
     // DELETE FROM earnings WHERE client = ? AND amount = ?
+    // 整句锚定（原来是落到这里的兜底分支）：兜底会把任何**没认出来的 DELETE** 静默当成
+    // 「记账没命中」返回 0 行 —— 那正是文件头警告的假绿形态。订单段下一步会加
+    // `DELETE FROM orders`，不锚死它就会悄悄走进这里、删了跟没删一样而测试全绿。
+    if (!/^DELETE FROM earnings WHERE client = \? AND amount = \?$/i.test(oneLine(sql)))
+      throw new Error(`fakeD1 不认识的 DELETE: 「${sql.slice(0, 60)}…」`);
     const client = args[0];
     if (!earnings.has(client)) return ok(0);
     if (earnings.get(client) !== args[1]) return ok(0);
@@ -111,6 +136,24 @@ export function makeFakeD1() {
   function runSelect(sql, args) {
     if (/FROM listings/i.test(sql)) {
       return { results: page([...listings.values()], sql, args, (a, b) => b.created - a.created).map(r => ({ ...r })) };
+    }
+    if (/FROM orders/i.test(sql)) {
+      const line = oneLine(sql);
+      // 大厅：`!=` 不在 evalSimpleWhere 的支持集里（那个只认 <= >= < > =），所以这两条整句认
+      if (ORDER_HALL_SQL.test(line)) {
+        const [status, exclude] = args;
+        const rows = [...orders.values()]
+          .filter(r => r.status === status && r.poster !== exclude)
+          .sort((a, b) => b.created - a.created);
+        const limit = Number(line.match(/LIMIT (\d+)/i)[1]);
+        return { results: rows.slice(0, limit).map(r => ({ ...r })) };
+      }
+      if (ORDER_BY_ID_SQL.test(line)) {
+        const row = orders.get(args[0]);
+        // 只投影语句点名的两列（真 D1 不会多给）
+        return { results: row ? [{ maker: row.maker, status: row.status }] : [] };
+      }
+      throw new Error(`fakeD1 不认识这个 orders 查询: 「${sql.slice(0, 60)}…」`);
     }
     if (/FROM sales/i.test(sql)) {
       return { results: page([...sales.values()], sql, args, (a, b) => b.created - a.created).map(r => ({ ...r })) };
@@ -197,6 +240,30 @@ export function makeFakeD1() {
               category: a[5], tier_idx: a[6], quality: a[7], item_name: a[8],
               item_json: a[9], qty: a[10], price: a[11], created: a[12], op_json: a[13] ?? null,
             });
+            return ok(1);
+          }
+          // ———— 工坊订单：发布。maker 是显式 NULL，所以绑定的 8 个参数跳过它 ————
+          if (ORDER_INSERT_SQL.test(oneLine(sql))) {
+            const [id, poster, spec_json, deposit, final, status, created, updated] = st._a;
+            orders.set(id, {
+              id, poster, maker: null, spec_json,
+              deposit: Number(deposit), final: Number(final), status,
+              // 本轮不写的列也照真表 schema 补上，行形状与真 D1 一致（后续段要用）
+              item_json: null, rating: null, comp_json: null, poster_ack: 0, maker_ack: 0,
+              created: Number(created), updated: Number(updated),
+            });
+            return ok(1);
+          }
+          // ———— 工坊订单：原子接单（并发仲裁点）————
+          // WHERE 里的 status 就是「还是待接单吗」的守卫：状态不符则一行都不动，
+          // 返回 meta.changes = 0，worker 据此回「手慢了」。
+          if (ORDER_ACCEPT_SQL.test(oneLine(sql))) {
+            const [maker, status, updated, id, need] = st._a;
+            const row = orders.get(id);
+            if (!row || row.status !== need) return ok(0);
+            row.maker = maker;
+            row.status = status;
+            row.updated = Number(updated);
             return ok(1);
           }
           if (/^CREATE/i.test(sql)) return ok(0);

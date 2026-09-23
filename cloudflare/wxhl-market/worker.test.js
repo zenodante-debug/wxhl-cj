@@ -284,3 +284,76 @@ describe('market · 其它', () => {
     expect((await (await worker.fetch(get('/market/listings?limit=1'), e)).json()).listings.length).toBe(1);
   });
 });
+
+// ================================================================
+// 工坊订单（v4a 第一段）：发布 / 大厅 / 原子接单
+// 服务器只中转飞行中订单，交付验收与领取留给后续任务。
+// 本文件顶部已 import worker / makeFakeD1，这里不重复 import。
+// ================================================================
+
+const 需求单 = {
+  名称: '狼牙短剑', 成品类型: '装备', 装备子类: '武器',
+  品质: '金色', 阶位: 2, 效果要求: '带流血', 说明: '越快越好',
+};
+
+async function call(env, path, init) {
+  const req = new Request('https://x.test' + path, init);
+  return worker.fetch(req, env, {});
+}
+const postJson = (body) => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+
+describe('订单 · 发布与大厅', () => {
+  it('发布后出现在大厅，且大厅不含已接单的', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const r = await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }));
+    expect(r.status).toBe(200);
+    const { id } = await r.json();
+    expect(id).toBeTruthy();
+
+    const hall = await (await call(env, '/order/list')).json();
+    expect(hall.orders).toHaveLength(1);
+    expect(hall.orders[0].poster).toBe('甲');
+    expect(hall.orders[0].spec.名称).toBe('狼牙短剑');
+    expect(hall.orders[0].deposit).toBe(300);
+  });
+
+  it('订金非正整数 → 400', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    for (const bad of [0, -5, 1.5]) {
+      const r = await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: bad, final: 100 }));
+      expect(r.status).toBe(400);
+    }
+  });
+
+  it('缺少 poster 或 spec → 400', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    expect((await call(env, '/order/create', postJson({ spec: 需求单, deposit: 1, final: 1 }))).status).toBe(400);
+    expect((await call(env, '/order/create', postJson({ poster: '甲', deposit: 1, final: 1 }))).status).toBe(400);
+  });
+});
+
+describe('订单 · 接单竞态（Review Focus 1）', () => {
+  it('两人同抢，第二个被明确拒绝且不覆盖已接单人', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+
+    const first = await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    expect(first.status).toBe(200);
+
+    const second = await call(env, '/order/accept', postJson({ id, maker: '丙' }));
+    expect(second.status).toBe(400);
+    expect(await second.text()).toContain('已被接走');
+
+    const hall = await (await call(env, '/order/list')).json();
+    expect(hall.orders).toHaveLength(0); // 已接单 → 不再出现在大厅
+
+    const { results } = await env.MARKET_DB.prepare(`SELECT maker, status FROM orders WHERE id = ?`).bind(id).all();
+    expect(results[0].maker).toBe('乙');
+    expect(results[0].status).toBe('已接单');
+  });
+
+  it('接不存在的单 → 400', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    expect((await call(env, '/order/accept', postJson({ id: 'nope', maker: '乙' }))).status).toBe(400);
+  });
+});

@@ -439,6 +439,129 @@ async function ensureRankSchema(env) {
   rankSchemaReady = true;
 }
 
+// ════════════════════════════════════════════════════════════════════════════
+// 工坊订单（v4a 第一段：建表 / 发布 / 大厅 / 原子接单）
+//
+// 第三次重复「独立段」的组织方式（市场 → 排行榜 → 订单）：自带 ensureOrderSchema，
+// 排在 fetch 里 ensureSchema(env) **之前**，三方互不波及。照 ensureRankSchema 的模子复制。
+//
+// 与市场的差别：市场是「钱货两讫」的一次性交易，订单是**长流程**（待接单 → 已接单 →
+// 已交付 → 已完成）。因此状态是行上的一个字段而不是「有行/无行」，
+// 并发仲裁点也从 DELETE 的 affected rows 挪到 UPDATE 的 meta.changes。
+// ════════════════════════════════════════════════════════════════════════════
+
+// ———— D1 建表：订单段自带，与市场/排行榜互不波及 ————
+let orderSchemaReady = false;
+async function ensureOrderSchema(env) {
+  if (orderSchemaReady) return;
+  await env.MARKET_DB.batch([
+    env.MARKET_DB.prepare(
+      `CREATE TABLE IF NOT EXISTS orders (
+         id TEXT PRIMARY KEY,
+         poster TEXT NOT NULL,
+         maker TEXT,
+         spec_json TEXT NOT NULL,
+         deposit INTEGER NOT NULL,
+         final INTEGER NOT NULL,
+         status TEXT NOT NULL,
+         item_json TEXT,
+         rating REAL,
+         comp_json TEXT,
+         poster_ack INTEGER NOT NULL DEFAULT 0,
+         maker_ack INTEGER NOT NULL DEFAULT 0,
+         created INTEGER NOT NULL,
+         updated INTEGER NOT NULL
+       )`,
+    ),
+    env.MARKET_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_status ON orders (status, created DESC)`),
+    env.MARKET_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_poster ON orders (poster)`),
+    env.MARKET_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_orders_maker ON orders (maker)`),
+  ]);
+  orderSchemaReady = true;
+}
+
+/** 成品 JSON 体积上限：与市场同一口径 */
+const ORDER_ITEM_MAX = 4096;
+
+const 订单状态 = { 待接单: '待接单', 已接单: '已接单', 已交付: '已交付', 已完成: '已完成', 已取消: '已取消', 已弃单: '已弃单' };
+
+function newOrderId() {
+  return String(Date.now()).padStart(15, '0') + '-' + Math.random().toString(36).slice(2, 8);
+}
+
+/** 行 → 前端形状（spec_json 解回对象） */
+function toOrderDto(row) {
+  return {
+    id: row.id, poster: row.poster, maker: row.maker,
+    spec: JSON.parse(row.spec_json),
+    deposit: row.deposit, final: row.final, status: row.status,
+    created: row.created, updated: row.updated,
+  };
+}
+
+// ———— 工坊订单: 发单人出钱、接单者出材料与图纸，交付后验收付尾款 ————
+// 服务器只做中转：只留飞行中订单，双方领取后由 /order/ack 删行；不留历史与评价汇总。
+async function handleOrder(url, request, env, cors) {
+  const p = url.pathname;
+  if (!p.startsWith('/order/')) return null;
+  await ensureOrderSchema(env);
+
+  // POST /order/create  { poster, spec, deposit, final }  →  { id }
+  if (p === '/order/create' && request.method === 'POST') {
+    let b;
+    try { b = await request.json(); } catch (_) { return new Response('请求体不是合法 JSON', { status: 400, headers: cors }); }
+    const poster = String(b.poster ?? '').trim();
+    if (!poster) return new Response('缺少发单人姓名', { status: 400, headers: cors });
+    if (!b.spec || typeof b.spec !== 'object') return new Response('缺少需求单', { status: 400, headers: cors });
+    const deposit = Number(b.deposit);
+    const final = Number(b.final);
+    if (!Number.isInteger(deposit) || deposit <= 0) return new Response('订金必须是正整数', { status: 400, headers: cors });
+    if (!Number.isInteger(final) || final < 0) return new Response('尾款必须是非负整数', { status: 400, headers: cors });
+    const spec_json = JSON.stringify(b.spec);
+    if (spec_json.length > ORDER_ITEM_MAX) return new Response('需求单过长', { status: 400, headers: cors });
+
+    const id = newOrderId();
+    const now = Date.now();
+    await withRetry(() =>
+      env.MARKET_DB.prepare(
+        `INSERT INTO orders (id, poster, maker, spec_json, deposit, final, status, created, updated)
+         VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?)`,
+      ).bind(id, poster, spec_json, deposit, final, 订单状态.待接单, now, now).run(),
+    );
+    return new Response(JSON.stringify({ id }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+
+  // GET /order/list?exclude=<姓名>  →  { orders }
+  if (p === '/order/list' && request.method === 'GET') {
+    const exclude = String(url.searchParams.get('exclude') ?? '');
+    const { results } = await env.MARKET_DB.prepare(
+      `SELECT * FROM orders WHERE status = ? AND poster != ? ORDER BY created DESC LIMIT 100`,
+    ).bind(订单状态.待接单, exclude).all();
+    return new Response(JSON.stringify({ orders: (results ?? []).map(toOrderDto) }), {
+      headers: { ...cors, 'Content-Type': 'application/json' },
+    });
+  }
+
+  // POST /order/accept  { id, maker }  →  { ok: true }
+  // 原子接单：WHERE 带上 status，受影响 0 行即说明已被别人接走或被撤销。
+  if (p === '/order/accept' && request.method === 'POST') {
+    let b;
+    try { b = await request.json(); } catch (_) { return new Response('请求体不是合法 JSON', { status: 400, headers: cors }); }
+    const maker = String(b.maker ?? '').trim();
+    if (!maker) return new Response('缺少接单人姓名', { status: 400, headers: cors });
+    const res = await withRetry(() =>
+      env.MARKET_DB.prepare(
+        `UPDATE orders SET maker = ?, status = ?, updated = ? WHERE id = ? AND status = ?`,
+      ).bind(maker, 订单状态.已接单, Date.now(), String(b.id), 订单状态.待接单).run(),
+    );
+    const changed = res?.meta?.changes ?? 0;
+    if (changed === 0) return new Response('手慢了，这单已被接走', { status: 400, headers: cors });
+    return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+
+  return new Response('未知的订单操作', { status: 404, headers: cors });
+}
+
 const RANK_COLS = `name, lv, title, job, updated`;
 const countRanks = async db => Number((await db.prepare(`SELECT COUNT(*) AS n FROM ranks`).first())?.n ?? 0);
 
@@ -613,6 +736,10 @@ export default {
     // 两边任何一方出问题都不会波及另一方。
     const rankRes = await handleRank(url, request, env, cors);
     if (rankRes) return rankRes;
+
+    // 工坊订单自成一段：自带 ensureOrderSchema，同样排在建表之前，与市场/排行榜三方互不波及。
+    const orderRes = await handleOrder(url, request, env, cors);
+    if (orderRes) return orderRes;
 
     // 建表：只在需要访问数据时初始化（未建好就返回明确原因，而不是 1101）
     try {
