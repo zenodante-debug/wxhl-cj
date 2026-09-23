@@ -902,13 +902,31 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
 });
 ```
 
-- [ ] **Step 2: Type-check** — Run: `npx tsc --noEmit`；Expected: `src/wxhl-003/crafting/` 零新增错误
+- [ ] **Step 2: Write the test**（控制器裁定：本级承担"余额不足必须拒绝且零变量变动"，必须钉住）
 
-- [ ] **Step 3: Commit**
+新建 `src/wxhl-003/crafting/order/__tests__/store.test.ts`，**照 `src/wxhl-003/crafting/__tests__/store.test.ts` 的 mock 模式**（`vi.hoisted` + `vi.mock` 掉 `./api`；`getVariables`/`replaceVariables`/`getCurrentMessageId`/`Mvu`/`toastr` 挂 `globalThis`；`setActivePinia(createPinia())`）。注意 **`vi.mock` 的相对路径必须数清层级**（`'../api'` 从 `order/__tests__/` 只到 `order/`，正确）。
+
+必须覆盖：
+- `publish` 订金超过余额 → 返回 false、`toastr.error` 被调、**`经济.UP` 与 `替换写入次数` 均为零变动**（即 `replaceMvuData` 未被调用）
+- `confirm` 尾款超过余额 → 同上（这条最关键：**不能出现"钱不够还验收了"**）
+- `publish` 正常路径 → 扣款正确、`createOrder` 被调用一次
+- `deliver` 体积超限 → 不调用 `deliverOrder`、不改背包
+- `deliver` 正常 → 背包少一件、`deliverOrder` 收到该物品快照
+
+- [ ] **Step 3: Run test to verify it fails**
+
+Run: `pnpm --config.verify-deps-before-run=false test -- src/wxhl-003/crafting/order`
+Expected: FAIL（`useOrderStore` 尚未实现或断言未满足）
+
+- [ ] **Step 4: Type-check + test**
+
+Run: `npx tsc --noEmit` → `crafting/` 零新增错误；`pnpm --config.verify-deps-before-run=false test` → 全绿
+
+- [ ] **Step 5: Commit**
 
 ```bash
-git add src/wxhl-003/crafting/order/store.ts
-git commit -m "feat(wxhl): 订单 store——发布/接单/交付/验收/退货/领取与本地结算"
+git add src/wxhl-003/crafting/order/store.ts src/wxhl-003/crafting/order/__tests__/store.test.ts
+git commit -m "feat(wxhl): 订单 store——发布/接单/交付/验收/退货/领取与本地结算（含经济守卫测试）"
 ```
 
 ---
