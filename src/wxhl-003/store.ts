@@ -61,6 +61,7 @@ import {
   type SettlementComputed,
 } from './settlementRules';
 import { buildSettlementPrompt, buildSettlementEnterPrompt } from './settlementGen';
+import { sanitizeJsonSchema } from './schemaSanitize';
 
 const SK = 'wxhl003_settings';
 
@@ -313,6 +314,8 @@ export function extractJSON(text: string): any {
 
 // ================================================================
 // AI 生成（内置 JSON 验证 + 格式重试）。市场 AI 审核等跨模块复用
+// - 请求侧 schema 先经 sanitizeJsonSchema 净化（zod 的 record/prefault/min 产物 Gemini 不收）
+// - API 以 400 拒收 schema 时自动降级为纯提示词重试（部分模型/中转不支持结构化输出）
 // ================================================================
 export async function aiGenerate(
   cfg: ApiConfig,
@@ -329,6 +332,8 @@ export async function aiGenerate(
   }
 
   let lastErr = '';
+  // 降级标记: API 拒收结构化 schema 后, 后续尝试一律不再携带 json_schema
+  let schema已降级 = false;
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       console.info('[wxhl003] 第' + (attempt + 1) + '次调用 model:', cfg.model);
@@ -339,7 +344,9 @@ export async function aiGenerate(
         should_silence: true,
         max_chat_history: 0,
       };
-      if (jsonSchema) config.json_schema = { name: jsonSchema.name, strict: true, value: jsonSchema.value };
+      if (jsonSchema && !schema已降级) {
+        config.json_schema = { name: jsonSchema.name, strict: true, value: sanitizeJsonSchema(jsonSchema.value) };
+      }
 
       const result = await generateRaw(config);
       const text = typeof result === 'string' ? result : (result as any).content || '';
@@ -368,6 +375,13 @@ export async function aiGenerate(
       }
     } catch (e: any) {
       lastErr = e.message || String(e);
+      // 400/参数类错误大概率是 API 不认结构化输出（如 Gemini 拒收 response_format）,
+      // 去掉 schema 立刻重试 —— 死命令 prompt 与 JSON 提取/校验链路依然兜底
+      if (jsonSchema && !schema已降级 && /\b400\b|bad\s*request|invalid/i.test(lastErr)) {
+        console.warn('[wxhl003] API 拒收结构化 schema, 降级为纯提示词重试');
+        schema已降级 = true;
+        continue;
+      }
       if (attempt < 2 && !jsonSchema) {
         await new Promise(r => setTimeout(r, 2000));
         continue;
