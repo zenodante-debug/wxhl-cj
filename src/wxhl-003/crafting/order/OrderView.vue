@@ -111,7 +111,7 @@
             <option v-for="n in [0, 1, 2, 3, 4, 5]" :key="n" :value="n">评 {{ n }} 分（共 +{{ n + 1 }}）</option>
           </select>
           <button class="ord-mini" :disabled="store.busy || !可验收(o)" @click="验收(o.id)">验收</button>
-          <button class="ord-mini ord-mini-dang" :disabled="store.busy" @click="store.reject(o.id)">退货</button>
+          <button class="ord-mini ord-mini-dang" :disabled="store.busy" @click="退货(o.id)">退货</button>
         </div>
       </div>
 
@@ -265,6 +265,13 @@ async function 验收(id: string): Promise<void> {
   记录刷新.value++; // 验收写了一条本地记录
 }
 
+/** 退货（发单人侧终局）：本地包装一层——store.reject 会 appendHistory 写「退货」记录，不 bump 记录刷新就要等下次动作/重挂载才显示 */
+async function 退货(id: string): Promise<void> {
+  await store.reject(id);
+  craft.syncFromMvu(); // 退货动了账本（订金不退、成品退回走待领）：背包/余额判定要看到新值
+  记录刷新.value++;    // 退货写了一条本地记录
+}
+
 /** 交付物品下拉候选：背包里数量 > 0 且不是图纸的物品名（Ruling N：图纸是生产资料，
  *  这里挡一道让玩家看不到选项；真正的拦截在 store.deliver，绕过 UI 也送不出去）。
  *  交付快照固定 数量=1，由 store.deliver 按死。 */
@@ -297,11 +304,12 @@ async function 弃单(o: 订单): Promise<void> {
   记录刷新.value++;
 }
 
-/** 待领取汇总行：钱按「订金 X + 尾款 Y UP」、物按「N 件物品」（口径与 store.claimAll 的成功播报一致） */
+/** 待领取汇总行：钱按「订金 X + 尾款 Y UP」/「赔偿 Z UP」、物按「N 件物品」（口径与 store.claimAll 的成功播报一致） */
 const 待领汇总 = computed(() => {
   const c = store.claim;
   const parts: string[] = [];
   if (c.deposit > 0 || c.final > 0) parts.push(`订金 ${c.deposit} + 尾款 ${c.final} UP`);
+  if ((c.comp ?? 0) > 0) parts.push(`赔偿 ${c.comp} UP`);
   if ((c.items?.length ?? 0) > 0) parts.push(`${c.items.length} 件物品`);
   return parts.join(' ＋ ');
 });
