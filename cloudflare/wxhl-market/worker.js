@@ -32,7 +32,12 @@ const BASE = {
   饰品: { 白色: [20, 40], 蓝色: [60, 150], 金色: [300, 700], 紫色: [1200, 2500], 银色: [1200, 2500] },
 };
 const PREMIUM = { 白色: 1, 蓝色: 1.0, 金色: 1.5, 紫色: 2.0, 银色: 2.0 };
-const GOODS_BASE = [5, 3000];
+// 允许挂单区间（2026-09-23 用户定稿）：参考价 = 基准价 × 阶位²（系统一）
+//   最低 = 参考价下限 × 50%，最高 = 参考价上限 × 200%（原品质溢价表作废）
+const PRICE_FLOOR_RATE = 0.5;
+const PRICE_CEIL_RATE = 2;
+// 道具按所填品质查武器基准（与前端 GOODS_BASE_CATEGORY 一致）
+const GOODS_BASE_CATEGORY = '武器';
 
 // ———— 装备规则基准（世界书<装备与消耗品系统>主属性加成基准表；银色数值等同紫色） ————
 const BONUS = {
@@ -122,14 +127,18 @@ export function checkPrice(kind, item, sellerTier, price, opsKey, welfareKey) {
     return fail('价格超出允许范围');
   const 运营 = Number(price) === 0 && !!welfareKey && opsKey === welfareKey;
   const tier = String(item?.阶位 ?? '') || String(sellerTier ?? '一阶');
+  const f = tierFactor(tier);
+  if (!f) return fail('阶位无法识别');
 
   if (kind === 'goods') {
     const qty = Number(item?.数量 ?? 1);
     if (!Number.isInteger(qty) || qty < 1 || qty > 999) return fail('数量须为 1~999 的整数');
-    const f = tierFactor(tier);
-    if (!f) return fail('阶位无法识别');
-    const min = GOODS_BASE[0] * f;
-    const max = GOODS_BASE[1] * f;
+    const q = parseQuality(item?.品质);
+    if (!q || q.quality === '银色')
+      return fail('道具需填写品质（白色/蓝色/金色/紫色）——请在上架界面补全后再挂单');
+    const base = BASE[GOODS_BASE_CATEGORY][q.quality];
+    const min = Math.floor(base[0] * f * PRICE_FLOOR_RATE);
+    const max = Math.floor(base[1] * f * PRICE_CEIL_RATE);
     if (!运营 && Number(price) < min) return fail(`价格过低，道具单价不得低于 ${min} UP`, min, max);
     if (Number(price) > max) return fail(`价格过高，道具单价不得超过 ${max} UP`, min, max);
     return { ok: true, min: 运营 ? 0 : min, max, reason: '' };
@@ -140,36 +149,47 @@ export function checkPrice(kind, item, sellerTier, price, opsKey, welfareKey) {
   if (!q || !category || !BASE[category][q.quality]) return fail('装备缺少可定价的品质/类型字段');
   if (q.quality === '白色') return fail('白色装备没有市场，回廊不收录');
   if (q.quality === '银色') return fail('银色装备有价无市，只走剧情，不进入市场');
-  const f = tierFactor(tier);
-  if (!f) return fail('阶位无法识别');
   const ref = BASE[category][q.quality];
-  const min = Math.floor(ref[0] * f);
-  const max = Math.floor(ref[1] * f * (PREMIUM[q.quality] ?? 1));
-  if (!运营 && Number(price) < min) return fail(`价格过低，不得低于基准下限 ${min} UP`, min, max);
-  if (Number(price) > max) return fail(`价格过高，${q.quality}装备不得超过 ${max} UP`, min, max);
+  const min = Math.floor(ref[0] * f * PRICE_FLOOR_RATE);
+  const max = Math.floor(ref[1] * f * PRICE_CEIL_RATE);
+  if (!运营 && Number(price) < min) return fail(`价格过低，不得低于参考价的 50%（${min} UP）`, min, max);
+  if (Number(price) > max) return fail(`价格过高，不得超过参考价的 200%（${max} UP）`, min, max);
   return { ok: true, min: 运营 ? 0 : min, max, reason: '' };
 }
 
 // ———— 装备规则硬校验（世界书<装备效果强度限制>），返回拒绝原因或 null ————
-function validateHard(item, quality, category, tierIdx) {
+// opDeclared = 挂单携带超模声明（真实阶位+费用）：数值超基准与强效果改为收费路径，跳过；
+//              结构类问题（效果>3条、骰面格式）仍无条件拒绝。
+function validateHard(item, quality, category, tierIdx, opDeclared) {
   const eff = item.效果 && typeof item.效果 === 'object' && !Array.isArray(item.效果)
     ? Object.keys(item.效果).length : 0;
   if (eff > 3) return `效果条目数 ${eff} 条超出上限（铁律最多 2 条，破限器上限 3 条）`;
 
-  const 强化加成 = category === '饰品' ? Math.max(0, num(item.强化等级)) : 0;
-  const bench = (BONUS[category][quality] || [])[tierIdx] ?? 0;
-  const 主上限 = bench + 强化加成 + BONUS_TOLERANCE;
-  const 副上限 = Math.floor(bench * 0.5) + 强化加成 + BONUS_TOLERANCE;
-  if (num(item.主属性加成) > 主上限)
-    return `主属性加成 ${num(item.主属性加成)} 超出该阶位基准（约 ${bench}，含容差上限 ${主上限}）`;
-  if (num(item.副属性加成) > 副上限)
-    return `副属性加成 ${num(item.副属性加成)} 超出该阶位基准（含容差上限 ${副上限}）`;
+  if (!opDeclared) {
+    const 强化加成 = category === '饰品' ? Math.max(0, num(item.强化等级)) : 0;
+    const bench = (BONUS[category][quality] || [])[tierIdx] ?? 0;
+    const 主上限 = bench + 强化加成 + BONUS_TOLERANCE;
+    const 副上限 = Math.floor(bench * 0.5) + 强化加成 + BONUS_TOLERANCE;
+    if (num(item.主属性加成) > 主上限)
+      return `主属性加成 ${num(item.主属性加成)} 超出该阶位基准（约 ${bench}，含容差上限 ${主上限}）——该物品属超模物品，需支付超模上架费`;
+    if (num(item.副属性加成) > 副上限)
+      return `副属性加成 ${num(item.副属性加成)} 超出该阶位基准（含容差上限 ${副上限}）——该物品属超模物品，需支付超模上架费`;
 
-  const 防闪上限 = ARMOR_MAX_T1 * (ARMOR_MULT[tierIdx] ?? 1) + ARMOR_TOLERANCE;
-  if (Math.abs(num(item.装备防御)) > 防闪上限)
-    return `装备防御 ${num(item.装备防御)} 超出该阶位合理范围（上限约 ${防闪上限}）`;
-  if (Math.abs(num(item.装备闪避)) > 防闪上限)
-    return `装备闪避 ${num(item.装备闪避)} 超出该阶位合理范围（上限约 ${防闪上限}）`;
+    const 防闪上限 = ARMOR_MAX_T1 * (ARMOR_MULT[tierIdx] ?? 1) + ARMOR_TOLERANCE;
+    if (Math.abs(num(item.装备防御)) > 防闪上限)
+      return `装备防御 ${num(item.装备防御)} 超出该阶位合理范围（上限约 ${防闪上限}）——该物品属超模物品，需支付超模上架费`;
+    if (Math.abs(num(item.装备闪避)) > 防闪上限)
+      return `装备闪避 ${num(item.装备闪避)} 超出该阶位合理范围（上限约 ${防闪上限}）——该物品属超模物品，需支付超模上架费`;
+
+    let text = '';
+    if (item.效果 && typeof item.效果 === 'object')
+      text = Object.entries(item.效果).map(([k, v]) => k + String(v)).join('');
+    else if (typeof item.效果 === 'string') text = item.效果;
+    if (STRONG_RE.test(text)) {
+      const 四阶以上紫银 = tierIdx >= 3 && (quality === '紫色' || quality === '银色');
+      if (!四阶以上紫银) return '效果含必中/无敌/锁血/即死/无限类强力关键词——该物品属超模物品，需支付超模上架费';
+    }
+  }
 
   const dice = String(item.伤害骰 ?? '无').trim();
   if (dice !== '' && dice !== '无') {
@@ -180,21 +200,25 @@ function validateHard(item, quality, category, tierIdx) {
     const count = Number(m[1] || 1);
     if (count > DICE_COUNT_MAX) return `伤害骰「${dice}」骰数 ${count} 超出上限`;
   }
-
-  let text = '';
-  if (item.效果 && typeof item.效果 === 'object')
-    text = Object.entries(item.效果).map(([k, v]) => k + String(v)).join('');
-  else if (typeof item.效果 === 'string') text = item.效果;
-  if (STRONG_RE.test(text)) {
-    const 四阶以上紫银 = tierIdx >= 3 && (quality === '紫色' || quality === '银色');
-    if (!四阶以上紫银) return '效果含必中/无敌/锁血/即死/无限类强力关键词，仅四阶以上紫/银装备可出现';
-  }
   return null;
 }
 
 // ———— 挂单整包校验: 结构防刷 + 服务器自行分类定价 + 装备规则硬校验 ————
 // 返回拒绝原因字符串, null = 通过。同时把服务器认定的分类与筛选列写进 out。
 // opsKey / welfareKey：运营通道密钥（见 checkPrice 注释）
+// 超模声明 b.op = { tier, rp, up }：携带时跳过数值/强效果拒绝（费用由前端从存档代扣，服务器记账展示）
+const TIER_NAMES_ALL = ['一阶', '二阶', '三阶', '四阶', '五阶', '超脱'];
+
+function parseOp(b) {
+  if (b.op === undefined || b.op === null) return { declared: false };
+  const op = b.op;
+  if (typeof op !== 'object' || Array.isArray(op)) return { error: 'op 字段格式非法' };
+  if (!TIER_NAMES_ALL.includes(op.tier)) return { error: 'op.tier 须为 一阶~五阶/超脱' };
+  if (!Number.isInteger(Number(op.rp)) || Number(op.rp) < 0 || Number(op.rp) > 9999999) return { error: 'op.rp 非法' };
+  if (!Number.isInteger(Number(op.up)) || Number(op.up) < 0 || Number(op.up) > 9999999) return { error: 'op.up 非法' };
+  return { declared: true, tier: String(op.tier), rp: Number(op.rp), up: Number(op.up) };
+}
+
 function validateListing(b, out, opsKey, welfareKey) {
   if (!b) return 'bad request';
   if (typeof b.client !== 'string' || b.client.length === 0 || b.client.length > 64) return 'client 缺失或过长';
@@ -205,6 +229,9 @@ function validateListing(b, out, opsKey, welfareKey) {
   if (typeof (b.item.描述 ?? '') !== 'string' || String(b.item.描述).length > 500) return '物品描述过长（上限 500 字）';
   if (!Number.isInteger(Number(b.qty)) || Number(b.qty) < 1 || Number(b.qty) > 999) return '数量须为 1~999 的整数';
   if (JSON.stringify(b.item).length > 4096) return '物品快照过大';
+
+  const op = parseOp(b);
+  if (op.error) return op.error;
 
   const hasMarkers = hasEquipMarkers(b.item);
   const q = parseQuality(b.item.品质);
@@ -217,10 +244,11 @@ function validateListing(b, out, opsKey, welfareKey) {
     if (!chk.ok) return chk.reason;
     const idx = tierIdxOf(tier);
     if (idx === null) return '阶位无法识别';
-    const hard = validateHard(b.item, q.quality, category, idx);
+    const hard = validateHard(b.item, q.quality, category, idx, op.declared);
     if (hard) return hard;
     out.category = category;
     out.tier_idx = idx;
+    out.op = op.declared ? { tier: op.tier, rp: op.rp, up: op.up } : null;
     return null;
   }
   if (hasMarkers) return '物品带装备字段但品质或类型无法识别，无法定价——请补全「品质」与「类型」';
@@ -230,6 +258,7 @@ function validateListing(b, out, opsKey, welfareKey) {
   if (!chk.ok) return chk.reason;
   out.category = '道具';
   out.tier_idx = tierIdxOf(tier);
+  out.op = op.declared ? { tier: op.tier, rp: op.rp, up: op.up } : null;
   return null;
 }
 
@@ -252,7 +281,8 @@ async function ensureSchema(env) {
          item_json TEXT NOT NULL,
          qty INTEGER NOT NULL,
          price INTEGER NOT NULL,
-         created INTEGER NOT NULL
+         created INTEGER NOT NULL,
+         op_json TEXT
        )`,
     ),
     env.MARKET_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_listings_created ON listings (created DESC)`),
@@ -263,12 +293,36 @@ async function ensureSchema(env) {
          amount INTEGER NOT NULL
        )`,
     ),
+    // 出售记录（成交时写入，供卖家在「我的」查看买家名；随挂单删除而保留）
+    env.MARKET_DB.prepare(
+      `CREATE TABLE IF NOT EXISTS sales (
+         id TEXT PRIMARY KEY,
+         client TEXT NOT NULL,
+         buyer TEXT NOT NULL,
+         item_json TEXT NOT NULL,
+         qty INTEGER NOT NULL,
+         price INTEGER NOT NULL,
+         created INTEGER NOT NULL
+       )`,
+    ),
+    env.MARKET_DB.prepare(`CREATE INDEX IF NOT EXISTS idx_sales_client ON sales (client, created DESC)`),
   ]);
+  // 迁移：给**已存在的旧表**补新列（CREATE TABLE IF NOT EXISTS 不会改老表结构）。
+  // 列已存在时 ALTER 会报错，属预期，吞掉即可。
+  const migrations = [`ALTER TABLE listings ADD COLUMN op_json TEXT`];
+  for (const sql of migrations) {
+    try {
+      await env.MARKET_DB.prepare(sql).run();
+    } catch (_) {
+      /* 列已存在 */
+    }
+  }
   schemaReady = true;
 }
 
-/** 行 → 下发给前端的挂单对象（与旧 KV 版字段完全一致，前端零改动） */
+/** 行 → 下发给前端的挂单对象（与旧 KV 版字段完全一致，前端零改动；超模物品多带 op） */
 function rowToListing(r) {
+  const op = r.op_json ? JSON.parse(r.op_json) : null;
   return {
     id: r.id,
     seller: r.seller,
@@ -278,6 +332,7 @@ function rowToListing(r) {
     qty: r.qty,
     price: r.price,
     created: r.created,
+    ...(op ? { op } : {}),
   };
 }
 
@@ -578,8 +633,8 @@ export default {
         const id = String(Date.now()).padStart(15, '0') + '-' + Math.random().toString(36).slice(2, 8);
         await withRetry(() =>
           env.MARKET_DB.prepare(
-            `INSERT INTO listings (id, client, seller, tier, kind, category, tier_idx, quality, item_name, item_json, qty, price, created)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+            `INSERT INTO listings (id, client, seller, tier, kind, category, tier_idx, quality, item_name, item_json, qty, price, created, op_json)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
           )
             .bind(
               id,
@@ -595,6 +650,7 @@ export default {
               Number(b.qty),
               Number(b.price),
               Date.now(),
+              cols.op ? JSON.stringify(cols.op) : null,
             )
             .run(),
         );
@@ -618,7 +674,7 @@ export default {
         if (quality) { where.push('quality = ?'); args.push(quality); }
         const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 50) || 50, 1), 200);
         const sql =
-          `SELECT id, seller, tier, kind, item_json, qty, price, created FROM listings` +
+          `SELECT id, seller, tier, kind, item_json, qty, price, created, op_json FROM listings` +
           (where.length ? ` WHERE ${where.join(' AND ')}` : '') +
           ` ORDER BY created DESC LIMIT ?`;
         const rows = await env.MARKET_DB.prepare(sql).bind(...args, limit).all();
@@ -641,12 +697,18 @@ export default {
           return new Response('own listing', { status: 403, headers: cors });
         }
         const total = Number(row.price) * Number(row.qty);
+        const now = Date.now();
         await withRetry(() =>
           env.MARKET_DB.batch([
             env.MARKET_DB.prepare(
               `INSERT INTO earnings (client, amount) VALUES (?, ?)
                ON CONFLICT(client) DO UPDATE SET amount = amount + excluded.amount`,
             ).bind(row.client, total),
+            // 出售记录：买家名写入，卖家可在「我的」查看
+            env.MARKET_DB.prepare(
+              `INSERT OR REPLACE INTO sales (id, client, buyer, item_json, qty, price, created)
+               VALUES (?, ?, ?, ?, ?, ?, ?)`,
+            ).bind(row.id, row.client, String(buyer ?? '匿名').slice(0, 24), row.item_json, row.qty, row.price, now),
             env.MARKET_DB.prepare(`DELETE FROM listings WHERE id = ?`).bind(row.id),
           ]),
         );
@@ -698,7 +760,7 @@ export default {
         const client = String(url.searchParams.get('client') ?? '').slice(0, 64);
         const earn = await env.MARKET_DB.prepare(`SELECT amount FROM earnings WHERE client = ?`).bind(client).first();
         const rows = await env.MARKET_DB.prepare(
-          `SELECT id, seller, tier, kind, item_json, qty, price, created FROM listings WHERE client = ? ORDER BY created DESC LIMIT 200`,
+          `SELECT id, seller, tier, kind, item_json, qty, price, created, op_json FROM listings WHERE client = ? ORDER BY created DESC LIMIT 200`,
         )
           .bind(client)
           .all();
@@ -709,6 +771,34 @@ export default {
       } catch (e) {
         console.error('[wxhl-market] mine 查询失败', String(e));
         return new Response('摊位查询失败: ' + String(e && e.message ? e.message : e), { status: 500, headers: cors });
+      }
+    }
+
+    // GET /market/sales?client=xxx  →  { sales: [我的出售记录，最近 100 条，含买家名] }
+    if (url.pathname === '/market/sales' && request.method === 'GET') {
+      try {
+        const client = String(url.searchParams.get('client') ?? '').slice(0, 64);
+        const rows = await env.MARKET_DB.prepare(
+          `SELECT id, buyer, item_json, qty, price, created FROM sales WHERE client = ? ORDER BY created DESC LIMIT 100`,
+        )
+          .bind(client)
+          .all();
+        return json(
+          {
+            sales: (rows.results ?? []).map(r => ({
+              id: r.id,
+              buyer: r.buyer,
+              item: JSON.parse(r.item_json),
+              qty: r.qty,
+              price: r.price,
+              created: r.created,
+            })),
+          },
+          { ...cors, 'Cache-Control': 'no-store' },
+        );
+      } catch (e) {
+        console.error('[wxhl-market] sales 查询失败', String(e));
+        return new Response('出售记录查询失败: ' + String(e && e.message ? e.message : e), { status: 500, headers: cors });
       }
     }
 

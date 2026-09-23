@@ -36,11 +36,16 @@ export const BASE: Record<EquipCategory, Record<EquipQuality, [number, number]>>
   饰品: { 白色: [20, 40], 蓝色: [60, 150], 金色: [300, 700], 紫色: [1200, 2500], 银色: [1200, 2500] },
 };
 
-/** 溢价上限倍率（相对基准价上限）：蓝禁溢价、金+50%、紫+100%（银不走市场） */
-const PREMIUM: Record<EquipQuality, number> = { 白色: 1, 蓝色: 1.0, 金色: 1.5, 紫色: 2.0, 银色: 2.0 };
+/**
+ * 允许挂单区间（2026-09-23 用户定稿）：参考价 = 基准价 × 阶位²（系统一）
+ *   最低 = 参考价下限 × 50%，最高 = 参考价上限 × 200%
+ * 原先按品质的溢价表（蓝×1.0/金×1.5/紫×2.0）作废，统一为上下各放宽。
+ */
+export const PRICE_FLOOR_RATE = 0.5;
+export const PRICE_CEIL_RATE = 2;
 
-/** 道具价格区间（UP），× 阶位²；下限盖住弹药(10/一阶)、上限盖住金色职业书(3000/一阶) */
-const GOODS_BASE: [number, number] = [5, 3000];
+/** 道具价格基准（2026-09-23）：与武器同表——道具按所填品质查武器基准，缺品质直接拒绝（要求补全） */
+export const GOODS_BASE_CATEGORY: EquipCategory = '武器';
 
 // ———— 品质归一 ————
 
@@ -173,13 +178,20 @@ export function checkPrice(kind: MarketKind, item: MarketItemSnapshot, sellerTie
   const fail = (reason: string, min = 0, max = 0): PriceCheck => ({ ok: false, min, max, reason });
   if (!Number.isFinite(price) || price < 0 || price > 9_999_999) return fail('价格超出允许范围');
 
+  const 阶位 = priceTierOf(item, sellerTier);
+  const f = tierFactor(阶位);
+  if (!f) return fail('阶位无法识别');
+
   if (kind === 'goods') {
     const qty = Number(item.数量 ?? 1);
     if (!Number.isInteger(qty) || qty < 1 || qty > 999) return fail('数量须为 1~999 的整数');
-    const f = tierFactor(priceTierOf(item, sellerTier));
-    if (!f) return fail('阶位无法识别');
-    const min = GOODS_BASE[0] * f;
-    const max = GOODS_BASE[1] * f;
+    // 道具按所填品质查武器基准；缺品质/不可识别 → 要求补全（玩家在上架界面填写）
+    const parsed = parseQuality(item.品质);
+    if (!parsed || parsed.quality === '银色')
+      return fail('道具需填写品质（白色/蓝色/金色/紫色）——请在上架界面补全后再挂单');
+    const base = BASE[GOODS_BASE_CATEGORY][parsed.quality];
+    const min = Math.floor(base[0] * f * PRICE_FLOOR_RATE);
+    const max = Math.floor(base[1] * f * PRICE_CEIL_RATE);
     if (price < min) return fail(`价格过低，${qty}件道具单价不得低于 ${min} UP`, min, max);
     if (price > max) return fail(`价格过高，道具单价不得超过 ${max} UP`, min, max);
     return { ok: true, min, max, reason: '' };
@@ -192,11 +204,11 @@ export function checkPrice(kind: MarketKind, item: MarketItemSnapshot, sellerTie
     return fail('装备缺少可定价的品质/类型字段');
   if (parsed.quality === '白色') return fail('白色装备没有市场，回廊不收录');
   if (parsed.quality === '银色') return fail('银色装备有价无市，只走剧情，不进入市场');
-  const ref = refRange(parsed.quality, category, priceTierOf(item, sellerTier));
+  const ref = refRange(parsed.quality, category, 阶位);
   if (!ref) return fail('阶位无法识别');
-  const min = Math.floor(ref.min);
-  const max = Math.floor(ref.max * (PREMIUM[parsed.quality] ?? 1));
-  if (price < min) return fail(`价格过低，不得低于基准下限 ${min} UP`, min, max);
-  if (price > max) return fail(`价格过高，${parsed.quality}装备不得超过 ${max} UP`, min, max);
+  const min = Math.floor(ref.min * PRICE_FLOOR_RATE);
+  const max = Math.floor(ref.max * PRICE_CEIL_RATE);
+  if (price < min) return fail(`价格过低，不得低于参考价的 50%（${min} UP）`, min, max);
+  if (price > max) return fail(`价格过高，不得超过参考价的 200%（${max} UP）`, min, max);
   return { ok: true, min, max, reason: '' };
 }

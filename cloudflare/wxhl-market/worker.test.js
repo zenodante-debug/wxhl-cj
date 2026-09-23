@@ -1,61 +1,21 @@
 import { describe, expect, it } from 'vitest';
-import { fakeD1 } from './fake-d1.js';
-import { checkPrice } from './worker.js';
-import worker from './worker.js';
+import worker, { checkPrice } from './worker.js';
+import { makeFakeD1 } from './fake-d1.mjs';
 
 // ================================================================
-// 与前端 priceTable/equipRules 同规则的镜像测试 + 真实存档回归
+// Worker 测试（与 smoke.mjs 同套断言，vitest 形态）
+// 定价口径 2026-09-23：参考价 = 基准价 × 阶位²；允许区间 = [下限×50%, 上限×200%]
+//   道具与武器同表（须填品质）；超模物品需带 op 声明方可上架
 // ================================================================
 
-describe('worker checkPrice（与前端 priceTable 同规则镜像）', () => {
-  it('蓝·武器·二阶 [400,800]，底价=基准下限', () => {
-    expect(checkPrice('equip', { 品质: '蓝色', 类型: '武器', 阶位: '二阶' }, '一阶', 400).ok).toBe(true);
-    expect(checkPrice('equip', { 品质: '蓝色', 类型: '武器', 阶位: '二阶' }, '一阶', 800).ok).toBe(true);
-    expect(checkPrice('equip', { 品质: '蓝色', 类型: '武器', 阶位: '二阶' }, '一阶', 801).ok).toBe(false);
-    expect(checkPrice('equip', { 品质: '蓝色', 类型: '武器', 阶位: '二阶' }, '一阶', 399).ok).toBe(false);
-  });
-  it('金+50% / 紫+100%', () => {
-    expect(checkPrice('equip', { 品质: '金色', 类型: '防具', 阶位: '一阶' }, '一阶', 250).ok).toBe(true);
-    expect(checkPrice('equip', { 品质: '金色', 类型: '防具', 阶位: '一阶' }, '一阶', 900).ok).toBe(true);
-    expect(checkPrice('equip', { 品质: '金色', 类型: '防具', 阶位: '一阶' }, '一阶', 901).ok).toBe(false);
-    expect(checkPrice('equip', { 品质: '紫色', 类型: '饰品', 阶位: '三阶' }, '一阶', 10800).ok).toBe(true);
-    expect(checkPrice('equip', { 品质: '紫色', 类型: '饰品', 阶位: '三阶' }, '一阶', 45000).ok).toBe(true);
-    expect(checkPrice('equip', { 品质: '紫色', 类型: '饰品', 阶位: '三阶' }, '一阶', 45001).ok).toBe(false);
-  });
-  it('白/银拒绝', () => {
-    expect(checkPrice('equip', { 品质: '白色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
-    expect(checkPrice('equip', { 品质: '银色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
-  });
-  it('缺字段拒绝 / 缺阶位回退卖家阶位', () => {
-    expect(checkPrice('equip', { 类型: '武器' }, '一阶', 100).ok).toBe(false);
-    expect(checkPrice('equip', { 品质: '蓝色', 类型: '武器' }, '三阶', 1800).ok).toBe(true);
-  });
-  it('goods [5,3000]×阶位²，物品阶位优先', () => {
-    expect(checkPrice('goods', { 数量: 5, 阶位: '一阶' }, '一阶', 15).ok).toBe(true);
-    expect(checkPrice('goods', { 数量: 5, 阶位: '一阶' }, '五阶', 3000).ok).toBe(true); // 物品一阶封顶3000
-    expect(checkPrice('goods', { 数量: 5, 阶位: '一阶' }, '五阶', 3001).ok).toBe(false);
-    expect(checkPrice('goods', { 数量: 5 }, '五阶', 50000).ok).toBe(true); // 无阶位按卖家五阶 [125,75000]
-    expect(checkPrice('goods', { 数量: 5 }, '五阶', 80000).ok).toBe(false);
-    expect(checkPrice('goods', { 数量: 5, 阶位: '一阶' }, '一阶', 4).ok).toBe(false);
-    expect(checkPrice('goods', { 数量: 1000 }, '一阶', 15).ok).toBe(false); // 数量上限 999（支持 50 发子弹整组出售）
-    expect(checkPrice('goods', { 数量: 999 }, '一阶', 15).ok).toBe(true);
-  });
-});
+const env = () => ({ MARKET_DB: makeFakeD1() });
+const post = (p, b) =>
+  new Request('https://t.local' + p, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
+const get = p => new Request('https://t.local' + p);
 
-// ———— 六接口（假 D1 环境） ————
-
-const env = () => ({ MARKET_DB: fakeD1() });
-const post = (path, body) =>
-  new Request('https://test.local' + path, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body),
-  });
-const get = path => new Request('https://test.local' + path);
-
-/** 真实存档风格：夜翼披风（躯干_极轻·蓝色·一阶，基准防具蓝一阶 [50,150]） */
-const 披风挂单 = {
-  client: 'seller1', seller: '测试甲', tier: '一阶', kind: 'equip',
+/** 真实存档：夜翼披风（蓝·防具·一阶 → 参考[50,150] → 允许[25,300]） */
+const 披风 = {
+  client: 'c1', seller: '测试甲', tier: '一阶', kind: 'equip',
   item: {
     名称: '夜翼披风', 类型: '躯干_极轻', 品质: '蓝色', 阶位: '一阶', 穿戴门槛: 'AGI≥7',
     强化等级: 0, 伤害骰: '无', 倍率: 0, 主属性: 'AGI', 副属性: 'PER', 主属性加成: 0,
@@ -66,133 +26,205 @@ const 披风挂单 = {
   qty: 1, price: 100,
 };
 
-describe('worker 六接口 · 真实存档物品', () => {
-  it('夜翼披风上架成功且服务器认定 kind=equip', async () => {
+describe('checkPrice · 与前端同规则', () => {
+  it('蓝武二阶：参考[400,800] → 允许[200,1600]', () => {
+    const w = { 品质: '蓝色', 类型: '武器', 阶位: '二阶' };
+    expect(checkPrice('equip', w, '一阶', 200).ok).toBe(true);
+    expect(checkPrice('equip', w, '一阶', 1600).ok).toBe(true);
+    expect(checkPrice('equip', w, '一阶', 199).ok).toBe(false);
+    expect(checkPrice('equip', w, '一阶', 1601).ok).toBe(false);
+  });
+  it('白装/银装拒绝', () => {
+    expect(checkPrice('equip', { 品质: '白色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
+    expect(checkPrice('equip', { 品质: '银色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
+  });
+  it('道具与武器同表：蓝品质一阶 = [50,400]', () => {
+    expect(checkPrice('goods', { 品质: '蓝色', 数量: 5, 阶位: '一阶' }, '一阶', 50).ok).toBe(true);
+    expect(checkPrice('goods', { 品质: '蓝色', 数量: 5, 阶位: '一阶' }, '一阶', 400).ok).toBe(true);
+    expect(checkPrice('goods', { 品质: '蓝色', 数量: 5, 阶位: '一阶' }, '一阶', 15).ok).toBe(false);
+  });
+  it('道具缺品质/银色 → 拒绝（要求补全）', () => {
+    expect(checkPrice('goods', { 数量: 5, 阶位: '一阶' }, '一阶', 100).ok).toBe(false);
+    expect(checkPrice('goods', { 品质: '特殊', 数量: 5, 阶位: '一阶' }, '一阶', 100).ok).toBe(false);
+    expect(checkPrice('goods', { 品质: '银色', 数量: 5, 阶位: '一阶' }, '一阶', 5000).ok).toBe(false);
+  });
+  it('白品质道具一阶 = [15,120]（弹药等便宜消耗品）', () => {
+    const ammo = { 品质: '白色', 数量: 50, 阶位: '一阶' };
+    expect(checkPrice('goods', ammo, '一阶', 15).ok).toBe(true);
+    expect(checkPrice('goods', ammo, '一阶', 120).ok).toBe(true);
+    expect(checkPrice('goods', ammo, '一阶', 14).ok).toBe(false);
+  });
+});
+
+describe('market/list · 上架与拒绝', () => {
+  it('真实装备 100 UP 上架成功，服务器认定 kind=equip', async () => {
     const e = env();
-    const res = await worker.fetch(post('/market/list', 披风挂单), e);
+    const res = await worker.fetch(post('/market/list', 披风), e);
     expect(res.status).toBe(200);
     const { id } = await res.json();
     const browse = await (await worker.fetch(get('/market/listings'), e)).json();
     const l = browse.listings.find(x => x.id === id);
-    expect(l).toBeTruthy();
     expect(l.kind).toBe('equip');
-    expect(l.item.名称).toBe('夜翼披风');
+    expect(l.item.效果.夜幕隐匿).toBeDefined();
+    expect(l.client).toBeUndefined(); // 不下发房主标识
   });
 
-  it('防具蓝装一阶超价（>150）被拒', async () => {
+  it('价格边界：25/300 可挂，24/301 拒', async () => {
     const e = env();
-    const res = await worker.fetch(post('/market/list', { ...披风挂单, price: 200 }), e);
+    const probe = { ...披风, client: 'cProbe' };
+    expect((await worker.fetch(post('/market/list', { ...probe, price: 25 }), e)).status).toBe(200);
+    expect((await worker.fetch(post('/market/list', { ...probe, price: 300 }), e)).status).toBe(200);
+    expect((await worker.fetch(post('/market/list', { ...probe, price: 24 }), e)).status).toBe(400);
+    const res = await worker.fetch(post('/market/list', { ...probe, price: 301 }), e);
     expect(res.status).toBe(400);
-    expect(await res.text()).toContain('不得超过');
+    expect(await res.text()).toContain('200%');
   });
 
-  it('防具蓝装一阶低于基准下限（<50）被拒', async () => {
+  it('效果>3条 → 拒（结构问题，op 也不能放行）', async () => {
     const e = env();
-    const res = await worker.fetch(post('/market/list', { ...披风挂单, price: 40 }), e);
+    const item = { ...披风.item, 效果: { a: '1', b: '2', c: '3', d: '4' } };
+    expect((await worker.fetch(post('/market/list', { ...披风, item }), e)).status).toBe(400);
+    expect((await worker.fetch(post('/market/list', { ...披风, item, op: { tier: '超脱', rp: 1, up: 1 } }), e)).status).toBe(400);
+  });
+
+  it('数值超模：未声明 op → 拒并提示超模费；声明 op → 放行且落库', async () => {
+    const e = env();
+    const item = { ...披风.item, 主属性加成: 20 }; // 蓝·防具·一阶基准 0，容差 2 → 超模
+    const res = await worker.fetch(post('/market/list', { ...披风, client: 'cOp', item }), e);
     expect(res.status).toBe(400);
-    expect(await res.text()).toContain('低于');
-  });
+    expect(await res.text()).toContain('超模');
 
-  it('效果条目 >3 被拒（铁律2条/破限器3条）', async () => {
-    const e = env();
-    const item = { ...披风挂单.item, 效果: { 一: 'a', 二: 'b', 三: 'c', 四: 'd' } };
-    const res = await worker.fetch(post('/market/list', { ...披风挂单, item }), e);
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain('效果条目');
-  });
-
-  it('主属性加成超基准被拒（蓝·防具·一阶基准0，容差2）', async () => {
-    const e = env();
-    const item = { ...披风挂单.item, 主属性加成: 5 };
-    const res = await worker.fetch(post('/market/list', { ...披风挂单, item }), e);
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain('主属性加成');
-  });
-
-  it('低阶装备含"必中"类强力关键词被拒', async () => {
-    const e = env();
-    const item = { ...披风挂单.item, 效果: { 必中打击: '攻击必定命中。', 滞空滑翔: '减伤。' } };
-    const res = await worker.fetch(post('/market/list', { ...披风挂单, item }), e);
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain('必中');
-  });
-
-  it('伪装防护：客户端传 kind=goods 的装备仍按装备定价', async () => {
-    const e = env();
-    // 夜翼披风传成 goods 并试图按道具区间挂 2500（防具蓝一阶上限只有 150）
-    const res = await worker.fetch(post('/market/list', { ...披风挂单, kind: 'goods', price: 2500 }), e);
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain('不得超过');
-  });
-
-  it('剥离属性字段伪装道具（品质+类型保留）仍按装备定价', async () => {
-    const e = env();
-    // 蓝武二阶上限 800；剥离全部属性字段后谎称道具挂 5000（道具区间二阶可到 12000）
-    const res = await worker.fetch(post('/market/list', {
-      client: 'seller1', seller: '测试甲', tier: '二阶', kind: 'goods',
-      item: { 名称: '制式长刀', 品质: '蓝色', 类型: '武器', 阶位: '二阶' },
-      qty: 1, price: 5000,
-    }), e);
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain('不得超过');
-  });
-
-  it('带装备字段但品质无法识别 → 拒绝', async () => {
-    const e = env();
-    const item = { ...披风挂单.item, 品质: '特殊' };
-    const res = await worker.fetch(post('/market/list', { ...披风挂单, item, kind: 'goods' }), e);
-    expect(res.status).toBe(400);
-    expect(await res.text()).toContain('品质');
-  });
-
-  it('消耗品（有品质无装备字段）走道具区间，服务器认定 kind=goods', async () => {
-    const e = env();
-    const res = await worker.fetch(post('/market/list', {
-      client: 'seller1', seller: '测试甲', tier: '一阶', kind: 'equip', // 客户端谎称装备也没用
-      item: { 名称: '圣水凝晶', 品质: '蓝色', 类型: '消耗品药剂', 阶位: '一阶', 描述: '恢复药剂', 数量: 10, 效果: { 纯净恢复: '回血。' } },
-      qty: 10, price: 15,
-    }), e);
-    expect(res.status).toBe(200);
+    const ok = await worker.fetch(
+      post('/market/list', { ...披风, client: 'cOp', item, op: { tier: '超脱', rp: 2250, up: 2250000 } }),
+      e,
+    );
+    expect(ok.status).toBe(200);
+    const { id } = await ok.json();
     const browse = await (await worker.fetch(get('/market/listings'), e)).json();
-    expect(browse.listings[0].kind).toBe('goods');
+    expect(browse.listings.find(x => x.id === id).op).toEqual({ tier: '超脱', rp: 2250, up: 2250000 });
   });
 
-  it('buy/cancel/collect/mine 全流程', async () => {
+  it('op 字段非法 → 拒', async () => {
     const e = env();
-    let res = await worker.fetch(post('/market/list', 披风挂单), e);
-    const { id } = await res.json();
-    // 自己买自己 → 403
-    res = await worker.fetch(post('/market/buy', { id, buyer: '测试甲', client: 'seller1' }), e);
-    expect(res.status).toBe(403);
-    // 买家购买
-    res = await worker.fetch(post('/market/buy', { id, buyer: '测试乙', client: 'buyer1' }), e);
-    expect(res.status).toBe(200);
-    // 重复购买 → 404
-    res = await worker.fetch(post('/market/buy', { id, buyer: '测试丙', client: 'buyer2' }), e);
-    expect(res.status).toBe(404);
-    // 卖家货款挂账 → 领取 → 再领 0
-    res = await worker.fetch(get('/market/mine?client=seller1'), e);
-    expect((await res.json()).pending).toBe(100);
-    res = await worker.fetch(post('/market/collect', { client: 'seller1' }), e);
-    expect((await res.json()).gained).toBe(100);
-    res = await worker.fetch(post('/market/collect', { client: 'seller1' }), e);
-    expect((await res.json()).gained).toBe(0);
+    expect((await worker.fetch(post('/market/list', { ...披风, op: { tier: '不存在', rp: 1, up: 1 } }), e)).status).toBe(400);
+    expect((await worker.fetch(post('/market/list', { ...披风, op: { tier: '超脱', rp: -1, up: 1 } }), e)).status).toBe(400);
   });
 
-  it('cancel：只有卖家本人能下架', async () => {
+  it('防伪装：kind 由服务器按物品字段认定', async () => {
     const e = env();
-    let res = await worker.fetch(post('/market/list', 披风挂单), e);
-    const { id } = await res.json();
-    res = await worker.fetch(post('/market/cancel', { id, client: 'someoneelse' }), e);
-    expect(res.status).toBe(403);
-    res = await worker.fetch(post('/market/cancel', { id, client: 'seller1' }), e);
-    expect(res.status).toBe(200);
-    res = await worker.fetch(get('/market/listings'), e);
-    expect((await res.json()).listings.some(l => l.id === id)).toBe(false);
+    // 装备谎称道具并按道具区间挂高价
+    expect((await worker.fetch(post('/market/list', { ...披风, kind: 'goods', price: 2500 }), e)).status).toBe(400);
+    // 剥离属性字段、只留品质+类型 → 仍按装备定价
+    const stripped = { 名称: '制式长刀', 品质: '蓝色', 类型: '武器', 阶位: '二阶' };
+    expect((await worker.fetch(post('/market/list', { ...披风, kind: 'goods', tier: '二阶', item: stripped, price: 5000 }), e)).status).toBe(400);
   });
 
+  it('带装备字段但品质不可识别 → 拒', async () => {
+    const e = env();
+    const item = { ...披风.item, 品质: '特殊' };
+    expect((await worker.fetch(post('/market/list', { ...披风, item, kind: 'goods' }), e)).status).toBe(400);
+  });
+
+  it('道具：白品质弹药可挂、缺品质被拒', async () => {
+    const e = env();
+    const ammo = {
+      client: 'c9', seller: '测试甲', tier: '一阶', kind: 'goods',
+      item: { 名称: '穿甲弹药', 类型: '弹药', 品质: '白色', 阶位: '一阶', 描述: '20发一组', 数量: 50 },
+      qty: 50, price: 15,
+    };
+    const ok = await worker.fetch(post('/market/list', ammo), e);
+    expect(ok.status).toBe(200);
+    const noQ = await worker.fetch(
+      post('/market/list', { ...ammo, item: { 名称: '神秘材料', 阶位: '一阶', 数量: 3 } }),
+      e,
+    );
+    expect(noQ.status).toBe(400);
+    expect(await noQ.text()).toContain('品质');
+  });
+});
+
+describe('market · 购买/出售记录/货款/下架', () => {
+  it('购买写出售记录（含买家名），卖家挂账总价', async () => {
+    const e = env();
+    const { id } = await (await worker.fetch(post('/market/list', 披风), e)).json();
+    expect((await worker.fetch(post('/market/buy', { id, buyer: '测试甲', client: 'c1' }), e)).status).toBe(403); // 自买
+    expect((await worker.fetch(post('/market/buy', { id, buyer: '测试乙', client: 'c2' }), e)).status).toBe(200);
+    expect((await worker.fetch(post('/market/buy', { id, buyer: '测试丙', client: 'c3' }), e)).status).toBe(404); // 已售
+
+    const mine = await (await worker.fetch(get('/market/mine?client=c1'), e)).json();
+    expect(mine.pending).toBe(100);
+    expect(mine.listings.length).toBe(0);
+
+    const sold = await (await worker.fetch(get('/market/sales?client=c1'), e)).json();
+    expect(sold.sales.length).toBe(1);
+    expect(sold.sales[0].buyer).toBe('测试乙');
+    expect(sold.sales[0].item.名称).toBe('夜翼披风');
+    expect(sold.sales[0].qty).toBe(1);
+    expect(sold.sales[0].price).toBe(100);
+
+    // 领取后清零，再领为 0
+    expect((await (await worker.fetch(post('/market/collect', { client: 'c1' }), e)).json()).gained).toBe(100);
+    expect((await (await worker.fetch(post('/market/collect', { client: 'c1' }), e)).json()).gained).toBe(0);
+  });
+
+  it('多件整组：单价 × 数量 = 货款', async () => {
+    const e = env();
+    const { id } = await (
+      await worker.fetch(
+        post('/market/list', {
+          client: 'c9', seller: '测试甲', tier: '一阶', kind: 'goods',
+          item: { 名称: '穿甲弹药', 品质: '白色', 阶位: '一阶', 数量: 50, 描述: 'x' },
+          qty: 50, price: 20,
+        }),
+        e,
+      )
+    ).json();
+    expect((await worker.fetch(post('/market/buy', { id, buyer: '测试乙', client: 'c2' }), e)).status).toBe(200);
+    expect((await (await worker.fetch(get('/market/mine?client=c9'), e)).json()).pending).toBe(1000);
+  });
+
+  it('下架：只有卖家本人能下架', async () => {
+    const e = env();
+    const { id } = await (await worker.fetch(post('/market/list', 披风), e)).json();
+    expect((await worker.fetch(post('/market/cancel', { id, client: '别人' }), e)).status).toBe(403);
+    expect((await worker.fetch(post('/market/cancel', { id, client: 'c1' }), e)).status).toBe(200);
+    const browse = await (await worker.fetch(get('/market/listings'), e)).json();
+    expect(browse.listings.some(l => l.id === id)).toBe(false);
+  });
+});
+
+describe('market · 运营通道（0 UP 福利）', () => {
+  const 福利券 = {
+    client: 'welfare', seller: '无由回廊', tier: '一阶', kind: 'goods',
+    item: { 名称: '十倍界王拳体验卡', 品质: '白色', 阶位: '一阶', 数量: 1, 描述: '福利卡' },
+    qty: 1, price: 0,
+  };
+  it('无密钥/密钥错误 → 拒；密钥正确 → 放行', async () => {
+    const e = env();
+    const eKey = { MARKET_DB: e.MARKET_DB, WELFARE_KEY: 'secret' };
+    expect((await worker.fetch(post('/market/list', 福利券), e)).status).toBe(400);
+    expect((await worker.fetch(post('/market/list', { ...福利券, opsKey: 'wrong' }), eKey)).status).toBe(400);
+    const ok = await worker.fetch(post('/market/list', { ...福利券, opsKey: 'secret' }), eKey);
+    expect(ok.status).toBe(200);
+    const { id } = await ok.json();
+    expect((await worker.fetch(post('/market/buy', { id, buyer: '测试乙', client: 'c2' }), e)).status).toBe(200);
+    expect((await (await worker.fetch(get('/market/mine?client=welfare'), e)).json()).pending).toBe(0); // 0 元单无货款
+  });
+  it('未配置 WELFARE_KEY 时，带 opsKey 也拒', async () => {
+    const e = env();
+    expect((await worker.fetch(post('/market/list', { ...福利券, opsKey: 'secret' }), e)).status).toBe(400);
+  });
+});
+
+describe('market · 其它', () => {
   it('未知路径 404', async () => {
-    const res = await worker.fetch(get('/nope'), env());
-    expect(res.status).toBe(404);
+    expect((await worker.fetch(get('/nope'), env())).status).toBe(404);
+  });
+  it('服务端筛选 category/tier/quality/limit', async () => {
+    const e = env();
+    await worker.fetch(post('/market/list', 披风), e);
+    expect((await (await worker.fetch(get('/market/listings?category=防具&tier=0&quality=蓝色'), e)).json()).listings.length).toBe(1);
+    expect((await (await worker.fetch(get('/market/listings?category=武器'), e)).json()).listings.length).toBe(0);
+    expect((await (await worker.fetch(get('/market/listings?limit=1'), e)).json()).listings.length).toBe(1);
   });
 });

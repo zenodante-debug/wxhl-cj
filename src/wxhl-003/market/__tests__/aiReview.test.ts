@@ -8,21 +8,24 @@ const 蓝武 = {
 const 药剂 = { 名称: '基础治疗药剂', 描述: '恢复 30% 生命。', 数量: 5, 类型: '消耗品药剂', 阶位: '一阶' };
 
 describe('buildReviewPrompt', () => {
-  it('单件：包含物品与两道审核的规则关键词', () => {
-    const p = buildReviewPrompt([{ item: 蓝武, kind: 'equip' }]);
+  it('单件：包含物品与两道审核的规则关键词 + 真实阶位判定要求', () => {
+    const p = buildReviewPrompt([{ item: 蓝武, kind: 'equip', nominalIdx: 1 }]);
     expect(p).toContain('制式长刀');
     expect(p).toContain('规则审核');
     expect(p).toContain('红线审核');
     expect(p).toContain('政治敏感');
     expect(p).toContain('NSFW');
     expect(p).toContain('常驻数值基准'); // 装备口径
+    expect(p).toContain('真实阶位');
+    expect(p).toContain('超脱');
     expect(p).toContain('共 1 件');
+    expect(p).toContain('名义二阶');
   });
 
   it('多件：一次审多件，列出全部物品并要求逐件结论', () => {
     const p = buildReviewPrompt([
-      { item: 蓝武, kind: 'equip' },
-      { item: 药剂, kind: 'goods' },
+      { item: 蓝武, kind: 'equip', nominalIdx: 1 },
+      { item: 药剂, kind: 'goods', nominalIdx: 0 },
     ]);
     expect(p).toContain('共 2 件');
     expect(p).toContain('制式长刀');
@@ -32,32 +35,45 @@ describe('buildReviewPrompt', () => {
     expect(p).toContain('results');
   });
 
-  it('标注口径决定是否附装备基准：全标道具时不出现数值基准', () => {
-    const goods = buildReviewPrompt([{ item: 药剂, kind: 'goods' }]);
+  it('标注口径决定规则段：全标道具时不出现装备数值基准', () => {
+    const goods = buildReviewPrompt([{ item: 药剂, kind: 'goods', nominalIdx: 0 }]);
     expect(goods).not.toContain('常驻数值基准');
     expect(goods).toContain('红线审核');
   });
 
-  it('混批时任一装备即附装备规则段（逐件标注在清单里体现）', () => {
+  it('混批时两段规则都给（逐件标注在清单里体现）', () => {
     const p = buildReviewPrompt([
-      { item: 药剂, kind: 'goods' },
-      { item: 蓝武, kind: 'equip' },
+      { item: 药剂, kind: 'goods', nominalIdx: 0 },
+      { item: 蓝武, kind: 'equip', nominalIdx: 1 },
     ]);
     expect(p).toContain('常驻数值基准');
-    expect(p).toContain('（道具）');
-    expect(p).toContain('（装备）');
+    expect(p).toContain('装备');
+    expect(p).toContain('道具');
   });
 });
 
-describe('reviewVerdict · 单件归一', () => {
-  it('通过 / 不通过带理由 / 不通过无理由兜底', () => {
-    expect(reviewVerdict({ pass: true, reasons: [] })).toEqual({ pass: true, reasons: [] });
-    expect(reviewVerdict({ pass: false, reasons: ['效果数值超基准'] }).reasons).toEqual(['效果数值超基准']);
-    const noReason = reviewVerdict({ pass: false, reasons: [] });
+describe('reviewVerdict · 单件归一（含真实阶位）', () => {
+  it('合规：realTier 解析为下标', () => {
+    expect(reviewVerdict({ pass: true, reasons: [], realTier: '二阶', opPoints: [] })).toEqual({
+      pass: true, reasons: [], realIdx: 1, opPoints: [],
+    });
+  });
+  it('超模：realTier=超脱 + 超模点', () => {
+    const v = reviewVerdict({ pass: true, reasons: [], realTier: '超脱', opPoints: ['无限资源倒转'] });
+    expect(v.pass).toBe(true);
+    expect(v.realIdx).toBe(5);
+    expect(v.opPoints).toEqual(['无限资源倒转']);
+  });
+  it('不通过带理由 / 不通过无理由兜底', () => {
+    const v = reviewVerdict({ pass: false, reasons: ['描述含敏感内容'], realTier: '一阶', opPoints: [] });
+    expect(v.pass).toBe(false);
+    expect(v.reasons).toEqual(['描述含敏感内容']);
+    const noReason = reviewVerdict({ pass: false, reasons: [], realTier: '一阶', opPoints: [] });
     expect(noReason.reasons[0]).toContain('未给出');
   });
-  it('理由规整为字符串并去空', () => {
-    expect(reviewVerdict({ pass: false, reasons: ['  ', 123, '正常理由'] }).reasons).toEqual(['123', '正常理由']);
+  it('realTier 无法识别 → realIdx=null（由调用方回退名义阶位）', () => {
+    expect(reviewVerdict({ pass: true, reasons: [], realTier: '???', opPoints: [] }).realIdx).toBeNull();
+    expect(reviewVerdict({ pass: true, reasons: [], opPoints: [] }).realIdx).toBeNull();
   });
   it('格式垃圾 → 抛错（fail-closed）', () => {
     expect(() => reviewVerdict(null)).toThrow();
@@ -70,8 +86,8 @@ describe('reviewVerdicts · 批量归一', () => {
   it('按名称映射结论', () => {
     const m = reviewVerdicts(
       { results: [
-        { 名称: '制式长刀', pass: true, reasons: [] },
-        { 名称: '基础治疗药剂', pass: false, reasons: ['描述含敏感内容'] },
+        { 名称: '制式长刀', pass: true, reasons: [], realTier: '二阶', opPoints: [] },
+        { 名称: '基础治疗药剂', pass: false, reasons: ['描述含敏感内容'], realTier: '一阶', opPoints: [] },
       ] },
       ['制式长刀', '基础治疗药剂'],
     );
@@ -81,13 +97,13 @@ describe('reviewVerdicts · 批量归一', () => {
   });
 
   it('接受裸数组', () => {
-    const m = reviewVerdicts([{ 名称: 'A', pass: true, reasons: [] }], ['A']);
+    const m = reviewVerdicts([{ 名称: 'A', pass: true, reasons: [], realTier: '一阶', opPoints: [] }], ['A']);
     expect(m.get('A')!.pass).toBe(true);
   });
 
   it('有物品没被审到 → 抛错（绝不放行未审物品）', () => {
     expect(() =>
-      reviewVerdicts({ results: [{ 名称: '制式长刀', pass: true, reasons: [] }] }, ['制式长刀', '漏审的刀']),
+      reviewVerdicts({ results: [{ 名称: '制式长刀', pass: true, reasons: [], realTier: '二阶', opPoints: [] }] }, ['制式长刀', '漏审的刀']),
     ).toThrow(/漏审的刀/);
   });
 
@@ -98,7 +114,7 @@ describe('reviewVerdicts · 批量归一', () => {
 
   it('单行格式异常按缺失处理（触发缺失检查）', () => {
     expect(() =>
-      reviewVerdicts({ results: [{ 名称: 'A', pass: 'yes', reasons: [] }] }, ['A']),
+      reviewVerdicts({ results: [{ 名称: 'A', pass: 'yes', reasons: [], realTier: '一阶', opPoints: [] }] }, ['A']),
     ).toThrow(/未覆盖/);
   });
 });

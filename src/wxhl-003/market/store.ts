@@ -6,10 +6,12 @@ import {
   createListing,
   fetchListings,
   fetchMine,
+  fetchSales,
   totalPrice,
   type Listing,
+  type SaleRecord,
 } from './api';
-import type { MarketItemSnapshot } from './priceTable';
+import { classify, type MarketItemSnapshot } from './priceTable';
 import {
   buildReviewPrompt,
   getCachedReview,
@@ -19,12 +21,15 @@ import {
   type ReviewTarget,
   type ReviewVerdict,
 } from './aiReview';
+import { assessDeterministic, baseUpOf, nominalIdxOf, opFeeFor, realTierName } from './fee';
+import { useMarketNotices } from './notify';
 import { aiGenerate, extractJSON, getActiveCfg, useForumStore } from '../store';
 
 // ================================================================
-// 无限回廊 · 自由市场 store
+// 无由回廊 · 自由市场 store
 // 结算顺序原则：本地能先校验的先校验（余额/数量），服务器失败一律回滚本地；
 // Mvu 读写严格照 store.ts writeToSave 模式（楼层探测 → _.set → replaceMvuData → 回读校验）。
+// 上架为两阶段：prepareSell（AI 审核+算税/超模费，不碰变量）→ 用户确认 → commitSell（执行+扣费）。
 // ================================================================
 
 /** 楼层探测：全局脚本 iframe 无楼层上下文时回退最新楼层（与 store.ts 一致） */
@@ -60,9 +65,44 @@ async function commit(mvu: any, mid: number | 'latest', checks: [string[], unkno
   }
 }
 
+// ==================== 上架两阶段的数据结构 ====================
+
+export interface SellPrepItem {
+  name: string;
+  snapshot: MarketItemSnapshot;
+  kind: 'equip' | 'goods';
+  qty: number;
+  price: number;
+  /** false = 红线/结构被拒，不可上架 */
+  ok: boolean;
+  reasons: string[];
+  /** 上架税 = ceil(总价×20%)，0 元单免税 */
+  tax: number;
+  /** 超模费（效果真实阶位高于名义阶位时） */
+  op: { realTier: string; realIdx: number; rp: number; up: number; points: string[] } | null;
+  /** 传给服务器的超模声明 */
+  opField?: { tier: string; rp: number; up: number };
+}
+
+export interface SellPrep {
+  items: SellPrepItem[];
+  listable: SellPrepItem[];
+  totalTax: number;
+  totalOpUp: number;
+  totalOpRp: number;
+  /** 需支付的 UP = 税 + 超模 UP 费 */
+  upNeeded: number;
+  /** 需支付的 RP = 超模 RP 费 */
+  rpNeeded: number;
+  upHave: number;
+  rpHave: number;
+  affordable: boolean;
+}
+
 export const useMarketStore = defineStore('wxhl003-market', () => {
   const listings = ref<Listing[]>([]);
   const myListings = ref<Listing[]>([]);
+  const sales = ref<SaleRecord[]>([]);
   const pending = ref(0);
   /** 跨 app 联动：其他 app（如工坊）要求市场打开并预选上架物品时写入物品名 */
   const pendingSell = ref('');
@@ -78,7 +118,11 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
   const playerName = ref('无名契约者');
   const playerTier = ref('一阶');
   const playerUP = ref(0);
+  const playerRP = ref(0);
   const playerBag = ref<Bag>({});
+
+  const noticesApi = useMarketNotices();
+  const unread = computed(() => noticesApi.notices.value.filter(n => !n.read).length);
 
   function syncFromMvu(): boolean {
     const r = readContractor();
@@ -89,6 +133,7 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     playerName.value = String(r.c.头部?.姓名 ?? '无名契约者');
     playerTier.value = String(r.c.头部?.阶位 ?? '一阶');
     playerUP.value = Number(r.c.经济?.UP ?? 0);
+    playerRP.value = Number(r.c.头部?.RP_当前 ?? 0);
     playerBag.value = (r.c.背包 ?? {}) as Bag;
     return true;
   }
@@ -98,10 +143,11 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     lastError.value = '';
     try {
       syncFromMvu();
-      const [all, mine] = await Promise.all([fetchListings(), fetchMine()]);
-      listings.value = [...all].reverse(); // key 升序 = 旧→新，界面最新在前
+      const [all, mine, sold] = await Promise.all([fetchListings(), fetchMine(), fetchSales().catch(() => [] as SaleRecord[])]);
+      listings.value = [...all].reverse(); // 服务器按时间倒序，界面最新在前
       myListings.value = mine.listings;
       pending.value = mine.pending;
+      sales.value = sold;
     } catch (e: any) {
       lastError.value = e?.message || '市场连接失败';
     } finally {
@@ -110,9 +156,9 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
   }
 
   /**
-   * 上架前 AI 审核（两道：规则/效果合规 + 红线），支持批量——多选上架只花一次 API。
+   * 上架前 AI 审核（规则/真实阶位判定 + 红线），支持批量——多选上架只花一次 API。
    * 已审过的物品走会话级缓存（改价/改数量不重审，改内容才重审）。
-   * fail-closed：未配置 API、调用失败、格式异常、有物品未被审到 → 抛错，由 sellBatch 拒绝上架。
+   * fail-closed：未配置 API、调用失败、格式异常、有物品未被审到 → 抛错，由 prepareSell 拒绝上架。
    */
   async function aiReviewItems(targets: ReviewTarget[]): Promise<Map<string, ReviewVerdict>> {
     const out = new Map<string, ReviewVerdict>();
@@ -149,71 +195,130 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     }
   }
 
-  /**
-   * 单件上架（sellBatch 的薄封装）：AI 审核通过 → 本地扣背包 → 服务器登记。
-   * 双击防护：结算进行中(listing)直接忽略重复调用。
-   */
-  async function sell(name: string, snapshot: MarketItemSnapshot, kind: 'equip' | 'goods', qty: number, price: number): Promise<boolean> {
-    const ok = await sellBatch([{ name, snapshot, kind, qty, price }]);
-    return ok;
-  }
+  // ==================== 上架：两阶段（prepare 算费 → 用户确认 → commit 扣费执行） ====================
 
   /**
-   * 批量上架：一次 AI 审核覆盖所有待上架物品，再逐件本地扣背包 + 服务器登记。
-   * 单价为 0 的条目按「未定价」跳过。任一环节失败只回滚该件，已成功的保留。
+   * 阶段一：AI 审核 + 确定性超模反查 + 计算税费。不碰任何变量、不发任何挂单。
+   * 红线命中 → ok=false（拒绝，不可收费放行）；超模 → 附费用明细，等用户确认。
+   * 同时向小手机通知中心写入 超模提醒/上架被拒。
    */
-  async function sellBatch(
+  async function prepareSell(
     entries: { name: string; snapshot: MarketItemSnapshot; kind: 'equip' | 'goods'; qty: number; price: number }[],
-  ): Promise<boolean> {
-    if (listing.value) return false; // 双击防护
+  ): Promise<SellPrep> {
     lastError.value = '';
-    const todo = entries.filter(e => Number(e.price) > 0);
-    if (todo.length === 0) {
-      lastError.value = '请先为要上架的物品填写单价';
-      toastr.warning(lastError.value);
-      return false;
-    }
-
-    // ① 先只读校验每件数量，任何一件不合法就整体不上架
     const r0 = readContractor();
-    if (!r0) {
-      lastError.value = '读不到存档变量';
-      return false;
-    }
+    if (!r0) throw new Error('读不到存档变量');
     const bag0 = (r0.c.背包 ?? {}) as Bag;
-    for (const e of todo) {
+    const upHave = Number(r0.c.经济?.UP ?? 0);
+    const rpHave = Number(r0.c.头部?.RP_当前 ?? 0);
+    const { add } = noticesApi;
+
+    // ① 数量与名义阶位（只读校验）
+    const nominalById = new Map<string, number>();
+    const items: SellPrepItem[] = [];
+    for (const e of entries) {
       const have = Number(bag0[e.name]?.数量 ?? 0);
       if (!Number.isInteger(e.qty) || e.qty < 1 || e.qty > have) {
-        lastError.value = `「${e.name}」数量不合法：现有 ${have}，拟上架 ${e.qty}`;
-        toastr.error(lastError.value);
-        return false;
+        items.push({ name: e.name, snapshot: e.snapshot, kind: e.kind, qty: e.qty, price: Number(e.price), ok: false, reasons: [`数量不合法：现有 ${have}，拟上架 ${e.qty}`], tax: 0, op: null });
+        continue;
+      }
+      const nominal = nominalIdxOf({ ...e.snapshot, 阶位: e.snapshot.阶位 }, playerTier.value);
+      if (nominal === null) {
+        items.push({ name: e.name, snapshot: e.snapshot, kind: e.kind, qty: e.qty, price: Number(e.price), ok: false, reasons: ['名义阶位无法识别（阶位写法不合规）'], tax: 0, op: null });
+        continue;
+      }
+      nominalById.set(e.name, nominal);
+      items.push({ name: e.name, snapshot: e.snapshot, kind: e.kind, qty: e.qty, price: Number(e.price), ok: true, reasons: [], tax: 0, op: null });
+    }
+
+    // ② AI 批量审核（一次调用覆盖全部）
+    const toReview = items.filter(i => i.ok);
+    let verdicts = new Map<string, ReviewVerdict>();
+    if (toReview.length > 0) {
+      verdicts = await aiReviewItems(
+        toReview.map(i => ({
+          item: { ...i.snapshot, 名称: i.name, 数量: i.qty },
+          kind: i.kind,
+          nominalIdx: nominalById.get(i.name) ?? 0,
+        })),
+      );
+    }
+
+    // ③ 逐项：红线拒绝 / 确定性超模反查 + AI 真实阶位（取较高者）→ 费用
+    for (const item of items) {
+      if (!item.ok) continue;
+      const v = verdicts.get(item.name);
+      if (!v) {
+        item.ok = false;
+        item.reasons = ['未通过审核'];
+        continue;
+      }
+      if (!v.pass) {
+        item.ok = false;
+        item.reasons = v.reasons;
+        add('上架被拒', `「${item.name}」：${item.reasons.join('；')}`);
+        continue;
+      }
+      const nominal = nominalById.get(item.name) ?? 0;
+      let realIdx = v.realIdx ?? nominal;
+      const points = [...v.opPoints];
+      if (item.kind === 'equip') {
+        const cls = classify({ ...item.snapshot, 名称: item.name });
+        if (cls.kind === 'equip') {
+          const det = assessDeterministic({ ...item.snapshot, 名称: item.name }, cls, nominal);
+          if (det) {
+            realIdx = Math.max(realIdx, det.realIdx);
+            points.push(...det.points);
+          }
+        }
+      }
+      const fee = opFeeFor(nominal, realIdx, baseUpOf(item.kind, item.snapshot, item.kind === 'equip' ? (classify({ ...item.snapshot, 名称: item.name }) as { category?: string }).category ?? null : null));
+      // 上架税：总价（数量×单价）的 20%，0 元单免税
+      item.tax = Math.ceil(item.qty * item.price * 0.2);
+      if (fee) {
+        item.op = { realTier: realTierName(fee.realIdx), realIdx: fee.realIdx, rp: fee.rp, up: fee.up, points };
+        item.opField = { tier: realTierName(fee.realIdx), rp: fee.rp, up: fee.up };
+        add(
+          '超模提醒',
+          `「${item.name}」效果达到「${realTierName(fee.realIdx)}」规格，上架需额外支付 RP ${fee.rp} + UP ${fee.up}。\n${points.join('\n')}`,
+        );
       }
     }
 
-    // ② AI 审核（一次调用覆盖全部；fail-closed：本地背包分毫未动）
-    listing.value = true;
-    let verdicts: Map<string, ReviewVerdict>;
-    try {
-      verdicts = await aiReviewItems(
-        todo.map(e => ({ item: { ...e.snapshot, 名称: e.name, 数量: e.qty }, kind: e.kind })),
-      );
-    } catch (e: any) {
-      listing.value = false;
-      lastError.value = e?.message || 'AI 审核失败';
-      toastr.error('上架被拒: ' + lastError.value);
-      return false;
-    }
+    const listable = items.filter(i => i.ok);
+    const totalTax = listable.reduce((s, i) => s + i.tax, 0);
+    const totalOpUp = listable.reduce((s, i) => s + (i.op?.up ?? 0), 0);
+    const totalOpRp = listable.reduce((s, i) => s + (i.op?.rp ?? 0), 0);
+    const upNeeded = totalTax + totalOpUp;
+    const rpNeeded = totalOpRp;
+    return {
+      items,
+      listable,
+      totalTax,
+      totalOpUp,
+      totalOpRp,
+      upNeeded,
+      rpNeeded,
+      upHave,
+      rpHave,
+      affordable: upHave >= upNeeded && rpHave >= rpNeeded,
+    };
+  }
 
+  /**
+   * 阶段二：用户确认费用后执行——逐件扣背包 + 服务器登记（含超模声明），
+   * 成功件一次性扣 上架税 + 超模费（UP/RP 自动从存档变量扣除，回读校验）。
+   * 任一件服务器失败只回滚该件，该件的费用不计。
+   */
+  async function commitSell(prep: SellPrep): Promise<boolean> {
+    if (listing.value) return false; // 双击防护
+    if (prep.listable.length === 0) return false;
+    listing.value = true;
     const failed: string[] = [];
-    const rejected: string[] = [];
+    const succeeded: SellPrepItem[] = [];
+    const { add } = noticesApi;
     try {
-      for (const e of todo) {
-        const v = verdicts.get(e.name);
-        if (!v?.pass) {
-          rejected.push(`「${e.name}」：${(v?.reasons ?? ['未通过审核']).join('；')}`);
-          continue;
-        }
-        // ③ 本地扣背包
+      for (const e of prep.listable) {
         const r = readContractor();
         if (!r) {
           failed.push(`「${e.name}」读不到存档变量`);
@@ -229,7 +334,6 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
         }
         _.set(r.mvu, ['stat_data', '契约者', '背包'], newBag);
         await commit(r.mvu, r.mid, []);
-        // ④ 服务器登记；失败则把该件加回背包
         try {
           await createListing({
             seller: playerName.value,
@@ -238,7 +342,9 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
             item: { ...e.snapshot, 名称: e.name, 数量: e.qty },
             qty: e.qty,
             price: e.price,
+            op: e.opField,
           });
+          succeeded.push(e);
         } catch (err: any) {
           const rb = readContractor();
           if (rb) {
@@ -252,23 +358,52 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
       listing.value = false;
     }
 
-    const okCount = todo.length - failed.length - rejected.length;
-    if (okCount > 0) toastr.success(`已上架 ${okCount} 件`);
-    if (rejected.length > 0) {
-      lastError.value = rejected.join('\n');
-      toastr.error(`AI 审核驳回 ${rejected.length} 件：\n` + rejected.join('\n'));
+    // 费用结算：只对成功上架的件收取（税 + 超模费），一次性扣
+    const feeUp = succeeded.reduce((s, i) => s + i.tax + (i.op?.up ?? 0), 0);
+    const feeRp = succeeded.reduce((s, i) => s + (i.op?.rp ?? 0), 0);
+    if (feeUp > 0 || feeRp > 0) {
+      const r = readContractor();
+      if (r) {
+        const up = Number(r.c.经济?.UP ?? 0);
+        const rp = Number(r.c.头部?.RP_当前 ?? 0);
+        if (up < feeUp || rp < feeRp) {
+          toastr.error(`费用结算异常：UP/RP 余额不足（需 UP ${feeUp} / RP ${feeRp}）。挂单已生效，请尽快补缴。`);
+          add('费用结算异常', `UP/RP 余额不足（需 UP ${feeUp} / RP ${feeRp}），挂单已生效请补缴。`);
+        } else {
+          _.set(r.mvu, ['stat_data', '契约者', '经济', 'UP'], up - feeUp);
+          _.set(r.mvu, ['stat_data', '契约者', '头部', 'RP_当前'], rp - feeRp);
+          await commit(r.mvu, r.mid, [
+            [['stat_data', '契约者', '经济', 'UP'], up - feeUp],
+            [['stat_data', '契约者', '头部', 'RP_当前'], rp - feeRp],
+          ]);
+        }
+      }
+    }
+
+    if (succeeded.length > 0) {
+      const feeLine = feeUp > 0 || feeRp > 0 ? `，支付税费/超模费 UP ${feeUp}${feeRp > 0 ? ` + RP ${feeRp}` : ''}` : '';
+      toastr.success(`已上架 ${succeeded.length} 件${feeLine}`);
+      add('上架成功', `已上架 ${succeeded.length} 件：${succeeded.map(i => `「${i.name}」`).join('、')}${feeLine}。`);
     }
     if (failed.length > 0) {
       lastError.value = failed.join('\n');
       toastr.error(`上架失败 ${failed.length} 件：\n` + failed.join('\n'));
+      add('上架失败', failed.join('\n'));
     }
     await refresh();
-    return okCount > 0;
+    return succeeded.length > 0;
   }
 
-  /** 购买：本地先校验余额（不足则不动服务器）→ 服务器销账 → 本地扣 UP 入包。双击防护：结算中直接忽略 */
+  // ==================== 购买（含 10% 手续费） ====================
+
+  /** 购买单价的 10% 手续费（回廊创收），向上取整 */
+  function buyerFeeFor(total: number): number {
+    return Math.ceil(total * 0.1);
+  }
+
+  /** 购买：本地先校验余额（含手续费，不足则不动服务器）→ 服务器销账 → 本地扣 UP 入包。双击防护 */
   async function buy(l: Listing): Promise<boolean> {
-    if (purchasing.value) return false; // 双击防护：防止一次支付 N 份钱只买一件
+    if (purchasing.value) return false;
     purchasing.value = true;
     try {
       return await doBuy(l);
@@ -284,10 +419,11 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
       lastError.value = '读不到存档变量';
       return false;
     }
-    const total = totalPrice(l); // 总价 = 单价 × 数量
+    const total = totalPrice(l);
+    const fee = buyerFeeFor(total); // 购买手续费 10%
     const up = Number(r.c.经济?.UP ?? 0);
     try {
-      spendUP(up, total);
+      spendUP(up, total + fee);
     } catch (e: any) {
       lastError.value = e.message;
       toastr.error(e.message);
@@ -300,13 +436,15 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
       toastr.error('购买失败: ' + lastError.value);
       return false;
     }
-    _.set(r.mvu, ['stat_data', '契约者', '经济', 'UP'], up - total);
+    _.set(r.mvu, ['stat_data', '契约者', '经济', 'UP'], up - total - fee);
     _.set(r.mvu, ['stat_data', '契约者', '背包'], bagAdd((r.c.背包 ?? {}) as Bag, l.item, l.qty));
-    await commit(r.mvu, r.mid, [[['stat_data', '契约者', '经济', 'UP'], up - total]]);
-    toastr.success(`购得「${l.item.名称}」×${l.qty}，支付 ${total} UP`);
+    await commit(r.mvu, r.mid, [[['stat_data', '契约者', '经济', 'UP'], up - total - fee]]);
+    toastr.success(`购得「${l.item.名称}」×${l.qty}，实付 ${total + fee} UP（含手续费 ${fee}）`);
     await refresh();
     return true;
   }
+
+  // ==================== 下架 / 领取 ====================
 
   /**
    * 下架取回。双击防护 + 「前世记忆」提醒：
@@ -354,7 +492,6 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
   /**
    * 领取货款。双击防护 + 「前世记忆」提醒：
    * 货款按客户端标识挂账，换新存档后旧存档的货款仍可领进当前存档。
-   * 登录前无法知道挂账来自哪一世（KV 里只存金额），因此只在有待领货款时提醒一次来源不明。
    */
   async function collect(): Promise<boolean> {
     if (collecting.value) return false; // 双击防护
@@ -399,6 +536,7 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
   return {
     listings,
     myListings,
+    sales,
     pending,
     pendingSell,
     loading,
@@ -410,10 +548,15 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     playerName,
     playerTier,
     playerUP,
+    playerRP,
     playerBag,
+    notices: noticesApi.notices,
+    unread,
+    markAllRead: noticesApi.markAllRead,
     refresh,
-    sell,
-    sellBatch,
+    prepareSell,
+    commitSell,
+    buyerFeeFor,
     buy,
     cancel,
     collect,

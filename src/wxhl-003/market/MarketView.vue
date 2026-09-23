@@ -7,7 +7,14 @@
         </svg>
       </button>
       <span class="hdr-title">自由市场</span>
-      <span class="hdr-up">{{ store.playerUP }} UP</span>
+      <span class="hdr-bal">{{ store.playerUP }} UP<template v-if="store.playerRP"> · {{ store.playerRP }} RP</template></span>
+      <button class="hdr-btn bell" @click="openNotices">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M18 8a6 6 0 1 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+          <path d="M13.7 21a2 2 0 0 1-3.4 0" />
+        </svg>
+        <span v-if="store.unread" class="bell-badge">{{ store.unread }}</span>
+      </button>
       <button class="hdr-btn" :disabled="store.loading" @click="store.refresh()">
         <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" :class="{ spinning: store.loading }">
           <polyline points="23 4 23 10 17 10" />
@@ -27,35 +34,17 @@
     <!-- ============ 逛市场 ============ -->
     <div v-if="tab === 'browse'" class="mkt-body">
       <div class="mkt-filters">
-        <button
-          v-for="f in CATEGORY_FILTERS"
-          :key="f.key"
-          class="mkt-chip"
-          :class="{ active: catFilter === f.key }"
-          @click="catFilter = f.key"
-        >
+        <button v-for="f in CATEGORY_FILTERS" :key="f.key" class="mkt-chip" :class="{ active: catFilter === f.key }" @click="catFilter = f.key">
           {{ f.label }}
         </button>
       </div>
       <div class="mkt-filters">
-        <button
-          v-for="f in TIER_FILTERS"
-          :key="f.key"
-          class="mkt-chip"
-          :class="{ active: tierFilter === f.key }"
-          @click="tierFilter = f.key"
-        >
+        <button v-for="f in TIER_FILTERS" :key="f.key" class="mkt-chip" :class="{ active: tierFilter === f.key }" @click="tierFilter = f.key">
           {{ f.label }}
         </button>
       </div>
       <div class="mkt-filters">
-        <button
-          v-for="f in FILTERS"
-          :key="f.key"
-          class="mkt-chip"
-          :class="{ active: filter === f.key }"
-          @click="filter = f.key"
-        >
+        <button v-for="f in FILTERS" :key="f.key" class="mkt-chip" :class="{ active: filter === f.key }" @click="filter = f.key">
           {{ f.label }}
         </button>
       </div>
@@ -68,23 +57,17 @@
           <span class="mc-price">{{ l.price * l.qty }} UP</span>
         </div>
         <div class="mc-tags" @click="detailOpen = l">
-          <span v-if="l.kind === 'equip'" class="mc-tag">{{ l.item.品质 }}·{{ l.item.类型 }}·{{ l.item.阶位 || l.tier }}</span>
-          <span v-else class="mc-tag goods">道具</span>
+          <span v-if="l.kind === 'equip'" class="mc-tag">{{ qualityLabel(l.item) }}·{{ l.item.类型 }}·{{ l.item.阶位 || l.tier }}</span>
+          <span v-else class="mc-tag goods">道具·{{ qualityLabel(l.item) }}·{{ l.item.阶位 || l.tier }}</span>
           <span class="mc-tag">×{{ l.qty }}</span>
           <span v-if="l.qty > 1" class="mc-tag">单价 {{ l.price }}</span>
+          <span v-if="l.op" class="mc-tag op">超模·{{ l.op.tier }}</span>
         </div>
         <div v-if="l.item.描述" class="mc-desc" @click="detailOpen = l">{{ l.item.描述 }}</div>
         <div class="mc-foot">
           <span class="mc-seller">{{ l.seller }} · {{ l.tier }} · {{ timeAgo(l.created) }}</span>
           <button class="mc-detail" @click="detailOpen = l">详情</button>
-          <button
-            v-if="l.client !== myClient"
-            class="mc-buy"
-            :disabled="store.purchasing"
-            @click="detailOpen = l"
-          >
-            购买
-          </button>
+          <button v-if="l.client !== myClient" class="mc-buy" :disabled="store.purchasing" @click="detailOpen = l">购买</button>
           <span v-else class="mc-own">我的挂单</span>
         </div>
       </div>
@@ -93,11 +76,11 @@
     <!-- ============ 上架（多选批量） ============ -->
     <div v-if="tab === 'sell'" class="mkt-body">
       <div class="mkt-hint">
-        勾选要上架的物品（可多选，多件只审核一次）→ 逐件填价 → 一次提交。
-        装备按品质与阶位定价并做规则校验，道具按阶位定价；全部经回廊 AI 审核，需在终端设置中配置 API。
+        勾选要上架的物品（可多选，多件只审核一次）→ 补全品质/阶位、填数量与单价 → 一次提交（先审核，再确认费用）。
       </div>
       <div class="mkt-hint dim">
-        分错类了？点物品上的「装备/道具」标签可手动改判定口径（只影响 AI 审核与价格提示；服务器仍按物品字段定价，带装备字段的物品躲不过装备价格上限）。
+        品质与阶位由你填写，回廊会审核是否与物品效果相符；效果超出所填阶位（超模）可上架，但需支付超模费。
+        价格须在参考价的 50%~200% 之间。上架另收总价 20% 所得税，购买方付 10% 手续费。
       </div>
       <div v-if="bagEntries.length === 0" class="mkt-empty">背包里没有可上架的物品</div>
 
@@ -113,11 +96,22 @@
           <button class="mc-kind" :class="{ equip: kindOf(entry.name) === 'equip' }" @click="cycleKind(entry.name, entry.item)">
             {{ kindOf(entry.name) === 'equip' ? '装备' : '道具' }}
           </button>
-          <span class="mc-tag">{{ entry.tag || '道具' }}·{{ entry.item.阶位 || store.playerTier }}</span>
+          <span class="mc-tag">{{ entry.tag || '道具' }}</span>
         </div>
 
-        <!-- 选中的物品：逐件填数量与单价 -->
         <div v-if="sellSel[entry.name]" class="sell-form">
+          <label class="sf-row">
+            <span>品质</span>
+            <select v-model="sellSel[entry.name].quality">
+              <option v-for="q in QUALITY_OPTIONS" :key="q" :value="q">{{ q }}</option>
+            </select>
+          </label>
+          <label class="sf-row">
+            <span>阶位</span>
+            <select v-model="sellSel[entry.name].tier">
+              <option v-for="t in TIER_OPTIONS" :key="t" :value="t">{{ t }}</option>
+            </select>
+          </label>
           <label class="sf-row">
             <span>数量</span>
             <input v-model.number="sellSel[entry.name].qty" type="number" min="1" :max="entry.item.数量" />
@@ -127,29 +121,19 @@
             <input v-model.number="sellSel[entry.name].price" type="number" min="0" max="9999999" />
           </label>
           <label class="sf-row col">
-            <span>描述（可编辑补充，1000 字内）</span>
-            <textarea
-              v-model="sellSel[entry.name].desc"
-              rows="3"
-              maxlength="1000"
-              placeholder="物品自带的描述会预填在这里，你可以编辑或补充"
-            ></textarea>
+            <span>描述（可编辑补充，500 字内）</span>
+            <textarea v-model="sellSel[entry.name].desc" rows="3" maxlength="500" placeholder="物品自带描述会预填在这里"></textarea>
           </label>
-          <div v-if="sellSel[entry.name].price" class="sf-hint">
+          <div v-if="sellSel[entry.name].price !== ''" class="sf-hint">
             总价：{{ Number(sellSel[entry.name].price) * Number(sellSel[entry.name].qty || 0) }} UP（单价 × 数量）
+            ｜ 所得税(20%)：{{ Math.ceil(Number(sellSel[entry.name].price) * Number(sellSel[entry.name].qty || 0) * 0.2) }} UP
           </div>
-          <div v-if="selectedRow(entry.name)?.无法定价" class="sf-check">
-            <div class="sf-err">✕ 物品带有装备字段但品质或类型无法识别，回廊无法定价——请先补全「品质」与「类型」字段，或点上方标签改判为道具</div>
-          </div>
-          <template v-else-if="selectedRow(entry.name)?.equipCheck">
-            <div
-              v-if="selectedRow(entry.name)!.equipCheck!.errors.length || selectedRow(entry.name)!.equipCheck!.warnings.length"
-              class="sf-check"
-            >
+          <template v-if="selectedRow(entry.name)?.equipCheck">
+            <div v-if="selectedRow(entry.name)!.equipCheck!.errors.length || selectedRow(entry.name)!.equipCheck!.warnings.length" class="sf-check">
               <div v-for="e in selectedRow(entry.name)!.equipCheck!.errors" :key="e" class="sf-err">✕ {{ e }}</div>
               <div v-for="w in selectedRow(entry.name)!.equipCheck!.warnings" :key="w" class="sf-warn">⚠ {{ w }}</div>
             </div>
-            <div v-else class="sf-check ok">✓ 装备规则校验通过（效果条目 / 属性加成基准 / 骰面格式 / 强效果限制）</div>
+            <div v-else class="sf-check ok">✓ 结构校验通过（效果条目 / 骰面格式）</div>
           </template>
           <div v-if="selectedRow(entry.name)?.priceHint" class="sf-hint" :class="{ bad: !selectedRow(entry.name)!.priceHint!.ok }">
             {{
@@ -161,10 +145,9 @@
         </div>
       </div>
 
-      <!-- 批量提交栏 -->
       <div v-if="selCount > 0" class="mkt-submit">
-        <button class="mc-buy big" :disabled="sellableCount === 0 || store.loading || store.reviewing || store.listing" @click="doSellAll">
-          {{ store.reviewing ? 'AI 审核中…' : store.listing ? '上架中…' : `确认上架 ${sellableCount} / ${selCount} 件（一次审核）` }}
+        <button class="mc-buy big" :disabled="sellableCount === 0 || prepping || store.reviewing || store.listing" @click="doSellAll">
+          {{ prepping || store.reviewing ? 'AI 审核中…' : store.listing ? '上架中…' : `提交 ${sellableCount} / ${selCount} 件（先审核）` }}
         </button>
       </div>
     </div>
@@ -176,10 +159,23 @@
           <span class="mc-name">待领货款</span>
           <span class="mc-price">{{ store.pending }} UP</span>
         </div>
-        <button class="mc-buy big" :disabled="store.pending <= 0 || store.loading" @click="store.collect()">
-          领取全部货款
+        <button class="mc-buy big" :disabled="store.pending <= 0 || store.collecting" @click="store.collect()">
+          {{ store.collecting ? '领取中…' : '领取全部货款' }}
         </button>
       </div>
+
+      <div class="mkt-hint">出售记录（最近 100 条）</div>
+      <div v-if="store.sales.length === 0" class="mkt-empty">还没有卖出过物品</div>
+      <div v-for="s in store.sales" :key="s.id" class="mkt-card sale">
+        <div class="mc-head">
+          <span class="mc-name" :style="{ color: qualityColor(s.item) }">{{ s.item.名称 }}</span>
+          <span class="mc-price">{{ s.price * s.qty }} UP</span>
+        </div>
+        <div class="mc-foot">
+          <span class="mc-seller">×{{ s.qty }} · 买家：<b class="buyer">{{ s.buyer }}</b> · {{ timeAgo(s.created) }}</span>
+        </div>
+      </div>
+
       <div class="mkt-hint">我的在售挂单</div>
       <div v-if="store.myListings.length === 0" class="mkt-empty">没有在售挂单</div>
       <div v-for="l in store.myListings" :key="l.id" class="mkt-card">
@@ -190,6 +186,7 @@
         <div class="mc-tags">
           <span class="mc-tag">×{{ l.qty }}</span>
           <span v-if="l.qty > 1" class="mc-tag">单价 {{ l.price }}</span>
+          <span v-if="l.op" class="mc-tag op">超模·{{ l.op.tier }}</span>
         </div>
         <div class="mc-foot">
           <span class="mc-seller">{{ timeAgo(l.created) }}</span>
@@ -199,7 +196,39 @@
       </div>
     </div>
 
-    <!-- ============ 商品详情 / 购买确认 ============ -->
+    <!-- ============ 费用确认（上架第二阶段） ============ -->
+    <div v-if="prep" class="mkt-mask" @click.self="prep = null">
+      <div class="mkt-dialog">
+        <div class="md-title">上架费用确认</div>
+        <div v-for="it in prep.listable" :key="it.name" class="fee-row">
+          <div class="fee-name">
+            「{{ it.name }}」×{{ it.qty }} · 单价 {{ it.price }} UP
+            <span v-if="it.op" class="fee-op">超模·{{ it.op.realTier }}</span>
+          </div>
+          <div class="fee-line">所得税(20%)：{{ it.tax }} UP</div>
+          <template v-if="it.op">
+            <div class="fee-line op">超模费：{{ it.op.rp }} RP + {{ it.op.up }} UP</div>
+            <div v-for="p in it.op.points" :key="p" class="fee-point">· {{ p }}</div>
+          </template>
+        </div>
+        <div class="md-total">
+          合计需付：<b>{{ prep.upNeeded }} UP</b><template v-if="prep.rpNeeded"> + <b>{{ prep.rpNeeded }} RP</b></template>
+        </div>
+        <div class="md-line dim">
+          当前持有 {{ prep.upHave }} UP<template v-if="prep.rpNeeded"> · {{ prep.rpHave }} RP</template>
+          <template v-if="!prep.affordable"> —— 余额不足，请先筹措</template>
+        </div>
+        <div class="md-line dim">费用直接从你的存档扣除（不交给任何人）。已售物品的所得税不退。</div>
+        <div class="md-actions">
+          <button class="mc-cancel" @click="prep = null">取消</button>
+          <button class="mc-buy" :disabled="!prep.affordable || store.listing" @click="confirmCommit">
+            {{ store.listing ? '上架中…' : '确认支付并上架' }}
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 商品详情 / 购买 ============ -->
     <div v-if="detailOpen" class="mkt-mask" @click.self="detailOpen = null">
       <div class="mkt-dialog detail">
         <div class="md-title-row">
@@ -210,11 +239,11 @@
           <span v-if="detailOpen.kind === 'equip'" class="mc-tag">
             {{ qualityLabel(detailOpen.item) }}·{{ detailOpen.item.类型 }}·{{ detailOpen.item.阶位 || detailOpen.tier }}
           </span>
-          <span v-else class="mc-tag goods">道具·{{ detailOpen.item.阶位 || detailOpen.tier }}</span>
+          <span v-else class="mc-tag goods">道具·{{ qualityLabel(detailOpen.item) }}·{{ detailOpen.item.阶位 || detailOpen.tier }}</span>
           <span class="mc-tag">×{{ detailOpen.qty }}</span>
+          <span v-if="detailOpen.op" class="mc-tag op">超模·{{ detailOpen.op.tier }}</span>
         </div>
 
-        <!-- 装备数值明细 -->
         <div v-if="detailOpen.kind === 'equip'" class="md-grid">
           <span v-if="has(detailOpen.item.伤害骰)">伤害骰</span><span v-if="has(detailOpen.item.伤害骰)">{{ detailOpen.item.伤害骰 }}</span>
           <span v-if="Number(detailOpen.item.倍率)">倍率</span><span v-if="Number(detailOpen.item.倍率)">{{ detailOpen.item.倍率 }}</span>
@@ -229,41 +258,49 @@
           <span v-if="has(detailOpen.item.穿戴门槛)">穿戴门槛</span><span v-if="has(detailOpen.item.穿戴门槛)">{{ detailOpen.item.穿戴门槛 }}</span>
         </div>
 
-        <!-- 效果明细 -->
         <div v-if="effectList(detailOpen.item).length" class="md-block">
           <div class="md-block-title">效果</div>
-          <div v-for="e in effectList(detailOpen.item)" :key="e.name" class="md-effect">
-            <b>{{ e.name }}</b
-            >：{{ e.text }}
-          </div>
+          <div v-for="ef in effectList(detailOpen.item)" :key="ef.name" class="md-effect"><b>{{ ef.name }}</b>：{{ ef.text }}</div>
         </div>
 
-        <!-- 描述 -->
         <div v-if="has(detailOpen.item.描述)" class="md-block">
           <div class="md-block-title">描述</div>
           <div class="md-desc-full">{{ detailOpen.item.描述 }}</div>
         </div>
 
-        <div class="md-line dim">
-          卖家：{{ detailOpen.seller }} · {{ detailOpen.tier }} · 上架于 {{ timeAgo(detailOpen.created) }}
-        </div>
+        <div class="md-line dim">卖家：{{ detailOpen.seller }} · {{ detailOpen.tier }} · 上架于 {{ timeAgo(detailOpen.created) }}</div>
         <div class="md-total">
-          单价 <b>{{ detailOpen.price }} UP</b> × {{ detailOpen.qty }} =
-          <b class="big">{{ detailOpen.price * detailOpen.qty }} UP</b>
+          单价 <b>{{ detailOpen.price }} UP</b> × {{ detailOpen.qty }} = <b class="big">{{ detailOpen.price * detailOpen.qty }} UP</b>
         </div>
-        <div class="md-line dim">支付后当前持有 {{ store.playerUP }} → {{ store.playerUP - detailOpen.price * detailOpen.qty }} UP</div>
+        <div v-if="detailOpen.client !== myClient" class="md-line dim">
+          购买手续费(10%)：{{ buyerFee }} UP ｜ 实付 <b>{{ detailOpen.price * detailOpen.qty + buyerFee }} UP</b>
+          ｜ 支付后持有 {{ store.playerUP }} → {{ store.playerUP - detailOpen.price * detailOpen.qty - buyerFee }} UP
+        </div>
 
         <div class="md-actions">
           <button class="mc-cancel" @click="detailOpen = null">关闭</button>
-          <button
-            v-if="detailOpen.client !== myClient"
-            class="mc-buy"
-            :disabled="store.purchasing"
-            @click="doBuy"
-          >
+          <button v-if="detailOpen.client !== myClient" class="mc-buy" :disabled="store.purchasing" @click="doBuy">
             {{ store.purchasing ? '支付中…' : '确认支付' }}
           </button>
           <button v-else class="mc-cancel" @click="doCancelMine(detailOpen)">下架取回</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ============ 通知中心 ============ -->
+    <div v-if="showNotices" class="mkt-mask" @click.self="showNotices = false">
+      <div class="mkt-dialog detail">
+        <div class="md-title-row">
+          <span class="md-title">市场通知</span>
+          <button class="md-close" @click="showNotices = false">✕</button>
+        </div>
+        <div v-if="store.notices.length === 0" class="mkt-empty">暂无通知</div>
+        <div v-for="n in store.notices" :key="n.id" class="notice">
+          <div class="notice-head">
+            <span class="notice-title">{{ n.title }}</span>
+            <span class="notice-time">{{ timeAgo(n.ts) }}</span>
+          </div>
+          <div class="notice-body">{{ n.body }}</div>
         </div>
       </div>
     </div>
@@ -277,7 +314,6 @@ import {
   categoryOf,
   checkPrice,
   classify,
-  hasEquipMarkers,
   parseQuality,
   tierIndexOfItem,
   type MarketItemSnapshot,
@@ -285,9 +321,7 @@ import {
 } from './priceTable';
 import { validateEquip } from './equipRules';
 import type { Bag } from './settle';
-import { useMarketStore } from './store';
-// 图纸转卖属 spec §5.2 的 v3 范围：图纸是工坊的生产资料，这里只借它的命名约定把图纸挡在上架候选之外
-import { isBlueprintName } from '../crafting/recipes';
+import { useMarketStore, type SellPrep } from './store';
 
 const emit = defineEmits<{ close: [] }>();
 const store = useMarketStore();
@@ -298,8 +332,10 @@ const TABS = [
   { key: 'mine', label: '我的' },
 ] as const;
 const tab = ref<(typeof TABS)[number]['key']>('browse');
-
 const myClient = getClientId();
+
+const QUALITY_OPTIONS = ['白色', '蓝色', '金色', '紫色'] as const;
+const TIER_OPTIONS = ['一阶', '二阶', '三阶', '四阶', '五阶'] as const;
 
 // ============ 逛市场 ============
 const FILTERS = [
@@ -331,118 +367,79 @@ const tierFilter = ref<(typeof TIER_FILTERS)[number]['key']>('all');
 
 const filteredListings = computed(() =>
   store.listings.filter(l => {
-    // 类型筛选：装备按 武器/防具/饰品，其余归道具
     if (catFilter.value !== 'all' && categoryOf(l.item) !== catFilter.value) return false;
-    // 阶位筛选：物品自身阶位优先，缺省按卖家阶位
     if (tierFilter.value !== 'all' && tierIndexOfItem(l.item, l.tier) !== Number(tierFilter.value)) return false;
-    // 品质筛选：按解包后的原品质（灰色封印(紫色) 也算紫色）
     if (filter.value !== 'all' && parseQuality(l.item.品质)?.quality !== filter.value) return false;
     return true;
   }),
 );
 
 const detailOpen = ref<Listing | null>(null);
+const showNotices = ref(false);
+function openNotices() {
+  showNotices.value = true;
+  store.markAllRead();
+}
 
-/** 详情弹层里购买（总价 = 单价 × 数量） */
+/** 购买手续费（与 store 同规则：总价 10% 向上取整） */
+const buyerFee = computed(() => (detailOpen.value ? store.buyerFeeFor(detailOpen.value.price * detailOpen.value.qty) : 0));
+
 async function doBuy() {
   if (!detailOpen.value) return;
   const ok = await store.buy(detailOpen.value);
   if (ok) detailOpen.value = null;
 }
 
-/** 详情弹层里下架自己的挂单 */
 async function doCancelMine(l: Listing) {
   const ok = await store.cancel(l);
   if (ok) detailOpen.value = null;
 }
 
-/** 装备品质展示（灰色封印解包） */
-function qualityLabel(item: MarketItemSnapshot): string {
-  const q = parseQuality(item.品质);
-  if (!q) return String(item.品质 ?? '未知');
-  return q.gray ? `灰色封印(${q.quality})` : q.quality;
-}
-
-/** 详情用：字段是否有效（过滤"无"/0/空） */
-function has(v: unknown): boolean {
-  if (v === undefined || v === null) return false;
-  if (typeof v === 'string') return !['', '无', 'none', 'None'].includes(v.trim());
-  if (typeof v === 'number') return v !== 0;
-  return true;
-}
-
-/** 详情用：效果列表（record 或字符串） */
-function effectList(item: MarketItemSnapshot): { name: string; text: string }[] {
-  const e = item.效果;
-  if (e && typeof e === 'object' && !Array.isArray(e)) {
-    return Object.entries(e as Record<string, unknown>).map(([name, text]) => ({ name, text: String(text) }));
-  }
-  if (typeof e === 'string' && e.trim()) return [{ name: '效果', text: e }];
-  return [];
-}
-
-// ============ 上架（多选批量） ============
-export interface SellEntry {
+// ============ 上架（多选批量 · 两阶段） ============
+interface SellEntry {
   name: string;
   item: MarketItemSnapshot & { 数量: number };
-  /** 数量/单价 输入缓冲（price 为空串表示未填） */
   qty: number;
   price: number | string;
-  /** 描述（预填物品自带描述，可编辑补充） */
   desc: string;
+  quality: string;
+  tier: string;
 }
 
-/** 已勾选待上架的物品（名称 → 输入缓冲） */
 const sellSel = reactive<Record<string, SellEntry>>({});
-/** 卖家手动标注口径（只影响 AI 审核与价格提示；服务器仍按物品字段定价） */
 const kindOverride = reactive<Record<string, 'equip' | 'goods'>>({});
+const prep = ref<SellPrep | null>(null);
+const prepping = ref(false);
 
-const bagEntries = computed(() =>
-  Object.entries(store.playerBag as Bag)
-    // 排除图纸：图纸转卖属 v3（spec §5.2）。当前上架只按普通道具价（[5,3000]×阶位²）估，
-    // 会把 4500~112500 UP 买来的生产资料贱卖；且买家能否拿到可用图纸取决于 worker 是否保留
-    // 「图纸数据」这种未知字段，保真度未知。故图纸一律不进上架候选。
-    .filter(([name, item]) => Number(item.数量) > 0 && !isBlueprintName(name)),
-);
+const bagEntries = computed(() => Object.entries(store.playerBag as Bag).filter(([, item]) => Number(item.数量) > 0));
 
-/** 每件物品的自动判定（重量级价格提示/装备校验只在勾选后算） */
 const bagRows = computed(() =>
   bagEntries.value.map(([name, item]) => {
     const auto = classify({ ...item, 名称: name });
-    /** 自动判定为装备的物品仍可被玩家标成道具（纠正误判）；自动判定为道具则只能标成装备 */
     const kind: 'equip' | 'goods' = kindOverride[name] ?? (auto.kind === 'equip' ? 'equip' : 'goods');
-    const 无法定价 =
-      auto.kind === 'goods' &&
-      hasEquipMarkers({ ...item, 名称: name }) &&
-      !kindOverride[name]; // 未手动标注且带装备字段却定不了价 → 服务器会拒
-    // 物品标签（「蓝色·防具」，道具为空串）
     const tag = auto.kind === 'equip' ? `${auto.gray ? `灰色封印(${auto.quality})` : auto.quality}·${auto.category}` : '';
-    return { name, item, kind, auto, tag, 无法定价 };
+    return { name, item, kind, auto, tag };
   }),
 );
 
-/** 勾选后的逐件价格提示与装备校验 */
+/** 勾选后的逐件：价格提示（按所填品质/阶位）+ 结构调整 */
 const sellRows = computed(() =>
   bagRows.value
     .filter(r => sellSel[r.name])
     .map(r => {
       const sel = sellSel[r.name];
-      const snap = { ...r.item, 名称: r.name, 数量: sel.qty };
+      const snap = { ...r.item, 名称: r.name, 数量: sel.qty, 品质: sel.quality, 阶位: sel.tier };
       const priceNum = Number(sel.price);
       const priceValid = sel.price !== '' && Number.isFinite(priceNum) && priceNum >= 0;
-      const equipCheck =
-        r.kind === 'equip' && r.auto.kind === 'equip' ? validateEquip(snap, r.auto, tierIndexOfItem(r.item, store.playerTier) ?? 0) : null;
+      const equipCheck = r.kind === 'equip' && r.auto.kind === 'equip' ? validateEquip(snap, r.auto, tierIndexOfItem({ 阶位: sel.tier }, store.playerTier) ?? 0) : null;
       return {
         name: r.name,
         item: r.item,
         kind: r.kind,
         entry: sel,
-        无法定价: r.无法定价,
-        // 价格合法区间提示（按标注口径算）
         priceHint: priceValid ? checkPrice(r.kind, snap, store.playerTier, priceNum) : null,
         equipCheck,
         canSell:
-          !r.无法定价 &&
           Number.isInteger(sel.qty) &&
           sel.qty >= 1 &&
           sel.qty <= r.item.数量 &&
@@ -452,29 +449,39 @@ const sellRows = computed(() =>
     }),
 );
 
-/** 模板用：每件背包物品 + 勾选状态 */
 const bagTagged = computed(() => bagRows.value.map(r => ({ ...r, sel: sellSel[r.name] ?? null })));
-
 const selCount = computed(() => sellRows.value.length);
 const sellableCount = computed(() => sellRows.value.filter(r => r.canSell).length);
 
-/** 模板用：取已勾选行的派生信息（价格提示/装备校验），未勾选返回 null */
 function selectedRow(name: string) {
   return sellRows.value.find(r => r.name === name) ?? null;
 }
 
-function toggleSel(name: string, item: MarketItemSnapshot & { 数量: number }) {
-  if (sellSel[name]) delete sellSel[name];
-  else sellSel[name] = { name, item, qty: 1, price: '', desc: String(item.描述 ?? '') };
+function defaultQuality(item: MarketItemSnapshot): string {
+  const q = parseQuality(item.品质)?.quality;
+  return q && q !== '银色' ? q : '白色';
 }
 
-/** 切换装备/道具标注口径 */
+function toggleSel(name: string, item: MarketItemSnapshot & { 数量: number }) {
+  if (sellSel[name]) delete sellSel[name];
+  else
+    sellSel[name] = {
+      name,
+      item,
+      qty: 1,
+      price: '',
+      desc: String(item.描述 ?? ''),
+      quality: defaultQuality(item),
+      tier: String(item.阶位 ?? '') || store.playerTier,
+    };
+}
+
 function cycleKind(name: string, item: MarketItemSnapshot) {
   const auto = classify({ ...item, 名称: name });
   const cur = kindOverride[name] ?? (auto.kind === 'equip' ? 'equip' : 'goods');
   const next = cur === 'equip' ? 'goods' : 'equip';
-  // 自动判定为道具的物品，标成"装备"才有意义；标回自动值则清除覆盖
-  if (next === (auto.kind === 'equip' ? 'equip' : 'goods')) delete kindOverride[name];
+  const autoKind = auto.kind === 'equip' ? 'equip' : 'goods';
+  if (next === autoKind) delete kindOverride[name];
   else kindOverride[name] = next;
 }
 
@@ -482,28 +489,52 @@ function kindOf(name: string): 'equip' | 'goods' {
   return kindOverride[name] ?? bagRows.value.find(r => r.name === name)?.kind ?? 'goods';
 }
 
-/** 批量提交：一次 AI 审核覆盖全部勾选物品 */
+/** 阶段一：提交审核 + 算费 */
 async function doSellAll() {
   const entries = sellRows.value
     .filter(r => r.canSell)
     .map(r => ({
       name: r.name,
-      // 描述以卖家编辑后的为准（可能被补充或改写），随快照一起上架并接受 AI 审核
-      snapshot: { ...r.item, 描述: String(r.entry.desc ?? '') } as MarketItemSnapshot,
+      snapshot: {
+        ...r.item,
+        描述: String(r.entry.desc ?? ''),
+        品质: r.entry.quality,
+        阶位: r.entry.tier,
+      } as MarketItemSnapshot,
       kind: r.kind,
       qty: Number(r.entry.qty),
       price: Number(r.entry.price),
     }));
   if (entries.length === 0) return;
-  const ok = await store.sellBatch(entries);
+  prepping.value = true;
+  try {
+    prep.value = await store.prepareSell(entries);
+  } catch (e: any) {
+    store.lastError = e?.message || 'AI 审核失败';
+  } finally {
+    prepping.value = false;
+  }
+}
+
+/** 阶段二：确认费用 → 执行上架 + 扣费 */
+async function confirmCommit() {
+  if (!prep.value) return;
+  const entries = prep.value.listable.map(i => i.name);
+  const ok = await store.commitSell(prep.value);
   if (ok) {
-    for (const e of entries) delete sellSel[e.name];
+    for (const n of entries) delete sellSel[n];
+    prep.value = null;
   }
 }
 
 // ============ 展示辅助 ============
+function qualityLabel(item: MarketItemSnapshot): string {
+  const q = parseQuality(item.品质);
+  if (!q) return String(item.品质 ?? '道具');
+  return q.gray ? `灰色封印(${q.quality})` : q.quality;
+}
+
 function qualityColor(item: MarketItemSnapshot): string {
-  // 按解包后的原品质上色（灰色封印(紫色) → 紫色）
   switch (parseQuality(item.品质)?.quality) {
     case '蓝色':
       return '#4a9eff';
@@ -518,8 +549,24 @@ function qualityColor(item: MarketItemSnapshot): string {
   }
 }
 
-function timeAgo(created: number): string {
-  const s = Math.max(0, Math.floor((Date.now() - created) / 1000));
+function has(v: unknown): boolean {
+  if (v === undefined || v === null) return false;
+  if (typeof v === 'string') return !['', '无', 'none', 'None'].includes(v.trim());
+  if (typeof v === 'number') return v !== 0;
+  return true;
+}
+
+function effectList(item: MarketItemSnapshot): { name: string; text: string }[] {
+  const e = item.效果;
+  if (e && typeof e === 'object' && !Array.isArray(e)) {
+    return Object.entries(e as Record<string, unknown>).map(([name, text]) => ({ name, text: String(text) }));
+  }
+  if (typeof e === 'string' && e.trim()) return [{ name: '效果', text: e }];
+  return [];
+}
+
+function timeAgo(ts: number): string {
+  const s = Math.max(0, Math.floor((Date.now() - ts) / 1000));
   if (s < 60) return '刚刚';
   if (s < 3600) return `${Math.floor(s / 60)}分钟前`;
   if (s < 86400) return `${Math.floor(s / 3600)}小时前`;
@@ -528,7 +575,7 @@ function timeAgo(created: number): string {
 
 onMounted(() => store.refresh());
 
-// 跨 app 联动：工坊「上架市场」跳转时预选物品（背包未同步好则等下次变化再试）
+// 跨 app 联动：工坊「上架市场」跳转时预选物品
 watch(
   () => [store.pendingSell, store.playerBag] as const,
   () => {
@@ -536,10 +583,8 @@ watch(
     if (!name) return;
     const item = (store.playerBag as Bag)[name];
     if (!item || Number(item.数量) <= 0) return;
-    // 与 bagEntries 同一道门：工坊「上架市场」目前只带成品名过来，但入口不该各自为政
-    if (isBlueprintName(name)) return;
     tab.value = 'sell';
-    if (!sellSel[name]) sellSel[name] = { name, item, qty: 1, price: '', desc: String(item.描述 ?? '') };
+    if (!sellSel[name]) toggleSel(name, item);
     store.pendingSell = '';
   },
   { immediate: true },
@@ -583,6 +628,7 @@ watch(
   align-items: center;
   justify-content: center;
   border-radius: 50%;
+  position: relative;
   &:disabled {
     opacity: 0.5;
   }
@@ -591,6 +637,20 @@ watch(
     height: 20px;
   }
 }
+.bell-badge {
+  position: absolute;
+  top: 3px;
+  right: 2px;
+  min-width: 14px;
+  height: 14px;
+  padding: 0 3px;
+  border-radius: 7px;
+  background: #e0705c;
+  color: #fff;
+  font-size: 9px;
+  line-height: 14px;
+  text-align: center;
+}
 .hdr-title {
   flex: 1;
   font-size: 14px;
@@ -598,10 +658,10 @@ watch(
   letter-spacing: 2px;
   margin-left: 4px;
 }
-.hdr-up {
+.hdr-bal {
   font-size: 11px;
   color: var(--amber-d, #b08a4f);
-  margin-right: 6px;
+  margin-right: 4px;
   font-variant-numeric: tabular-nums;
 }
 
@@ -635,6 +695,7 @@ watch(
   background: rgba(224, 112, 92, 0.1);
   border: 1px solid rgba(224, 112, 92, 0.3);
   border-radius: 6px;
+  white-space: pre-wrap;
 }
 
 .mkt-body {
@@ -650,6 +711,7 @@ watch(
   display: flex;
   gap: 4px;
   flex-shrink: 0;
+  flex-wrap: wrap;
 }
 .mkt-chip {
   padding: 3px 10px;
@@ -667,7 +729,12 @@ watch(
 .mkt-hint {
   font-size: 11px;
   color: var(--chalk-d, #9c8f80);
-  opacity: 0.8;
+  opacity: 0.85;
+  line-height: 1.5;
+  &.dim {
+    opacity: 0.6;
+    font-size: 10px;
+  }
 }
 .mkt-empty {
   padding: 30px 0;
@@ -693,6 +760,9 @@ watch(
   }
   &.proceeds {
     border-color: rgba(176, 138, 79, 0.4);
+  }
+  &.sale {
+    border-color: rgba(122, 176, 138, 0.3);
   }
 }
 .mc-head {
@@ -726,6 +796,10 @@ watch(
     background: rgba(90, 140, 100, 0.15);
     color: #7fb08a;
   }
+  &.op {
+    background: rgba(224, 112, 92, 0.18);
+    color: #e0705c;
+  }
 }
 .mc-desc {
   font-size: 11px;
@@ -745,7 +819,10 @@ watch(
 .mc-seller {
   font-size: 10px;
   color: var(--chalk-d, #9c8f80);
-  opacity: 0.7;
+  opacity: 0.75;
+  .buyer {
+    color: var(--amber, #d8b36a);
+  }
 }
 .mc-own {
   font-size: 10px;
@@ -778,14 +855,15 @@ watch(
   color: #e0705c;
   cursor: pointer;
 }
-.mc-repick {
-  border: none;
+.mc-detail {
+  padding: 3px 10px;
+  font-size: 10px;
+  border-radius: 6px;
+  border: 1px solid rgba(176, 138, 79, 0.4);
   background: transparent;
   color: var(--amber-d, #b08a4f);
-  font-size: 11px;
   cursor: pointer;
 }
-/* 勾选框 + 物品名 */
 .mc-pick {
   display: flex;
   align-items: center;
@@ -797,7 +875,6 @@ watch(
     flex-shrink: 0;
   }
 }
-/* 装备/道具 标注切换 */
 .mc-kind {
   font-size: 10px;
   padding: 1px 6px;
@@ -812,17 +889,6 @@ watch(
     color: var(--amber, #d8b36a);
   }
 }
-/* 批量提交栏 */
-.mkt-submit {
-  position: sticky;
-  bottom: 0;
-  padding-top: 6px;
-  background: linear-gradient(180deg, transparent, #100c09 40%);
-}
-.mkt-hint.dim {
-  opacity: 0.6;
-  font-size: 10px;
-}
 
 .sell-form {
   display: flex;
@@ -836,11 +902,12 @@ watch(
   gap: 8px;
   font-size: 12px;
   color: var(--chalk-d, #9c8f80);
-  span {
-    width: 56px;
+  > span {
+    width: 64px;
     flex-shrink: 0;
   }
-  input {
+  input,
+  select {
     flex: 1;
     min-width: 0;
     padding: 5px 8px;
@@ -854,10 +921,35 @@ watch(
       border-color: rgba(176, 138, 79, 0.6);
     }
   }
+  &.col {
+    flex-direction: column;
+    align-items: stretch;
+    gap: 4px;
+    > span {
+      width: auto;
+    }
+    textarea {
+      width: 100%;
+      padding: 5px 8px;
+      font-size: 12px;
+      line-height: 1.5;
+      border-radius: 6px;
+      border: 1px solid rgba(80, 40, 20, 0.5);
+      background: rgba(16, 12, 9, 0.8);
+      color: var(--chalk, #d8cdbd);
+      outline: none;
+      resize: vertical;
+      font-family: inherit;
+      &:focus {
+        border-color: rgba(176, 138, 79, 0.6);
+      }
+    }
+  }
 }
 .sf-hint {
   font-size: 11px;
   color: #7fb08a;
+  line-height: 1.5;
   &.bad {
     color: #e0705c;
   }
@@ -882,6 +974,13 @@ watch(
   color: #d8b36a;
 }
 
+.mkt-submit {
+  position: sticky;
+  bottom: 0;
+  padding-top: 6px;
+  background: linear-gradient(180deg, transparent, #100c09 40%);
+}
+
 .mkt-mask {
   position: absolute;
   inset: 0;
@@ -894,7 +993,7 @@ watch(
 }
 .mkt-dialog {
   width: 100%;
-  max-width: 300px;
+  max-width: 320px;
   border-radius: 10px;
   border: 1px solid rgba(176, 138, 79, 0.4);
   background: #1e150e;
@@ -902,37 +1001,21 @@ watch(
   display: flex;
   flex-direction: column;
   gap: 8px;
-}
-.md-title {
-  font-size: 14px;
-  color: var(--amber, #d8b36a);
-  letter-spacing: 2px;
-}
-.md-line {
-  font-size: 12px;
-  color: var(--chalk, #d8cdbd);
-  &.dim {
-    color: var(--chalk-d, #9c8f80);
-    font-size: 11px;
+  &.detail {
+    max-height: 88%;
+    overflow-y: auto;
   }
-}
-.md-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 8px;
-  margin-top: 4px;
-}
-
-/* ===== 商品详情弹层 ===== */
-.mkt-dialog.detail {
-  max-height: 88%;
-  overflow-y: auto;
 }
 .md-title-row {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
+}
+.md-title {
+  font-size: 14px;
+  color: var(--amber, #d8b36a);
+  letter-spacing: 2px;
 }
 .md-close {
   border: none;
@@ -994,39 +1077,82 @@ watch(
     font-size: 14px;
   }
 }
-.mc-detail {
-  padding: 3px 10px;
-  font-size: 10px;
-  border-radius: 6px;
-  border: 1px solid rgba(176, 138, 79, 0.4);
-  background: transparent;
-  color: var(--amber-d, #b08a4f);
-  cursor: pointer;
+.md-line {
+  font-size: 12px;
+  color: var(--chalk, #d8cdbd);
+  &.dim {
+    color: var(--chalk-d, #9c8f80);
+    font-size: 11px;
+    line-height: 1.5;
+  }
+}
+.md-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
 }
 
-/* 描述输入行（标签在上，文本域在下） */
-.sf-row.col {
+/* 费用确认弹层 */
+.fee-row {
+  display: flex;
   flex-direction: column;
-  align-items: stretch;
-  gap: 4px;
-  span {
-    width: auto;
+  gap: 2px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+}
+.fee-name {
+  font-size: 12px;
+  color: var(--chalk, #d8cdbd);
+}
+.fee-op {
+  font-size: 10px;
+  color: #e0705c;
+  margin-left: 4px;
+}
+.fee-line {
+  font-size: 11px;
+  color: var(--chalk-d, #9c8f80);
+  &.op {
+    color: #e0705c;
   }
-  textarea {
-    width: 100%;
-    padding: 5px 8px;
-    font-size: 12px;
-    line-height: 1.5;
-    border-radius: 6px;
-    border: 1px solid rgba(80, 40, 20, 0.5);
-    background: rgba(16, 12, 9, 0.8);
-    color: var(--chalk, #d8cdbd);
-    outline: none;
-    resize: vertical;
-    font-family: inherit;
-    &:focus {
-      border-color: rgba(176, 138, 79, 0.6);
-    }
-  }
+}
+.fee-point {
+  font-size: 10px;
+  color: var(--chalk-d, #9c8f80);
+  opacity: 0.8;
+  padding-left: 6px;
+}
+
+/* 通知中心 */
+.notice {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  padding: 6px 8px;
+  border-radius: 6px;
+  background: rgba(0, 0, 0, 0.22);
+  border-left: 2px solid rgba(176, 138, 79, 0.5);
+}
+.notice-head {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+}
+.notice-title {
+  font-size: 12px;
+  color: var(--amber, #d8b36a);
+}
+.notice-time {
+  font-size: 10px;
+  color: var(--chalk-d, #9c8f80);
+  white-space: nowrap;
+}
+.notice-body {
+  font-size: 11px;
+  color: var(--chalk, #d8cdbd);
+  line-height: 1.5;
+  white-space: pre-wrap;
 }
 </style>

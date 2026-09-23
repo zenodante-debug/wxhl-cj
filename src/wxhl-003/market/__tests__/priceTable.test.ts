@@ -3,6 +3,9 @@ import { checkPrice, classify, hasEquipMarkers, parseCategory, parseQuality, ref
 
 // ================================================================
 // 测试用例来自用户真实存档（无限回廊7.0 聊天导出）+ 世界书装备系统规则
+// 定价口径（2026-09-23 用户定稿）：参考价 = 一阶基准价 × 阶位²（系统一）
+//   允许区间 = [参考价下限 × 50%, 参考价上限 × 200%]
+//   道具与武器同表（按所填品质查武器基准），且必须填写品质
 // ================================================================
 
 /** 真实存档：夜翼披风（防具·躯干_极轻·蓝色·一阶） */
@@ -26,7 +29,7 @@ const 圣水凝晶 = {
   效果: { 圣力洗礼: '解除异常状态。', 纯净恢复: '恢复30%生命。' },
   类型: '消耗品药剂', 阶位: '一阶',
 };
-/** 真实存档：特管局合作者徽记（品质"特殊" → 道具） */
+/** 真实存档：特管局合作者徽记（品质"特殊" → 不可定价，需补全品质） */
 const 徽记 = { 描述: '特管局合作凭证', 数量: 1, 名称: '特管局合作者徽记', 品质: '特殊', 类型: '凭证' };
 /** 真实存档：背包里的技能条目（类型"被动" → 道具） */
 const 技能卷轴 = {
@@ -145,62 +148,89 @@ describe('refRange · 一阶基准×阶位²', () => {
   });
 });
 
-describe('checkPrice · equip（底价=基准下限，无折扣）', () => {
-  it('蓝装平价：[基准下限, 基准上限]，禁溢价', () => {
-    const 蓝武器二阶 = { 名称: '制式长刀', 品质: '蓝色', 类型: '武器', 阶位: '二阶', 数量: 1 };
-    expect(checkPrice('equip', 蓝武器二阶, '一阶', 400).ok).toBe(true);
-    expect(checkPrice('equip', 蓝武器二阶, '一阶', 800).ok).toBe(true);
-    expect(checkPrice('equip', 蓝武器二阶, '一阶', 801).ok).toBe(false);
-    expect(checkPrice('equip', 蓝武器二阶, '一阶', 399).ok).toBe(false); // 底价=基准下限 400
+describe('checkPrice · equip（允许区间 = 参考价 50% ~ 200%）', () => {
+  const 蓝武器二阶 = { 名称: '制式长刀', 品质: '蓝色', 类型: '武器', 阶位: '二阶', 数量: 1 };
+  it('蓝武二阶：参考 [400,800] → 允许 [200,1600]', () => {
+    expect(checkPrice('equip', 蓝武器二阶, '一阶', 200).ok).toBe(true);
+    expect(checkPrice('equip', 蓝武器二阶, '一阶', 1600).ok).toBe(true);
+    expect(checkPrice('equip', 蓝武器二阶, '一阶', 199).ok).toBe(false);
+    expect(checkPrice('equip', 蓝武器二阶, '一阶', 1601).ok).toBe(false);
   });
-  it('金装最多+50%', () => {
-    const 金防具一阶 = { 名称: '秘银胸甲', 品质: '金色', 类型: '防具', 阶位: '一阶' };
-    expect(checkPrice('equip', 金防具一阶, '一阶', 250).ok).toBe(true); // 基准下限
-    expect(checkPrice('equip', 金防具一阶, '一阶', 900).ok).toBe(true); // 600×1.5
-    expect(checkPrice('equip', 金防具一阶, '一阶', 901).ok).toBe(false);
-    expect(checkPrice('equip', 金防具一阶, '一阶', 249).ok).toBe(false);
+
+  it('金防具一阶：参考 [250,600] → 允许 [125,1200]（品质溢价表已作废，统一 ×2）', () => {
+    const 金防具 = { 名称: '秘银胸甲', 品质: '金色', 类型: '防具', 阶位: '一阶' };
+    expect(checkPrice('equip', 金防具, '一阶', 125).ok).toBe(true);
+    expect(checkPrice('equip', 金防具, '一阶', 1200).ok).toBe(true);
+    expect(checkPrice('equip', 金防具, '一阶', 124).ok).toBe(false);
+    expect(checkPrice('equip', 金防具, '一阶', 1201).ok).toBe(false);
   });
-  it('紫装上限=基准上限×2，下限=基准下限', () => {
-    const 紫饰品三阶 = { 名称: '龙血吊坠', 品质: '紫色', 类型: '饰品', 阶位: '三阶' };
-    expect(checkPrice('equip', 紫饰品三阶, '一阶', 10800).ok).toBe(true);
-    expect(checkPrice('equip', 紫饰品三阶, '一阶', 45000).ok).toBe(true); // 22500×2
-    expect(checkPrice('equip', 紫饰品三阶, '一阶', 45001).ok).toBe(false);
-    expect(checkPrice('equip', 紫饰品三阶, '一阶', 10799).ok).toBe(false);
+
+  it('紫饰品三阶：参考 [10800,22500] → 允许 [5400,45000]', () => {
+    const 紫饰品 = { 名称: '龙血吊坠', 品质: '紫色', 类型: '饰品', 阶位: '三阶' };
+    expect(checkPrice('equip', 紫饰品, '一阶', 5400).ok).toBe(true);
+    expect(checkPrice('equip', 紫饰品, '一阶', 45000).ok).toBe(true);
+    expect(checkPrice('equip', 紫饰品, '一阶', 5399).ok).toBe(false);
+    expect(checkPrice('equip', 紫饰品, '一阶', 45001).ok).toBe(false);
   });
+
   it('白装/银装拒绝上架', () => {
     expect(checkPrice('equip', { 名称: '铁剑', 品质: '白色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
     expect(checkPrice('equip', { 名称: '圣剑', 品质: '银色', 类型: '武器', 阶位: '一阶' }, '一阶', 50).ok).toBe(false);
   });
-  it('物品缺阶位时按卖家阶位算', () => {
+
+  it('物品缺阶位时按卖家阶位算（蓝武 三阶卖家 → [450,3600]）', () => {
     const 无阶蓝武 = { 名称: '制式长刀', 品质: '蓝色', 类型: '武器' };
-    expect(checkPrice('equip', 无阶蓝武, '三阶', 1800).ok).toBe(true); // [100,200]×9
-    expect(checkPrice('equip', 无阶蓝武, '三阶', 1801).ok).toBe(false);
+    expect(checkPrice('equip', 无阶蓝武, '三阶', 450).ok).toBe(true);
+    expect(checkPrice('equip', 无阶蓝武, '三阶', 3600).ok).toBe(true);
+    expect(checkPrice('equip', 无阶蓝武, '三阶', 449).ok).toBe(false);
+    expect(checkPrice('equip', 无阶蓝武, '三阶', 3601).ok).toBe(false);
+  });
+
+  it('真实存档回归：夜翼披风（蓝·防具·一阶）参考 [50,150] → 允许 [25,300]', () => {
+    expect(checkPrice('equip', 夜翼披风, '一阶', 25).ok).toBe(true);
+    expect(checkPrice('equip', 夜翼披风, '一阶', 300).ok).toBe(true);
+    expect(checkPrice('equip', 夜翼披风, '一阶', 24).ok).toBe(false);
+    expect(checkPrice('equip', 夜翼披风, '一阶', 301).ok).toBe(false);
   });
 });
 
-describe('checkPrice · goods（[5,3000]×阶位²）', () => {
-  it('一阶道具：5~3000 UP', () => {
-    expect(checkPrice('goods', { ...圣水凝晶 }, '一阶', 15).ok).toBe(true);
-    expect(checkPrice('goods', { ...徽记 }, '一阶', 5).ok).toBe(true);
-    expect(checkPrice('goods', { ...技能卷轴 }, '一阶', 100).ok).toBe(true); // 基础技能卷轴100
-    expect(checkPrice('goods', { ...技能卷轴 }, '一阶', 600).ok).toBe(true); // 高级技能卷轴600
-    expect(checkPrice('goods', { ...圣水凝晶 }, '一阶', 4).ok).toBe(false);
-    expect(checkPrice('goods', { ...圣水凝晶 }, '一阶', 3001).ok).toBe(false);
+describe('checkPrice · goods（与武器同表，必须填写品质）', () => {
+  it('蓝品质道具一阶：参考武器蓝 [100,200] → 允许 [50,400]（15 UP 乱卖被拦）', () => {
+    expect(checkPrice('goods', 圣水凝晶, '一阶', 50).ok).toBe(true);
+    expect(checkPrice('goods', 圣水凝晶, '一阶', 400).ok).toBe(true);
+    expect(checkPrice('goods', 圣水凝晶, '一阶', 49).ok).toBe(false);
+    expect(checkPrice('goods', 圣水凝晶, '一阶', 401).ok).toBe(false);
+    // 旧规则下 15 UP 能挂，现在不行——这正是"强力道具几十 UP 扰乱市场"的修法
+    expect(checkPrice('goods', 圣水凝晶, '一阶', 15).ok).toBe(false);
   });
-  it('道具自带阶位时按物品阶位算', () => {
-    // 圣水凝晶 阶位一阶，卖家五阶 → 按物品一阶算 [5,3000]
-    expect(checkPrice('goods', { ...圣水凝晶 }, '五阶', 3000).ok).toBe(true);
-    expect(checkPrice('goods', { ...圣水凝晶 }, '五阶', 3001).ok).toBe(false);
+
+  it('白品质道具一阶：参考武器白 [30,60] → 允许 [15,120]（弹药等便宜消耗品）', () => {
+    const 弹药 = { 名称: '穿甲弹药', 品质: '白色', 类型: '弹药', 阶位: '一阶', 数量: 50 };
+    expect(checkPrice('goods', 弹药, '一阶', 15).ok).toBe(true);
+    expect(checkPrice('goods', 弹药, '一阶', 120).ok).toBe(true);
+    expect(checkPrice('goods', 弹药, '一阶', 14).ok).toBe(false);
+    expect(checkPrice('goods', 弹药, '一阶', 121).ok).toBe(false);
   });
-  it('无阶位道具按卖家阶位算（五阶 [125, 75000]）', () => {
-    const 无阶道具 = { 名称: '神秘材料', 数量: 3 };
-    expect(checkPrice('goods', 无阶道具, '五阶', 50000).ok).toBe(true);
-    expect(checkPrice('goods', 无阶道具, '五阶', 80000).ok).toBe(false);
+
+  it('缺品质 / 品质不可识别 → 拒绝（要求补全）', () => {
+    expect(checkPrice('goods', { 名称: '神秘材料', 数量: 3 }, '一阶', 100).ok).toBe(false);
+    expect(checkPrice('goods', 徽记, '一阶', 100).ok).toBe(false);
+    expect(checkPrice('goods', { ...技能卷轴 }, '一阶', 100).ok).toBe(false);
+    expect(checkPrice('goods', { 名称: 'x', 品质: '特殊', 数量: 1 }, '一阶', 100).reason).toContain('品质');
   });
-  it('数量与价格防刷（道具数量上限 999，支持成组出售如 50 发子弹）', () => {
-    expect(checkPrice('goods', { ...圣水凝晶, 数量: 1000 }, '一阶', 15).ok).toBe(false);
-    expect(checkPrice('goods', { ...圣水凝晶, 数量: 999 }, '一阶', 15).ok).toBe(true);
-    expect(checkPrice('goods', { ...圣水凝晶, 数量: 0 }, '一阶', 15).ok).toBe(false);
+
+  it('道具自带阶位时按物品阶位算；无阶位按卖家阶位', () => {
+    expect(checkPrice('goods', 圣水凝晶, '五阶', 400).ok).toBe(true); // 物品一阶封顶 400
+    expect(checkPrice('goods', 圣水凝晶, '五阶', 401).ok).toBe(false);
+    const 五阶道具 = { 名称: 'x', 品质: '蓝色', 数量: 1, 阶位: '五阶' };
+    expect(checkPrice('goods', 五阶道具, '一阶', 5000).ok).toBe(true); // [100,200]×25 → [1250,10000]
+    expect(checkPrice('goods', 五阶道具, '一阶', 1249).ok).toBe(false);
+  });
+
+  it('数量与价格防刷（上限 999）', () => {
+    expect(checkPrice('goods', { ...圣水凝晶, 数量: 1000 }, '一阶', 100).ok).toBe(false);
+    expect(checkPrice('goods', { ...圣水凝晶, 数量: 999 }, '一阶', 100).ok).toBe(true);
+    expect(checkPrice('goods', { ...圣水凝晶, 数量: 0 }, '一阶', 100).ok).toBe(false);
     expect(checkPrice('goods', { ...圣水凝晶 }, '一阶', -1).ok).toBe(false);
   });
 });

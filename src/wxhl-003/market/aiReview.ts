@@ -3,14 +3,14 @@ import type { MarketKind, MarketItemSnapshot } from './priceTable';
 // ================================================================
 // 无由回廊 · 自由市场上架 AI 审核（前端，用卖家终端设置中配置的 API）
 // 两道审核合一次调用：
-//   1. 规则审核——装备数值/效果是否符合世界书<装备效果强度限制>
-//      （道具按卖家标注只审效果文本是否明显离谱）
-//   2. 红线审核——政治敏感 / R18·18+·NSFW / 违法内容，装备道具一视同仁
+//   1. 规则审核——效果语义强度判定「真实阶位」（一阶~五阶/超脱）。
+//      2026-09-23 起超模不再拒绝，改为收费上架（费用由 fee.ts 按真实阶位计算）；
+//      AI 负责语义层（效果文本实际达到哪一阶规格），数值层由 fee.assessDeterministic 反查。
+//   2. 红线审核——政治敏感 / R18·18+·NSFW / 违法内容 → 仍然直接拒绝（不可收费放行）。
 // 批量：一次调用可审多件（多选上架时只花一次 API）。
 // 标注：卖家可手动把物品标为装备/道具，只影响本审核口径；
 //       服务器仍按物品真实字段分类定价（防"标成道具"绕过装备价格上限）。
-// fail-closed：未配置 API、调用失败、格式异常、审核不过 → 一律不上架（由 store.sell 保证）
-// 价格与硬性数值校验仍由 priceTable/equipRules/Worker 确定性规则兜底，AI 只管语义与内容。
+// fail-closed：未配置 API、调用失败、格式异常、红线命中 → 一律不上架（由 store.sell 保证）。
 // ================================================================
 
 /** 审核结果 JSON Schema——一次审多件（aiGenerate 结构化输出） */
@@ -27,8 +27,10 @@ export const REVIEW_SCHEMA = {
             名称: { type: 'string' },
             pass: { type: 'boolean' },
             reasons: { type: 'array', items: { type: 'string' } },
+            realTier: { type: 'string' },
+            opPoints: { type: 'array', items: { type: 'string' } },
           },
-          required: ['名称', 'pass', 'reasons'],
+          required: ['名称', 'pass', 'reasons', 'realTier', 'opPoints'],
         },
       },
     },
@@ -37,14 +39,21 @@ export const REVIEW_SCHEMA = {
 } as const;
 
 export interface ReviewVerdict {
+  /** false = 红线/结构问题，拒绝上架（不可收费放行） */
   pass: boolean;
   reasons: string[];
+  /** AI 判定的效果真实阶位下标 0..5（0..4=一阶~五阶，5=超脱）；解析失败为 null */
+  realIdx: number | null;
+  /** 超模点：哪里超模、超到什么程度 */
+  opPoints: string[];
 }
 
 export interface ReviewTarget {
   item: MarketItemSnapshot;
   /** 卖家标注（未标注则按自动分类传入） */
   kind: MarketKind;
+  /** 名义阶位下标 0..4（供 AI 对照判定真实阶位） */
+  nominalIdx: number;
 }
 
 /** 世界书<装备效果强度限制>常驻数值基准（阶位 → 命中/闪避、伤害%、属性/防御加成） */
@@ -56,20 +65,21 @@ const EFFECT_BENCH = [
   '五阶: 命中/闪避+10~20%、伤害+20~40%、属性/防御+6',
 ].join('；');
 
-const 装备规则段 = `【第一道 · 规则审核】（本物品按「装备」口径审：需做数值与效果判断）
-装备规则：
-- 每件装备最多 2 条效果（效果条目破限器可合法扩到 3 条，超过 3 条为严重违规）
-- 效果分常驻/触发/消耗三类：常驻仅限纯数值且不得超基准；触发类需写明触发条件，数值至多常驻上限的 1.5~2 倍；消耗类需写明消耗或冷却，强度最高
+const 装备规则段 = `【第一道 · 规则审核】（本物品按「装备」口径审：判定效果的真实阶位）
+装备效果阶位参照：
 - 常驻数值基准（按阶位）——${EFFECT_BENCH}
-- 必中/无敌/锁血/即死类强力效果：仅四阶以上紫/银品质装备可出现，且必须限定明确回合数（单次≤2回合）并有明确消耗
-- 禁止：无条件即死、永久无敌、无限资源/锁血、无条件必中核心弱点、无代价强效果、效果无限循环联动
-- 数值字段（主/副属性加成、防御/闪避、伤害骰）已由回廊确定性规则硬校验过，你重点审查「效果文本」的语义强度是否绕开上述基准（例如把超模数值伪装成触发条件、无冷却无限触发等）`;
+- 效果分常驻/触发/消耗三类：触发类数值至多常驻上限的 1.5~2 倍且须写明触发条件；消耗类强度最高且须写明消耗或冷却
+- 每件装备最多 2 条效果（破限器可合法扩到 3 条，超过 3 条属结构违规，直接 pass=false）
+- 必中/无敌/锁血/即死类强力效果：四阶以上紫/银品质且限定回合数（单次≤2回合）并有明确消耗才算四/五阶规格，否则视超出程度上调真实阶位
+- 真实阶位判定：效果实际达到哪一阶的规格，就判哪一阶——超模不再直接拒绝，而是按真实阶位收取上架费，所以请诚实评估、不要放水也不要过严
+- 数值字段（主/副属性加成、防御/闪避、伤害骰）已由回廊确定性规则反查阶位，你重点审「效果文本」的语义强度（如把超模数值伪装成触发条件、无冷却无限触发等）`;
 
-const 道具规则段 = `【第一道 · 规则审核】（本物品按「道具」口径审：无装备数值基准）
-- 道具价格已由回廊按阶位硬性限制，你只看「效果」文本是否明显离谱：普通药剂/消耗品不应出现无条件即死、永久无敌、无限资源、改变整个战局的强力效果
-- 有触发类/消耗类效果时，应写明触发条件或消耗`;
+const 道具规则段 = `【第一道 · 规则审核】（本物品按「道具」口径审：判定效果的真实阶位）
+- 道具无装备数值基准，按「同等效果在装备上属于哪一阶规格」来判定真实阶位
+- 普通药剂/消耗品的效果（回血、解毒、短时增益）是一阶规格
+- 真实阶位判定：效果实际达到哪一阶的规格，就判哪一阶——超模不再直接拒绝，而是按真实阶位收取上架费，请诚实评估`;
 
-const 红线段 = `【第二道 · 红线审核】（所有物品一视同仁，检查名称、描述、效果全文；描述可能含卖家自行补充的内容，一并审查）
+const 红线段 = `【第二道 · 红线审核】（所有物品一视同仁，检查名称、描述、效果全文；描述可能含卖家自行补充的内容，一并审查。红线命中直接 pass=false，不可收费放行）
 - 政治敏感：现实政治人物/事件/组织、意识形态宣传、现实国家间冲突的立场化内容
 - R18 / 18+ / NSFW：色情、露骨性描写；任何涉及未成年人的性化内容是绝对红线，一律拒绝
 - 违法内容：现实毒品/武器/爆炸物制作教唆、诈骗话术、现实犯罪指导
@@ -78,26 +88,25 @@ const 红线段 = `【第二道 · 红线审核】（所有物品一视同仁，
 
 /**
  * 构建审核提示词（纯函数）。批量时一次审多件，逐件给出结论。
- * 卖家标注为「装备」才附数值基准，标为「道具」只审效果离谱度与红线。
+ * 每件标注口径决定用装备规则还是道具规则；混批时两段都给。
  */
 export function buildReviewPrompt(targets: ReviewTarget[]): string {
-  const multi = targets.length > 1;
+  const hasEquip = targets.some(t => t.kind === 'equip');
+  const hasGoods = targets.some(t => t.kind === 'goods');
+  const 规则段 = [hasEquip ? 装备规则段 : '', hasGoods ? 道具规则段 : ''].filter(Boolean).join('\n\n');
+
   const 清单 = targets
-    .map((t, i) => {
-      const head = `—${i + 1}—（${t.kind === 'equip' ? '装备' : '道具'}）\n${JSON.stringify(t.item)}`;
-      return head;
-    })
+    .map(
+      (t, i) =>
+        `—${i + 1}—（${t.kind === 'equip' ? '装备' : '道具'}·名义${['一阶', '二阶', '三阶', '四阶', '五阶'][t.nominalIdx] ?? '一阶'}）\n${JSON.stringify(t.item)}`,
+    )
     .join('\n');
-
-  const 规则段 = targets.some(t => t.kind === 'equip') ? 装备规则段 : 道具规则段;
-
-  const 输出格式 = multi
-    ? `{"results": [{"名称": "物品名", "pass": true, "reasons": []}, {"名称": "另一件", "pass": false, "reasons": ["违反了什么、涉及哪段文本、为什么"]}]}`
-    : `{"results": [{"名称": "物品名", "pass": true, "reasons": []}]}`;
 
   return `你是「无限回廊」自由市场的上架审核官。回廊是成年玩家游玩的中文文字跑团世界，玩家把物品挂上跨玩家市场前需通过你的审核。只输出 JSON，不要任何其他文字。
 
 ${规则段}
+
+阶位序列：一阶 < 二阶 < 三阶 < 四阶 < 五阶 < 超脱。超脱的定义：一切超出五阶规格的效果——无限资源、无限锁血、现实改写、时间回溯、无代价即死、全属性倍增、规则系能力（抹杀概念、改写因果）等。
 
 ${红线段}
 
@@ -105,8 +114,9 @@ ${红线段}
 ${清单}
 
 【输出格式】
-${输出格式}
-pass=false 时 reasons 必须非空且具体。`;
+{"results": [{"名称": "物品名", "pass": true, "reasons": [], "realTier": "三阶", "opPoints": []}, {"名称": "另一件", "pass": false, "reasons": ["触犯红线：……"], "realTier": "五阶", "opPoints": ["效果X达到五阶规格：……"]}]}
+- pass=true：允许上架。realTier 填效果真实阶位（与名义阶位相同则填名义阶位）；opPoints 仅在 realTier 高于名义阶位时逐条列出超模点（哪个效果、超出到什么程度），否则空数组
+- pass=false：红线或结构违规，拒绝上架，reasons 逐条写明；realTier 仍填你的评估结果`;
 }
 
 /** 单件审核结果归一：格式异常抛错（调用方 fail-closed） */
@@ -118,7 +128,11 @@ export function reviewVerdict(parsed: any): ReviewVerdict {
     ? parsed.reasons.map((r: unknown) => String(r).trim()).filter((r: string) => r.length > 0)
     : [];
   if (!pass && reasons.length === 0) reasons = ['AI 审核未通过（未给出具体理由），请调整物品内容后重试'];
-  return { pass, reasons };
+  const realIdx = typeof parsed.realTier === 'string' ? ['一阶', '二阶', '三阶', '四阶', '五阶', '超脱'].indexOf(parsed.realTier.trim()) : -1;
+  const opPoints = Array.isArray(parsed.opPoints)
+    ? parsed.opPoints.map((r: unknown) => String(r).trim()).filter((r: string) => r.length > 0)
+    : [];
+  return { pass, reasons, realIdx: realIdx >= 0 ? realIdx : null, opPoints };
 }
 
 /**
