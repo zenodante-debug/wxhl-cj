@@ -272,15 +272,22 @@
         </div>
       </div>
     </div>
+
+    <!-- ============ 订单 ============ -->
+    <div v-if="tab === 'order'" class="crf-body">
+      <OrderView />
+    </div>
   </div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, reactive, ref, watchEffect } from 'vue';
+import { computed, onMounted, reactive, ref, watch, watchEffect } from 'vue';
 import { 归一位阶 } from '../dice';
 import type { DesignTarget } from './blueprintAI';
 import { computeDC, 难度分档 } from './craft';
 import { armorStats, attrBonus, weaponStats, WEAPON_TABLE, type ArmorSpectrum, type Attr, type Quality } from './equipTables';
+import OrderView from './order/OrderView.vue';
+import { useOrderStore } from './order/store';
 import {
   INDUSTRY_ATTR, 材料类别, 行业列表, isBlueprintName,
   type MaterialCategory, type 配方, type 行业,
@@ -294,8 +301,15 @@ const TABS = [
   { key: 'recipes', label: '配方' },
   { key: 'craft', label: '制作' },
   { key: 'materials', label: '材料' },
+  { key: 'order', label: '订单' },
 ] as const;
 const tab = ref<(typeof TABS)[number]['key']>('recipes');
+
+// 订单页签：每次切入都从服务器刷新一遍（大厅/我的/待领取都是服务器账本，本地不缓存）
+const orderStore = useOrderStore();
+watch(tab, t => {
+  if (t === 'order') orderStore.refresh();
+});
 
 const ATTRS: Attr[] = ['STR', 'AGI', 'CON', 'PER'];
 const CATS = [...材料类别.filter(c => c !== '任意'), '未分类'];
