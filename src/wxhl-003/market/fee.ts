@@ -63,7 +63,12 @@ export function opFeeFor(nominalIdx: number, realIdx: number, baseUp: number): O
  * 品质不可识别时退白色武器下限（30）。
  */
 export function baseUpOf(kind: 'equip' | 'goods', item: MarketItemSnapshot, category?: string | null): number {
-  const table = (kind === 'equip' && category ? (BASE as Record<string, Record<string, [number, number]>>)[category] : undefined) ?? BASE.武器;
+  // 显式标注成 string 索引的映射：`??` 两侧类型不同（左边带 string 索引签名、右边是
+  // `Record<EquipQuality, …>` 只有五个具体键），不标注的话 table 会推断成**联合类型**，
+  // 下一行用 string 索引它就会报 TS7053（联合类型要求 key 对每个成员都合法）。
+  // 运行时行为不变 —— `base ? base[0] : …` 本来就兜住了查不到的情况。
+  const table: Record<string, [number, number]> | undefined =
+    (kind === 'equip' && category ? (BASE as Record<string, Record<string, [number, number]>>)[category] : undefined) ?? BASE.武器;
   const base = table?.[String(item.品质 ?? '')];
   return base ? base[0] : BASE.武器.白色[0];
 }
