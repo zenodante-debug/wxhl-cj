@@ -680,3 +680,85 @@ describe('订单 · 待领清单（Ruling L）', () => {
     expect(maker.claim.items.map(e => e.id)).toEqual([id]);
   });
 });
+
+// ================================================================
+// Ruling M：`待领` 条目必须带**逐项金额**。
+// 客户端「先回执、后入账，只为回执成功的条目入账」——若 ACK 失败而钱已入账，服务器下次仍列出该项，
+// 只有条目自带金额才能让客户端认出「这项我已经发过了」并跳过；否则每次刷新再发一遍 → 无限刷钱。
+// ================================================================
+describe('订单 · 待领逐项金额（Ruling M）', () => {
+  /** 汇总恒等式的右边：按 项 过滤后求和（`只要正数` 用于尾款——金额 0 的是退回的成品，不算钱） */
+  const 金额和 = (mine, 项, 只要正数 = false) =>
+    mine.claim.待领.filter(e => e.项 === 项 && (!只要正数 || e.金额 > 0)).reduce((s, e) => s + e.金额, 0);
+  const 条目 = (mine, id) => mine.claim.待领.filter(e => e.id === id);
+
+  /** 建单 → 接单，返回 id（其余状态由用例自己推进） */
+  async function 建单接单(env, poster, deposit, final) {
+    const { id } = await (await call(env, '/order/create', postJson({ poster, spec: 需求单, deposit, final }))).json();
+    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    return id;
+  }
+
+  it('逐项金额口径：订金=deposit、尾款（钱）=final、成品与退回的成品=0', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const id = await 建单接单(env, '甲', 300, 700);
+
+    expect(条目(await 待领(env, '乙'), id)).toEqual([{ id, 项: '订金', 金额: 300 }]);
+
+    await call(env, '/order/deliver', postJson({ id, maker: '乙', item: { 名称: '剑', 数量: 1 } }));
+    expect(条目(await 待领(env, '甲'), id)).toEqual([{ id, 项: '成品', 金额: 0 }]);   // 物：金额 0
+
+    await call(env, '/order/confirm', postJson({ id, poster: '甲' }));
+    expect(条目(await 待领(env, '乙'), id)).toEqual([
+      { id, 项: '订金', 金额: 300 },                  // 还没领，照旧列出并带自己的金额
+      { id, 项: '尾款', 金额: 700 },
+    ]);
+
+    // 退回的成品：同一个「尾款」项，但金额 0（客户端据此知道这条给的是物、不入账）
+    const env2 = { MARKET_DB: makeFakeD1() };
+    const id2 = await 建单接单(env2, '甲', 300, 700);
+    await call(env2, '/order/deliver', postJson({ id: id2, maker: '乙', item: { 名称: '剑', 数量: 1 } }));
+    await call(env2, '/order/reject', postJson({ id: id2, poster: '甲' }));
+    expect(条目(await 待领(env2, '乙'), id2)).toEqual([
+      { id: id2, 项: '订金', 金额: 300 },
+      { id: id2, 项: '尾款', 金额: 0 },
+    ]);
+  });
+
+  it('恒等式：deposit ≡ Σ(订金条目金额)，final ≡ Σ(金额>0 的尾款条目)，且与逐单状态同步', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const a = await 建单接单(env, '甲', 300, 700);
+    const b = await 建单接单(env, '丙', 200, 100);   // 这单会走退货
+    const c = await 建单接单(env, '丁', 400, 600);   // 这单只领订金
+
+    // 三单都在：deposit = 300 + 200 + 400，且恰等于订金条目金额之和
+    let mine = await 待领(env, '乙');
+    expect(mine.claim.deposit).toBe(900);
+    expect(mine.claim.deposit).toBe(金额和(mine, '订金'));
+    expect(mine.claim.待领.filter(e => e.项 === '订金')).toHaveLength(3);
+
+    await 领(env, a, '乙', 'maker', '订金');          // a 的订金领掉 → 金额与条目同步消失
+    mine = await 待领(env, '乙');
+    expect(mine.claim.deposit).toBe(600);
+    expect(mine.claim.deposit).toBe(金额和(mine, '订金'));
+
+    await call(env, '/order/deliver', postJson({ id: a, maker: '乙', item: { 名称: '剑', 数量: 1 } }));
+    await call(env, '/order/confirm', postJson({ id: a, poster: '甲' }));
+    // b 交付后退货：退回的成品挂在「尾款」项上，金额 0 → 不得计入 final
+    await call(env, '/order/deliver', postJson({ id: b, maker: '乙', item: { 名称: '盾', 数量: 1 } }));
+    await call(env, '/order/reject', postJson({ id: b, poster: '丙' }));
+
+    mine = await 待领(env, '乙');
+    expect(mine.claim.final).toBe(700);                                    // 只有 a 的尾款
+    expect(mine.claim.final).toBe(金额和(mine, '尾款', true));              // ≡ 金额>0 的尾款条目之和
+    // 求和时 0 不改变总数，故「钱/物」的区分必须另看条目本身：只有 a 的尾款是钱，b 的是退回的成品
+    expect(条目(mine, a).map(e => [e.项, e.金额])).toEqual([['尾款', 700]]);
+    expect(条目(mine, b).map(e => [e.项, e.金额])).toEqual([['订金', 200], ['尾款', 0]]);
+
+    // 客户端的入账口径：只为「回执成功且金额>0」的条目加钱 —— 逐条累加必须等于汇总
+    const 客户端入账 = mine.claim.待领.filter(e => e.金额 > 0).reduce((s, e) => s + e.金额, 0);
+    expect(客户端入账).toBe(400 + 200 + 700);                              // c 订金 + b 订金 + a 尾款
+    expect(客户端入账).toBe(mine.claim.deposit + mine.claim.final);        // ＝ 两个汇总之和（同一派生）
+    expect(mine.claim.items.map(e => e.id)).toEqual([b]);                  // 物另算：b 退回的成品（a 的成品归发单人）
+  });
+});

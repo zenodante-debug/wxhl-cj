@@ -549,7 +549,9 @@ export function 应领(row) {
  *
  * 返回 [{ 项, 金额, 成品 }]：
  * - `项` ∈ `订金` | `尾款` | `成品`，直接就是 `/order/ack` 的入参；
- * - `金额` 计入同名的汇总数字（仅 `成品` 项为 0——它给的是物不是钱）；
+ * - `金额` 计入同名的汇总数字（仅 `成品` 项为 0——它给的是物不是钱）；也是 `待领` 条目下发给客户端的
+ *   **逐项金额**：客户端「先回执、后入账，只为回执成功的条目入账」，靠它认出「这项我已经发过了」，
+ *   否则 ACK 失败而钱已入账时，每次刷新都会再发一遍（Ruling M）。
  * - `成品: true` 表示这一项领的是成品快照（不是 UP），值取自 `row.item_json`。
  *
  * 注意「尾款」这一个 **`maker_final` 位**承载两种权益，互斥、共用一个 `项` 名：
@@ -717,7 +719,7 @@ async function handleOrder(url, request, env, cors) {
   // GET /order/mine?who=<姓名>  →  { asPoster, asMaker, claim }
   // claim 是该用户名下所有订单的待领**汇总**；领取本身发生在客户端，领完调 /order/ack。
   // 一旦 ACK 过（该项的 ack 位为 1），该项就不再出现在 claim 里 —— 汇总与「已领」互斥。
-  // Ruling L：另给**显式清单** `待领: [{ id, 项 }]`，客户端照它逐条 ACK。
+  // Ruling L：另给**显式清单** `待领: [{ id, 项, 金额 }]`，客户端照它逐条 ACK（`金额` 见 Ruling M）。
   //   只有汇总数字是不够的：ACK 是逐单逐项的（`{id, who, side, 项}`），从若干张单的**和**里
   //   反推不出该对哪张单的哪一项发 ACK；客户端若图省事把每张单的每一项都 ACK 一遍，
   //   就会**提前置位尚不存在的权益**（订单还在「已接单」就 ACK 尾款 → `maker_final_ack=1`
@@ -737,7 +739,12 @@ async function handleOrder(url, request, env, cors) {
         if (p.成品) claim.items.push({ id: r.id, item: JSON.parse(r.item_json) });
         else if (p.项 === '订金') claim.deposit += p.金额;
         else claim.final += p.金额;
-        claim.待领.push({ id: r.id, 项: p.项 });
+        // Ruling M：条目自带**逐项金额**。客户端必须「先回执、后入账，只为回执成功的条目入账」——
+        // 若 ACK 失败而钱已入账，服务器下次仍会列出该项，只有条目自带金额才能让客户端认出
+        // 「这项我已经发过了」，从而跳过它；否则每次刷新都会再发一遍 → 无限刷钱。
+        // `金额` 与汇总数字出自同一个 `p.金额`：`deposit` ≡ Σ(订金条目金额)、`final` ≡ Σ(尾款且金额>0)，
+        // 恒等式是结构性的，不靠两处各自维护。
+        claim.待领.push({ id: r.id, 项: p.项, 金额: p.金额 });
       }
     }
     return new Response(JSON.stringify({
