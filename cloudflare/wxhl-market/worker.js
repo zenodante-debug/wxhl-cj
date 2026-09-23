@@ -504,7 +504,15 @@ function toOrderDto(row) {
 async function handleOrder(url, request, env, cors) {
   const p = url.pathname;
   if (!p.startsWith('/order/')) return null;
-  await ensureOrderSchema(env);
+
+  // 建表失败要回**带 CORS 的可读 500**，而不是让异常窜出 fetch ——
+  // 那样客户端只会看到一个没有 CORS 头的 1101/500，控制台里连原因都读不出来。
+  // 照 handleRank 包 ensureRankSchema 的模子来（市场那边也是同样的包法）。
+  try {
+    await ensureOrderSchema(env);
+  } catch (e) {
+    return new Response('订单数据库初始化失败: ' + String(e && e.message ? e.message : e), { status: 500, headers: cors });
+  }
 
   // POST /order/create  { poster, spec, deposit, final }  →  { id }
   if (p === '/order/create' && request.method === 'POST') {
@@ -554,9 +562,127 @@ async function handleOrder(url, request, env, cors) {
         `UPDATE orders SET maker = ?, status = ?, updated = ? WHERE id = ? AND status = ?`,
       ).bind(maker, 订单状态.已接单, Date.now(), String(b.id), 订单状态.待接单).run(),
     );
-    const changed = res?.meta?.changes ?? 0;
+    const changed = changesOf(res);
     if (changed === 0) return new Response('手慢了，这单已被接走', { status: 400, headers: cors });
     return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+
+  /** 读一行；不存在返回 null */
+  async function readOrder(id) {
+    const row = await env.MARKET_DB.prepare(`SELECT * FROM orders WHERE id = ?`).bind(id).first();
+    return row ?? null;
+  }
+
+  /**
+   * 带条件的状态推进；受影响 0 行 → false。
+   * `AND status = ?` 是**并发守卫**：长流程里状态可能已被另一方推走（交付后又被验收/退货），
+   * 0 行即说明读到的状态已过期，绝不能按旧状态覆盖回去。
+   */
+  async function advance(id, fromStatus, toStatus, extra = {}) {
+    const 列 = Object.keys(extra);
+    const 赋值 = 列.map(k => `${k} = ?`).join(', ');
+    const sql = `UPDATE orders SET status = ?, updated = ?${赋值 ? ', ' + 赋值 : ''} WHERE id = ? AND status = ?`;
+    const 值 = [toStatus, Date.now(), ...列.map(k => extra[k]), id, fromStatus];
+    const res = await withRetry(() => env.MARKET_DB.prepare(sql).bind(...值).run());
+    return changesOf(res) > 0;
+  }
+
+  // POST /order/deliver  { id, maker, item }
+  // 交付：先把成品快照过体积关（与市场同一口径），再原子推进状态。
+  if (p === '/order/deliver' && request.method === 'POST') {
+    let b;
+    try { b = await request.json(); } catch (_) { return new Response('请求体不是合法 JSON', { status: 400, headers: cors }); }
+    const row = await readOrder(String(b.id));
+    if (!row || row.status !== 订单状态.已接单) return new Response('订单不存在或不在可交付状态', { status: 400, headers: cors });
+    if (String(b.maker ?? '').trim() !== row.maker) return new Response('只有接单人本人能交付', { status: 400, headers: cors });
+    if (!b.item || typeof b.item !== 'object') return new Response('缺少成品', { status: 400, headers: cors });
+    const item_json = JSON.stringify(b.item);
+    if (item_json.length > ORDER_ITEM_MAX) return new Response(`成品数据过大（${item_json.length} > ${ORDER_ITEM_MAX} 字节）`, { status: 400, headers: cors });
+    if (!(await advance(row.id, 订单状态.已接单, 订单状态.已交付, { item_json })))
+      return new Response('交付失败：订单状态已变', { status: 400, headers: cors });
+    return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+
+  // POST /order/confirm  { id, poster }  —— 验收（尾款由客户端结算，服务端只推进状态）
+  if (p === '/order/confirm' && request.method === 'POST') {
+    let b;
+    try { b = await request.json(); } catch (_) { return new Response('请求体不是合法 JSON', { status: 400, headers: cors }); }
+    const row = await readOrder(String(b.id));
+    if (!row || row.status !== 订单状态.已交付) return new Response('订单不存在或不在待验收状态', { status: 400, headers: cors });
+    if (String(b.poster ?? '').trim() !== row.poster) return new Response('只有发单人本人能验收', { status: 400, headers: cors });
+    if (!(await advance(row.id, 订单状态.已交付, 订单状态.已完成)))
+      return new Response('验收失败：订单状态已变', { status: 400, headers: cors });
+    return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+
+  // POST /order/reject  { id, poster }  —— 退货（订金不退；成品回接单者待领）
+  // 「订金不退」只体现在待领归属上：发单人的 claim 永远不加 deposit（见 /order/mine），
+  // 而对接单者，这单已不是「待接单」，订金继续挂在他名下等他 ACK 领走 —— 不是没收。
+  if (p === '/order/reject' && request.method === 'POST') {
+    let b;
+    try { b = await request.json(); } catch (_) { return new Response('请求体不是合法 JSON', { status: 400, headers: cors }); }
+    const row = await readOrder(String(b.id));
+    if (!row || row.status !== 订单状态.已交付) return new Response('订单不存在或不在待验收状态', { status: 400, headers: cors });
+    if (String(b.poster ?? '').trim() !== row.poster) return new Response('只有发单人本人能退货', { status: 400, headers: cors });
+    if (!(await advance(row.id, 订单状态.已交付, 订单状态.已取消)))
+      return new Response('退货失败：订单状态已变', { status: 400, headers: cors });
+    return new Response(JSON.stringify({ ok: true }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+
+  // GET /order/mine?who=<姓名>  →  { asPoster, asMaker, claim }
+  // claim 是**该用户名下所有订单**的待领汇总；领取本身发生在客户端，领完调 /order/ack。
+  // 一旦 ACK 过（ack 位为 1），该项就不再出现在 claim 里 —— 汇总与「已领」互斥。
+  if (p === '/order/mine' && request.method === 'GET') {
+    const who = String(url.searchParams.get('who') ?? '').trim();
+    if (!who) return new Response('缺少姓名', { status: 400, headers: cors });
+    const { results } = await env.MARKET_DB.prepare(
+      `SELECT * FROM orders WHERE poster = ? OR maker = ? ORDER BY updated DESC LIMIT 200`,
+    ).bind(who, who).all();
+    const rows = results ?? [];
+    const claim = { deposit: 0, final: 0, item: null, comp: null };
+    for (const r of rows) {
+      const 已领 = { poster: r.poster_ack === 1, maker: r.maker_ack === 1 };
+      // 订金：接单后归接单者（除「已取消且从未接单」的情形——那种订单 maker 为 NULL，不会走到这里）
+      // 发单人**任何状态都不加**，这就是「订金不退」在服务端的全部含义。
+      if (r.maker === who && r.status !== 订单状态.待接单 && !已领.maker) claim.deposit += r.deposit;
+      // 尾款：验收完成后归接单者
+      if (r.maker === who && r.status === 订单状态.已完成 && !已领.maker) claim.final += r.final;
+      // 成品：交付后归发单人（**验收完成后仍归发单人**，直到他 ACK 领走）；退货后归接单者。
+      // 已完成不能漏：发单人验收了却没领，成品还是他的，丢了就凭空蒸发。
+      if ((r.status === 订单状态.已交付 || r.status === 订单状态.已完成) && r.poster === who && !已领.poster && r.item_json)
+        claim.item = JSON.parse(r.item_json);
+      if (r.status === 订单状态.已取消 && r.maker === who && !已领.maker && r.item_json) claim.item = JSON.parse(r.item_json);
+    }
+    return new Response(JSON.stringify({
+      asPoster: rows.filter(r => r.poster === who).map(toOrderDto),
+      asMaker: rows.filter(r => r.maker === who).map(toOrderDto),
+      claim,
+    }), { headers: { ...cors, 'Content-Type': 'application/json' } });
+  }
+
+  // POST /order/ack  { id, who, side }  →  { ok, deleted }
+  // 标记某一方已领取；双方都领完 → 删行（这是"服务器不撑爆"的关键）。
+  // 幂等：行已被另一边删掉就当「已领完」返回 deleted:true；
+  // 同一方重复 ACK 只是把 1 再写一遍，第二次读到的双方位仍不齐，不会重复删。
+  if (p === '/order/ack' && request.method === 'POST') {
+    let b;
+    try { b = await request.json(); } catch (_) { return new Response('请求体不是合法 JSON', { status: 400, headers: cors }); }
+    const row = await readOrder(String(b.id));
+    if (!row) return new Response(JSON.stringify({ ok: true, deleted: true }), { headers: { ...cors, 'Content-Type': 'application/json' } }); // 已被另一边删掉，幂等
+    const side = b.side === 'maker' ? 'maker' : 'poster';
+    // 当事人校验：只允许替自己领。但**该侧尚无当事人**时（从未被接单的单，maker 为 NULL）放行 ——
+    // 这不是放宽越权：claim 的归属一律按 `r.maker === who` 判，NULL 匹配不上任何名字，
+    // 所以替一张空单按 maker 侧 ACK 谁也拿不到东西，只是让这张空行也能被清掉。
+    // 当事人存在时仍逐字核对姓名，防止别人替你 ACK 把你的待领款「领」掉。
+    const 当事人 = side === 'maker' ? row.maker : row.poster;
+    if (当事人 !== null && 当事人 !== undefined && String(b.who ?? '').trim() !== 当事人)
+      return new Response('不是该订单的当事人', { status: 400, headers: cors });
+    const 列 = side === 'maker' ? 'maker_ack' : 'poster_ack';
+    await withRetry(() => env.MARKET_DB.prepare(`UPDATE orders SET ${列} = 1, updated = ? WHERE id = ?`).bind(Date.now(), row.id).run());
+    const after = await readOrder(row.id);
+    const deleted = !!after && after.poster_ack === 1 && after.maker_ack === 1;
+    if (deleted) await withRetry(() => env.MARKET_DB.prepare(`DELETE FROM orders WHERE id = ?`).bind(row.id).run());
+    return new Response(JSON.stringify({ ok: true, deleted }), { headers: { ...cors, 'Content-Type': 'application/json' } });
   }
 
   return new Response('未知的订单操作', { status: 404, headers: cors });

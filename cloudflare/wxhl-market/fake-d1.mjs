@@ -1,6 +1,7 @@
 // 假 D1：只实现本 Worker 用到的 SQL 子集
 // （CREATE TABLE/INDEX、INSERT [OR REPLACE]／SELECT…ON CONFLICT、UPDATE 条件扣减、
-//   SELECT+WHERE/ORDER BY/LIMIT/OFFSET、COUNT(*)、DELETE、orders 表的发布/大厅/接单）
+//   SELECT+WHERE/ORDER BY/LIMIT/OFFSET、COUNT(*)、DELETE、
+//   orders 表的发布/大厅/接单/交付/验收/退货/待领取/ACK）
 // 供 smoke.mjs、worker.test.js、rank.test.js、buy.test.js **共用** —— 只有这一份。
 //
 // 2026-09-23 合并：此前仓库里同时存在 fake-d1.js 与 fake-d1.mjs 两份假 D1，各自被不同测试引用。
@@ -46,6 +47,26 @@ const ORDER_INSERT_SQL =
   /^INSERT INTO orders \(id, poster, maker, spec_json, deposit, final, status, created, updated\) VALUES \(\?, \?, NULL, \?, \?, \?, \?, \?, \?\)$/i;
 /** 断言用：查单行的接单人/状态 */
 const ORDER_BY_ID_SQL = /^SELECT maker, status FROM orders WHERE id = \?$/i;
+
+// ———— v4a 第二段（交付 / 验收 / 退货 / 待领取 / ACK）新增的形态 ————
+// 同样整句锚定。理由同上：这些语句全是位置参数，拆着认一旦看漏就静默错位
+// （比如把 item_json 当 updated 绑），测试照样绿。整句锚定后 worker 少写一个守卫条件、
+// 改一处 LIMIT，假件立刻炸出来。
+/** 读整行（.first()）：交付/验收/退货前先看状态与当事人 */
+const ORDER_ONE_SQL = /^SELECT \* FROM orders WHERE id = \?$/i;
+/** 待领取汇总（.all()）：`poster = ? OR maker = ?` 里的 OR 拼不进按 AND 切分的通用 WHERE */
+const ORDER_MINE_SQL =
+  /^SELECT \* FROM orders WHERE poster = \? OR maker = \? ORDER BY updated DESC LIMIT 200$/i;
+/** 状态推进：带 item_json 的是交付，不带的是一条验收/退货 —— 两条分开锚，免得参数错位 */
+const ORDER_ADVANCE_SQL =
+  /^UPDATE orders SET status = \?, updated = \? WHERE id = \? AND status = \?$/i;
+const ORDER_ADVANCE_ITEM_SQL =
+  /^UPDATE orders SET status = \?, updated = \?, item_json = \? WHERE id = \? AND status = \?$/i;
+/** ACK：只把某一方的 ack 位置 1。两方各锚一句，免得把当事人的位认错 */
+const ORDER_ACK_POSTER_SQL = /^UPDATE orders SET poster_ack = 1, updated = \? WHERE id = \?$/i;
+const ORDER_ACK_MAKER_SQL = /^UPDATE orders SET maker_ack = 1, updated = \? WHERE id = \?$/i;
+/** 双方 ACK 完删行 */
+const ORDER_DELETE_SQL = /^DELETE FROM orders WHERE id = \?$/i;
 
 /** 从语句里取 WHERE 片段（去掉 ORDER BY 之后的部分） */
 const whereOf = sql => (sql.split(/WHERE/i)[1] ?? '').split(/ORDER BY/i)[0].trim();
@@ -120,6 +141,13 @@ export function makeFakeD1() {
       for (const r of doomed) ranks.delete(r.name);
       return ok(doomed.length);
     }
+    // 订单段：双方 ACK 完删行。整句锚定，理由见上方常量处。
+    if (ORDER_DELETE_SQL.test(oneLine(sql))) {
+      const id = args[0];
+      if (!orders.has(id)) return ok(0);
+      orders.delete(id);
+      return ok(1);
+    }
     // DELETE FROM earnings WHERE client = ? AND amount = ?
     // 整句锚定（原来是落到这里的兜底分支）：兜底会把任何**没认出来的 DELETE** 静默当成
     // 「记账没命中」返回 0 行 —— 那正是文件头警告的假绿形态。订单段下一步会加
@@ -152,6 +180,19 @@ export function makeFakeD1() {
         const row = orders.get(args[0]);
         // 只投影语句点名的两列（真 D1 不会多给）
         return { results: row ? [{ maker: row.maker, status: row.status }] : [] };
+      }
+      // 读整行：交付/验收/退货/ACK 都要先看状态与当事人，真 D1 会给出全部列
+      if (ORDER_ONE_SQL.test(line)) {
+        const row = orders.get(args[0]);
+        return { results: row ? [{ ...row }] : [] };
+      }
+      // 待领取汇总：发单侧 + 接单侧的订单，新的在前
+      if (ORDER_MINE_SQL.test(line)) {
+        const [poster, maker] = args;
+        const rows = [...orders.values()]
+          .filter(r => r.poster === poster || r.maker === maker)
+          .sort((a, b) => b.updated - a.updated);
+        return { results: rows.slice(0, 200).map(r => ({ ...r })) };
       }
       throw new Error(`fakeD1 不认识这个 orders 查询: 「${sql.slice(0, 60)}…」`);
     }
@@ -263,6 +304,35 @@ export function makeFakeD1() {
             if (!row || row.status !== need) return ok(0);
             row.maker = maker;
             row.status = status;
+            row.updated = Number(updated);
+            return ok(1);
+          }
+          // ———— 工坊订单：交付（多写一列 item_json）。WHERE 的旧状态是并发守卫 ————
+          if (ORDER_ADVANCE_ITEM_SQL.test(oneLine(sql))) {
+            const [status, updated, item_json, id, need] = st._a;
+            const row = orders.get(id);
+            if (!row || row.status !== need) return ok(0);
+            row.status = status;
+            row.item_json = item_json;
+            row.updated = Number(updated);
+            return ok(1);
+          }
+          // ———— 工坊订单：验收 / 退货（不带 item_json，参数比上一条少一个）————
+          if (ORDER_ADVANCE_SQL.test(oneLine(sql))) {
+            const [status, updated, id, need] = st._a;
+            const row = orders.get(id);
+            if (!row || row.status !== need) return ok(0);
+            row.status = status;
+            row.updated = Number(updated);
+            return ok(1);
+          }
+          // ———— 工坊订单：ACK 记某一方已领取（重复 ACK 只是再写一次 1）————
+          if (ORDER_ACK_POSTER_SQL.test(oneLine(sql)) || ORDER_ACK_MAKER_SQL.test(oneLine(sql))) {
+            const 列 = ORDER_ACK_MAKER_SQL.test(oneLine(sql)) ? 'maker_ack' : 'poster_ack';
+            const [updated, id] = st._a;
+            const row = orders.get(id);
+            if (!row) return ok(0);
+            row[列] = 1;
             row.updated = Number(updated);
             return ok(1);
           }

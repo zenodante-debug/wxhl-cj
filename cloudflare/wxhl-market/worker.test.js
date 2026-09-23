@@ -357,3 +357,101 @@ describe('订单 · 接单竞态（Review Focus 1）', () => {
     expect((await call(env, '/order/accept', postJson({ id: 'nope', maker: '乙' }))).status).toBe(400);
   });
 });
+
+describe('订单 · 交付与验收', () => {
+  async function 发布并接单(env, over = {}) {
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700, ...over }))).json();
+    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+    return id;
+  }
+
+  it('交付挂成品，验收后状态为已完成', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const id = await 发布并接单(env);
+    const item = { 名称: '狼牙短剑', 品质: '金色', 类型: '武器', 阶位: '二阶', 数量: 1 };
+
+    const d = await call(env, '/order/deliver', postJson({ id, maker: '乙', item }));
+    expect(d.status).toBe(200);
+
+    const mine = await (await call(env, `/order/mine?who=${encodeURIComponent('甲')}`)).json();
+    expect(mine.asPoster[0].status).toBe('已交付');
+    expect(mine.claim.item.名称).toBe('狼牙短剑');   // 发单人待领成品
+
+    expect((await call(env, '/order/confirm', postJson({ id, poster: '甲' }))).status).toBe(200);
+    const after = await (await call(env, `/order/mine?who=${encodeURIComponent('乙')}`)).json();
+    expect(after.asMaker[0].status).toBe('已完成');
+    expect(after.claim.final).toBe(700);            // 接单者待领尾款
+  });
+
+  it('成品 JSON 超 4096 字节 → 400（Review Focus 2，服务端侧）', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const id = await 发布并接单(env);
+    const 巨物 = { 名称: 'x'.repeat(5000), 数量: 1 };
+    const r = await call(env, '/order/deliver', postJson({ id, maker: '乙', item: 巨物 }));
+    expect(r.status).toBe(400);
+    expect(await r.text()).toContain('过大');
+  });
+
+  it('非接单人不能交付；未接单不能交付', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const id = await 发布并接单(env);
+    const item = { 名称: '剑', 数量: 1 };
+    expect((await call(env, '/order/deliver', postJson({ id, maker: '丙', item }))).status).toBe(400);
+
+    const env2 = { MARKET_DB: makeFakeD1() };
+    const { id: id2 } = await (await call(env2, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+    expect((await call(env2, '/order/deliver', postJson({ id: id2, maker: '乙', item }))).status).toBe(400);
+  });
+
+  it('退货：状态变为已取消，成品回到接单者待领，订金【不退还发单人】', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const id = await 发布并接单(env);
+    const item = { 名称: '剑', 数量: 1 };
+    await call(env, '/order/deliver', postJson({ id, maker: '乙', item }));
+    expect((await call(env, '/order/reject', postJson({ id, poster: '甲' }))).status).toBe(200);
+
+    const makerMine = await (await call(env, `/order/mine?who=${encodeURIComponent('乙')}`)).json();
+    expect(makerMine.asMaker[0].status).toBe('已取消');
+    expect(makerMine.claim.item.名称).toBe('剑');   // 退回的成品
+    expect(makerMine.claim.deposit).toBe(300);      // 订金仍是接单者的（未领则仍待领）——「不退」指发单人拿不回去
+
+    const posterMine = await (await call(env, `/order/mine?who=${encodeURIComponent('甲')}`)).json();
+    expect(posterMine.claim.deposit).toBe(0);       // 发单人永远拿不回订金
+    expect(posterMine.claim.final).toBe(0);         // 退货不付尾款
+    expect(posterMine.claim.item).toBeNull();       // 成品已退回，发单人不再持有
+  });
+});
+
+describe('订单 · 待领取与 ACK（Review Focus 3/4）', () => {
+  it('双方 ACK 后 orders 表无该行', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+
+    const a1 = await (await call(env, '/order/ack', postJson({ id, who: '甲', side: 'poster' }))).json();
+    expect(a1.deleted).toBe(false);                 // 只有一方领了，行还在
+
+    const a2 = await (await call(env, '/order/ack', postJson({ id, who: '乙', side: 'maker' }))).json();
+    expect(a2.deleted).toBe(true);                  // 双方领完 → 删行
+
+    const { results } = await env.MARKET_DB.prepare(`SELECT * FROM orders WHERE id = ?`).bind(id).all();
+    expect(results).toHaveLength(0);
+  });
+
+  it('重复领取是幂等的：ACK 两次不报错，且不会让行消失两次', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+    expect((await call(env, '/order/ack', postJson({ id, who: '甲', side: 'poster' }))).status).toBe(200);
+    expect((await call(env, '/order/ack', postJson({ id, who: '甲', side: 'poster' }))).status).toBe(200);
+  });
+
+  it('接单者待领订金（接单后），领取前重复查询仍能看到', async () => {
+    const env = { MARKET_DB: makeFakeD1() };
+    const { id } = await (await call(env, '/order/create', postJson({ poster: '甲', spec: 需求单, deposit: 300, final: 700 }))).json();
+    await call(env, '/order/accept', postJson({ id, maker: '乙' }));
+
+    const m1 = await (await call(env, `/order/mine?who=${encodeURIComponent('乙')}`)).json();
+    expect(m1.claim.deposit).toBe(300);
+    const m2 = await (await call(env, `/order/mine?who=${encodeURIComponent('乙')}`)).json();
+    expect(m2.claim.deposit).toBe(300);             // 没 ACK 就还在
+  });
+});
