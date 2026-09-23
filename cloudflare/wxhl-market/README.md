@@ -116,7 +116,7 @@ wrangler secret put RANK_ADMIN_KEY
 ## 本地验证（不需要网络）
 
 ```bash
-node smoke.mjs          # 用假 D1 跑市场全流程（含部分购买与银色定价），57 项断言
+node smoke.mjs          # 用假 D1 跑市场+工坊订单全流程（含部分购买、银色定价、订单全流程至 ACK 后删行），74 项断言；订单端点回 404（未部署的旧 worker）时该段自动跳过
 ```
 
 线上冒烟：见下方 curl 示例。

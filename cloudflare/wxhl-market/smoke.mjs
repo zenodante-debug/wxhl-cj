@@ -8,7 +8,7 @@ const post = (p, b) => new Request('https://t.local' + p, { method: 'POST', head
 const get = p => new Request('https://t.local' + p);
 const call = (req, e = env) => worker.fetch(req, e);
 
-let pass = 0, fail = 0;
+let pass = 0, fail = 0, skipped = 0;
 function check(name, cond, extra = '') {
   if (cond) { pass++; console.log('  ✅', name); }
   else { fail++; console.log('  ❌', name, extra); }
@@ -214,5 +214,81 @@ check('银色道具走武器表（同银武器价）',
   !checkPrice('goods', { 品质: '银色', 阶位: '一阶', 数量: 1 }, '一阶', 7499).ok);
 check('道具缺品质拒绝', !checkPrice('goods', { 数量: 5, 阶位: '一阶' }, '一阶', 100).ok);
 
-console.log(`\n结果: ${pass} 通过 / ${fail} 失败`);
+console.log('=== 12. 工坊订单全流程（发布→接单→交付→验收→双方领取→删行）===');
+// 需求单照抄 worker.test.js 的 fixture；订金 300 / 尾款 700。
+// 订单端点未部署（拿本脚本打旧 worker / 线上尚未发版）时 /order/create 回 404：
+// 本段跳过并计 skipped，不让整场冒烟变红。
+const 冒烟需求单 = { 名称: '狼牙短剑', 成品类型: '装备', 装备子类: '武器', 品质: '金色', 阶位: 2, 效果要求: '带流血', 说明: '越快越好' };
+r = await call(post('/order/create', { poster: '测试甲', spec: 冒烟需求单, deposit: 300, final: 700 }));
+if (r.status === 404) {
+  skipped++;
+  console.log('  [跳过] 订单端点未部署，跳过（待部署后启用）');
+} else {
+  const 段首失败数 = fail; // 段内有失败步骤时，结尾提示订单可能滞留飞行中
+  const 发布失败原文 = r.status === 200 ? '' : await r.clone().text();
+  const order = r.status === 200 ? await r.json() : {};
+  check('发布 200 且有 id', r.status === 200 && !!order.id, 发布失败原文 || JSON.stringify(order));
+
+  r = await call(get('/order/list'));
+  j = await r.json();
+  const 在大厅 = j.orders.find(o => o.id === order.id);
+  check('大厅可见（含需求单与价款）', !!在大厅 && 在大厅.poster === '测试甲' && 在大厅.spec?.名称 === '狼牙短剑' && 在大厅.deposit === 300 && 在大厅.final === 700, JSON.stringify(j).slice(0, 200));
+  r = await call(get('/order/list?exclude=' + encodeURIComponent('测试甲')));
+  check('大厅排除自己发的单', !(await r.json()).orders.some(o => o.id === order.id));
+
+  check('乙接单 200', (await call(post('/order/accept', { id: order.id, maker: '测试乙' }))).status === 200);
+  r = await call(post('/order/accept', { id: order.id, maker: '测试丙' }));
+  check('丙再抢被拒且明示', r.status === 400 && (await r.clone().text()).includes('已被接走'));
+
+  // 接单后：乙只挂订金（尾款要验收后才产生——Ruling L：清单只列当下真实存在的权益）；
+  // 甲此时尚无成品可领（成品要到已交付）。
+  r = await call(get('/order/mine?who=' + encodeURIComponent('测试乙')));
+  j = await r.json();
+  check('接单后乙待领＝订金 300（仅此一项）', j.claim.deposit === 300 && j.claim.待领.filter(e => e.id === order.id).map(e => e.项).join() === '订金', JSON.stringify(j.claim).slice(0, 160));
+  r = await call(get('/order/mine?who=' + encodeURIComponent('测试甲')));
+  j = await r.json();
+  check('接单后甲尚无成品可领', j.claim.items.length === 0 && !j.claim.待领.some(e => e.id === order.id), JSON.stringify(j.claim).slice(0, 120));
+
+  check('乙交付成品', (await call(post('/order/deliver', { id: order.id, maker: '测试乙', item: { 名称: '冒烟测试品', 数量: 1 } }))).status === 200);
+
+  // 已交付：甲待领成品且带快照（Ruling I/L 的逐项视图，条目与 items 同源同 id）
+  r = await call(get('/order/mine?who=' + encodeURIComponent('测试甲')));
+  j = await r.json();
+  check('交付后甲待领成品「冒烟测试品」', j.claim.items.length === 1 && j.claim.items[0].id === order.id && j.claim.items[0].item?.名称 === '冒烟测试品' && j.claim.待领.some(e => e.id === order.id && e.项 === '成品'), JSON.stringify(j.claim).slice(0, 160));
+
+  check('甲验收 → 已完成', (await call(post('/order/confirm', { id: order.id, poster: '测试甲' }))).status === 200);
+  r = await call(get('/order/mine?who=' + encodeURIComponent('测试乙')));
+  j = await r.json();
+  check('验收后乙待领尾款 700（条目带逐项金额）', j.asMaker.find(o => o.id === order.id)?.status === '已完成' && j.claim.final === 700 && j.claim.待领.some(e => e.id === order.id && e.项 === '尾款' && e.金额 === 700), JSON.stringify(j.claim).slice(0, 160));
+
+  // 双方按项 ACK：三项领齐 → 服务器删行（「服务器只留飞行中订单」）。
+  // 失败路径（非 200 的 ACK 是纯文本体）：不 parse，回占位对象让 check 红掉而不是炸脚本。
+  const ack = async (who, side, 项) => {
+    const res = await call(post('/order/ack', { id: order.id, who, side, 项 }));
+    return res.status === 200 ? await res.json() : { ok: false, deleted: false, status: res.status, body: await res.text() };
+  };
+  const 领成品 = await ack('测试甲', 'poster', '成品');
+  check('甲领成品（行仍在：乙两项未领）', 领成品.ok === true && 领成品.deleted === false, JSON.stringify(领成品));
+  const 领订金 = await ack('测试乙', 'maker', '订金');
+  check('乙领订金（行仍在：尾款未领）', 领订金.ok === true && 领订金.deleted === false, JSON.stringify(领订金));
+  const 领尾款 = await ack('测试乙', 'maker', '尾款');
+  check('乙领尾款 → 最后一项，行删除', 领尾款.ok === true && 领尾款.deleted === true, JSON.stringify(领尾款));
+
+  // 删行后：双方 /order/mine 都查不到该单的任何残留待领；行本身也没了（本地假 D1 可直接数行）
+  r = await call(get('/order/mine?who=' + encodeURIComponent('测试甲')));
+  j = await r.json();
+  check('删行后甲无该单残留待领', !j.claim.待领.some(e => e.id === order.id) && !j.claim.items.some(e => e.id === order.id));
+  r = await call(get('/order/mine?who=' + encodeURIComponent('测试乙')));
+  j = await r.json();
+  check('删行后乙无该单残留待领', !j.claim.待领.some(e => e.id === order.id) && !j.claim.items.some(e => e.id === order.id));
+  const 残行 = (await env.MARKET_DB.prepare(`SELECT * FROM orders WHERE id = ?`).bind(order.id).all()).results.length;
+  check('orders 表已无该行（服务器只留飞行中订单）', 残行 === 0, `剩 ${残行} 行`);
+
+  // 冒烟自清理：正常路径订单已删行；若中途失败，行会滞留在飞行中 ——
+  // 本地是内存假库、进程退出即消失；线上滞留由 v4c 的 purge 兜底。明说，不静默。
+  if (fail > 段首失败数)
+    console.log(`  [注意] 订单段有失败步骤，订单 ${order.id ?? '(未取得 id)'} 可能滞留飞行中（本地内存库随进程消失；线上滞留由 v4c purge 兜底）`);
+}
+
+console.log(`\n结果: ${pass} 通过 / ${fail} 失败${skipped ? ` / ${skipped} 跳过` : ''}`);
 process.exit(fail === 0 ? 0 : 1);
