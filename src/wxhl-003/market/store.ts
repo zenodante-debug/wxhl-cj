@@ -287,7 +287,7 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
         item.opField = { tier: realTierName(fee.realIdx), rp: fee.rp, up: fee.up };
         add(
           transFee ? '超脱上架费' : '超模提醒',
-          `「${item.name}」效果达到「${realTierName(fee.realIdx)}」规格，上架需支付 RP ${fee.rp} + UP ${fee.up}${transFee ? '（含超脱上架费 20 RP + 基准价×50% UP）' : ''}。\n${points.join('\n')}`,
+          `「${item.name}」效果达到「${realTierName(fee.realIdx)}」规格，上架需支付 RP ${fee.rp} + UP ${fee.up}${transFee ? '（含超脱上架费 20 RP + 超脱基准价×50% UP）' : ''}。\n${points.join('\n')}`,
         );
       }
     }

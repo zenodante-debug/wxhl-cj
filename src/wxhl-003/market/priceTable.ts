@@ -186,7 +186,7 @@ function priceTierOf(item: MarketItemSnapshot, sellerTier: string): string {
 
 export function checkPrice(kind: MarketKind, item: MarketItemSnapshot, sellerTier: string, price: number): PriceCheck {
   const fail = (reason: string, min = 0, max = 0): PriceCheck => ({ ok: false, min, max, reason });
-  if (!Number.isFinite(price) || price < 0 || price > 1_000_000_000) return fail('价格超出允许范围');
+  if (!Number.isFinite(price) || price < 0 || price > 10_000_000_000) return fail('价格超出允许范围');
 
   const 阶位 = priceTierOf(item, sellerTier);
   const f = tierFactor(阶位);
@@ -201,7 +201,8 @@ export function checkPrice(kind: MarketKind, item: MarketItemSnapshot, sellerTie
       return fail('道具需填写品质（白色/蓝色/金色/紫色/银色）——请在上架界面补全后再挂单');
     const base = BASE[GOODS_BASE_CATEGORY][parsed.quality];
     const min = Math.floor(base[0] * f * PRICE_FLOOR_RATE);
-    const max = Math.floor(base[1] * f * PRICE_CEIL_RATE);
+    // 超脱阶不设价格上限（用户 2026-09-24 定稿）：只守下限
+    const max = isTranscendent(阶位) ? Number.MAX_SAFE_INTEGER : Math.floor(base[1] * f * PRICE_CEIL_RATE);
     if (price < min) return fail(`价格过低，${qty}件道具单价不得低于 ${min} UP`, min, max);
     if (price > max) return fail(`价格过高，道具单价不得超过 ${max} UP`, min, max);
     return { ok: true, min, max, reason: '' };
@@ -216,7 +217,8 @@ export function checkPrice(kind: MarketKind, item: MarketItemSnapshot, sellerTie
   const ref = refRange(parsed.quality, category, 阶位);
   if (!ref) return fail('阶位无法识别');
   const min = Math.floor(ref.min * PRICE_FLOOR_RATE);
-  const max = Math.floor(ref.max * PRICE_CEIL_RATE);
+  // 超脱阶不设价格上限（用户 2026-09-24 定稿）：只守下限
+  const max = isTranscendent(阶位) ? Number.MAX_SAFE_INTEGER : Math.floor(ref.max * PRICE_CEIL_RATE);
   if (price < min) return fail(`价格过低，不得低于参考价的 50%（${min} UP）`, min, max);
   if (price > max) return fail(`价格过高，不得超过参考价的 200%（${max} UP）`, min, max);
   return { ok: true, min, max, reason: '' };

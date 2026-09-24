@@ -130,7 +130,7 @@ function parseCategory(item) {
 // （发福利用）。玩家端拿不到这个密钥，价格下限对他们依旧严格。
 export function checkPrice(kind, item, sellerTier, price, opsKey, welfareKey) {
   const fail = (reason, min = 0, max = 0) => ({ ok: false, min, max, reason });
-  if (!Number.isFinite(Number(price)) || Number(price) < 0 || Number(price) > 1000000000)
+  if (!Number.isFinite(Number(price)) || Number(price) < 0 || Number(price) > 10000000000)
     return fail('价格超出允许范围');
   const 运营 = Number(price) === 0 && !!welfareKey && opsKey === welfareKey;
   const tier = String(item?.阶位 ?? '') || String(sellerTier ?? '一阶');
@@ -144,7 +144,8 @@ export function checkPrice(kind, item, sellerTier, price, opsKey, welfareKey) {
     if (!q) return fail('道具需填写品质（白色/蓝色/金色/紫色/银色）——请在上架界面补全后再挂单');
     const base = BASE[GOODS_BASE_CATEGORY][q.quality];
     const min = Math.floor(base[0] * f * PRICE_FLOOR_RATE);
-    const max = Math.floor(base[1] * f * PRICE_CEIL_RATE);
+    // 超脱阶不设价格上限（用户 2026-09-24 定稿）：只守下限
+    const max = /超脱/.test(tier) ? Number.MAX_SAFE_INTEGER : Math.floor(base[1] * f * PRICE_CEIL_RATE);
     if (!运营 && Number(price) < min) return fail(`价格过低，道具单价不得低于 ${min} UP`, min, max);
     if (Number(price) > max) return fail(`价格过高，道具单价不得超过 ${max} UP`, min, max);
     return { ok: true, min: 运营 ? 0 : min, max, reason: '' };
@@ -156,7 +157,8 @@ export function checkPrice(kind, item, sellerTier, price, opsKey, welfareKey) {
   if (q.quality === '白色') return fail('白色装备没有市场，回廊不收录');
   const ref = BASE[category][q.quality];
   const min = Math.floor(ref[0] * f * PRICE_FLOOR_RATE);
-  const max = Math.floor(ref[1] * f * PRICE_CEIL_RATE);
+  // 超脱阶不设价格上限（用户 2026-09-24 定稿）：只守下限
+  const max = /超脱/.test(tier) ? Number.MAX_SAFE_INTEGER : Math.floor(ref[1] * f * PRICE_CEIL_RATE);
   if (!运营 && Number(price) < min) return fail(`价格过低，不得低于参考价的 50%（${min} UP）`, min, max);
   if (Number(price) > max) return fail(`价格过高，不得超过参考价的 200%（${max} UP）`, min, max);
   return { ok: true, min: 运营 ? 0 : min, max, reason: '' };
@@ -220,8 +222,8 @@ function parseOp(b) {
   const op = b.op;
   if (typeof op !== 'object' || Array.isArray(op)) return { error: 'op 字段格式非法' };
   if (!TIER_NAMES_ALL.includes(op.tier)) return { error: 'op.tier 须为 一阶~五阶/超脱' };
-  if (!Number.isInteger(Number(op.rp)) || Number(op.rp) < 0 || Number(op.rp) > 1000000000) return { error: 'op.rp 非法' };
-  if (!Number.isInteger(Number(op.up)) || Number(op.up) < 0 || Number(op.up) > 1000000000) return { error: 'op.up 非法' };
+  if (!Number.isInteger(Number(op.rp)) || Number(op.rp) < 0 || Number(op.rp) > 10000000000) return { error: 'op.rp 非法' };
+  if (!Number.isInteger(Number(op.up)) || Number(op.up) < 0 || Number(op.up) > 10000000000) return { error: 'op.up 非法' };
   return { declared: true, tier: String(op.tier), rp: Number(op.rp), up: Number(op.up) };
 }
 

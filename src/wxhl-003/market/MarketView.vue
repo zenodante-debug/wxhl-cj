@@ -118,7 +118,7 @@
           </label>
           <label class="sf-row">
             <span>单价 UP</span>
-            <input v-model.number="sellSel[entry.name].price" type="number" min="0" max="1000000000" />
+            <input v-model.number="sellSel[entry.name].price" type="number" min="0" max="10000000000" />
           </label>
           <label class="sf-row col">
             <span>描述（可编辑补充，500 字内）</span>

@@ -56,10 +56,11 @@ export function opFeeFor(nominalIdx: number, realIdx: number, baseUp: number): O
   let sum = 0;
   for (let i = Math.max(0, nominalIdx); i <= Math.min(5, realIdx); i++) sum += TIER_COEFS[i];
   const transFee = realIdx === 5;
+  const transBase = baseUp * priceCoef(5); // 超脱基准价 = 一阶基准 × 500（标了超脱就按超脱档定价）
   return {
     sum,
     rp: 50 * sum + (transFee ? 20 : 0),
-    up: baseUp * priceCoef(realIdx) * sum + (transFee ? Math.floor(baseUp * 0.5) : 0),
+    up: baseUp * priceCoef(realIdx) * sum + (transFee ? Math.floor(transBase * 0.5) : 0),
     realIdx,
   };
 }
