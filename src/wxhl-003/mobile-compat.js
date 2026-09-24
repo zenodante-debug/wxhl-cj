@@ -49,6 +49,17 @@
     }
   };
 
+  /** 读「手机尺寸」设置（与小手机共享 localStorage wxhl003_settings），缺省 1 */
+  const readPhoneScale = () => {
+    try {
+      const s = JSON.parse(hostWindow.localStorage.getItem('wxhl003_settings'));
+      const v = Number(s?.phoneScale);
+      return Number.isFinite(v) && v > 0 ? Math.min(Math.max(v, 0.5), 2) : 1;
+    } catch (_) {
+      return 1;
+    }
+  };
+
   const clampPosition = (left, top, width, height) => {
     const viewport = getViewport();
     const gap = 10;
@@ -215,10 +226,11 @@
 
     const frame = overlay.querySelector('.phone-frame');
     if (frame) {
-      // 状态栏页（sb-open）贴满可视视口；其余页保持小手机尺寸
+      // 状态栏页（sb-open）贴满可视视口；其余页按「手机尺寸」设置取 320×640 的缩放并夹到视口内
       const isSb = frame.classList.contains('sb-open');
-      const fw = isSb ? viewport.width - 12 : Math.max(280, Math.min(390, viewport.width - 20));
-      const fh = isSb ? viewport.height - 12 : Math.max(360, Math.min(640, viewport.height - 20));
+      const ps = readPhoneScale();
+      const fw = isSb ? viewport.width - 12 : Math.max(240, Math.min(320 * ps, viewport.width - 20));
+      const fh = isSb ? viewport.height - 12 : Math.max(320, Math.min(640 * ps, viewport.height - 20));
       setImportant(frame, {
         position: 'fixed',
         width: `${fw}px`,

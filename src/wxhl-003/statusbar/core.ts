@@ -1573,19 +1573,6 @@ export function mountStatusbar(root: HTMLElement): () => void {
 
       updateFacilityPermissions(d('契约者.头部.军衔', '列兵'));
 
-      $c.find('#env-world').html(editText(d('契约者.当前世界', '现实'), '契约者.当前世界'));
-      $c.find('#env-real-date').html(editText(d('契约者.当前时间.现实日期', '---'), '契约者.当前时间.现实日期'));
-      $c.find('#env-real-time').html(editText(d('契约者.当前时间.现实时间', '---'), '契约者.当前时间.现实时间'));
-      $c.find('#env-dungeon-date').html(
-        editText(d('契约者.当前时间.副本日期', '不在副本中'), '契约者.当前时间.副本日期'),
-      );
-      $c.find('#env-dungeon-time').html(
-        editText(d('契约者.当前时间.副本时间', '不在副本中'), '契约者.当前时间.副本时间'),
-      );
-      $c.find('#env-obj-time').html(editText(d('契约者.当前时间.客观时间', '不在副本中'), '契约者.当前时间.客观时间'));
-      $c.find('#env-loc').html(editText(d('契约者.当前时间.地点', '未知'), '契约者.当前时间.地点'));
-      $c.find('#env-prog').html(editText(d('契约者.当前时间.阶段进度', '0%'), '契约者.当前时间.阶段进度'));
-
       $c.find('#h-name').html(editText(d('契约者.头部.姓名', '---'), '契约者.头部.姓名'));
       $c.find('#h-lv').html('Lv.' + editSpan(d('契约者.头部.等级', 1), '契约者.头部.等级'));
       $c.find('#h-exp').html(
@@ -2495,10 +2482,10 @@ export function mountStatusbar(root: HTMLElement): () => void {
 
   /* ==================== 模块面板开合（门洞 → 覆盖面板） ==================== */
   const MODULE_TITLES: Record<string, string> = {
-    'tab-status': '契 约 者 档 案',
+    'tab-power': '个 人 战 力 面 板',
     'tab-dungeon': '副 本 情 报',
     'tab-entity': '实 体 名 单',
-    'tab-bag': '背 包 与 储 藏 室',
+    'tab-bag': '物 资 · 产 业',
     'tab-mapjob': '回 廊 地 图 · 职 业 树',
     'tab-attributes': '属 性 加 点',
   };

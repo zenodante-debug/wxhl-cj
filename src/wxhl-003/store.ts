@@ -94,6 +94,12 @@ export interface Settings {
   worldbookProfiles: Profile<{ selectedWorldbooks: string[]; worldbookEntryFilter: Record<string, string[] | null> }>[];
   activeWorldbookProfile: string; // 方案名; '' = 未使用方案
   wallpaper: string;
+  /** 手机界面字体（CSS font-family 串；'' = 用默认黑体栈）。只影响小手机内部，与酒馆页面隔离 */
+  fontFamily: string;
+  /** 手机框尺寸缩放（0.8 ~ 1.5，1 = 默认 320×640） */
+  phoneScale: number;
+  /** 字体缩放（0.85 ~ 1.4，1 = 默认）——只缩放手机内文字，不改手机框尺寸 */
+  fontScale: number;
 }
 
 /**
@@ -131,6 +137,9 @@ function load(): Settings {
         worldbookProfiles: p.worldbookProfiles || [],
         activeWorldbookProfile: p.activeWorldbookProfile || '',
         wallpaper: p.wallpaper || '',
+        fontFamily: typeof p.fontFamily === 'string' ? p.fontFamily : '',
+        phoneScale: typeof p.phoneScale === 'number' && p.phoneScale > 0 ? p.phoneScale : 1,
+        fontScale: typeof p.fontScale === 'number' && p.fontScale > 0 ? p.fontScale : 1,
       };
     }
   } catch (_) {}
@@ -145,6 +154,9 @@ function load(): Settings {
     worldbookProfiles: [],
     activeWorldbookProfile: '',
     wallpaper: '',
+    fontFamily: '',
+    phoneScale: 1,
+    fontScale: 1,
   };
 }
 

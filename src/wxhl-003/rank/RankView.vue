@@ -24,9 +24,13 @@
           <span class="my-lv">Lv.{{ store.mySnapshot.lv }}</span>
         </div>
         <div class="my-body">
-          <span class="my-title">{{ store.mySnapshot.title }}</span>
           <span class="my-name">{{ store.mySnapshot.name }}</span>
-          <span class="my-job">{{ store.mySnapshot.job }}</span>
+          <span v-if="store.mySnapshot.title && store.mySnapshot.title !== '无'" class="my-title">{{
+            store.mySnapshot.title
+          }}</span>
+          <span v-if="store.mySnapshot.job && store.mySnapshot.job !== '无'" class="my-job">{{
+            store.mySnapshot.job
+          }}</span>
         </div>
       </template>
       <div v-else class="my-head">
@@ -39,9 +43,7 @@
     <div class="rank-body">
       <div class="rank-cols">
         <span class="c-rank">#</span>
-        <span class="c-title">称号</span>
-        <span class="c-name">姓名</span>
-        <span class="c-job">职业</span>
+        <span>契约者</span>
         <span class="c-lv">Lv</span>
       </div>
 
@@ -49,9 +51,13 @@
         <div v-if="row.kind === 'gap'" class="rank-gap">⋯</div>
         <div v-else class="rank-row" :class="{ mine: row.mine, top3: row.rank <= 3 }">
           <span class="c-rank">{{ row.rank }}</span>
-          <span class="c-title" :title="row.entry.title">{{ row.entry.title }}</span>
-          <span class="c-name" :title="row.entry.name">{{ row.entry.name }}</span>
-          <span class="c-job" :title="row.entry.job">{{ row.entry.job }}</span>
+          <div class="c-main">
+            <div class="c-line1">
+              <span class="c-name">{{ row.entry.name }}</span>
+              <span v-if="row.entry.title && row.entry.title !== '无'" class="c-title">{{ row.entry.title }}</span>
+            </div>
+            <div v-if="row.entry.job && row.entry.job !== '无'" class="c-line2">{{ row.entry.job }}</div>
+          </div>
           <span class="c-lv">{{ row.entry.lv }}</span>
         </div>
       </template>
@@ -184,35 +190,27 @@ onMounted(() => store.refresh());
 .my-body {
   display: flex;
   align-items: baseline;
-  gap: 8px;
+  flex-wrap: wrap;
+  gap: 4px 8px;
   margin-top: 6px;
   min-width: 0;
 }
+/* 不省略、允许换行：长称号/职业在窄屏也完整可见 */
 .my-title {
   color: #c8a468;
-  font-size: 13px;
-  flex-shrink: 0;
-  max-width: 40%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 12px;
+  word-break: break-word;
 }
 .my-name {
   color: #e8dcc8;
   font-size: 14px;
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-weight: 600;
+  word-break: break-word;
 }
 .my-job {
   color: #8a9a8a;
   font-size: 11px;
-  flex-shrink: 0;
-  max-width: 30%;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  word-break: break-word;
 }
 
 .rank-error {
@@ -236,9 +234,9 @@ onMounted(() => store.refresh());
 .rank-cols,
 .rank-row {
   display: grid;
-  grid-template-columns: 28px minmax(0, 1.1fr) minmax(0, 1fr) minmax(0, 0.9fr) 40px;
+  grid-template-columns: 30px minmax(0, 1fr) 42px;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
 .rank-cols {
   position: sticky;
@@ -269,21 +267,34 @@ onMounted(() => store.refresh());
   color: #8a7355;
   text-align: center;
 }
-.c-title,
-.c-name,
-.c-job {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+/* 两行式：第一行 姓名 + 称号，第二行 职业；长文本换行完整显示（不再截断成「…」） */
+.c-main {
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
 }
-.c-title {
-  color: #c8a468;
+.c-line1 {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.c-line2 {
+  font-size: 11px;
+  color: #8a9a8a;
+  word-break: break-word;
 }
 .c-name {
   color: #e0d4bc;
+  font-size: 13px;
+  font-weight: 600;
+  word-break: break-word;
 }
-.c-job {
-  color: #8a9a8a;
+.c-title {
+  color: #c8a468;
+  font-size: 11px;
+  word-break: break-word;
 }
 .c-lv {
   color: var(--amber-d, #b08a4f);

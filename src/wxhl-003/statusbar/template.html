@@ -46,9 +46,9 @@
     <div class="scene-walls">
       <div class="wall wall-left">
         <div class="flesh-veins"></div>
-        <div class="door door-near" data-target="tab-status">
+        <div class="door door-near" data-target="tab-power">
           <div class="door-recess">
-            <div class="door-plate">契 约 者 档 案</div>
+            <div class="door-plate">个 人 战 力 面 板</div>
             <div class="door-status" id="door-status-identity">---</div>
             <div class="door-slit"></div>
           </div>
@@ -70,35 +70,8 @@
         <div class="wall-scratch">NO RETURN</div>
       </div>
 
-      <div class="wall wall-right">
-        <div class="flesh-veins right"></div>
-        <div class="door door-near" data-target="tab-dungeon">
-          <div class="door-recess">
-            <div class="door-plate">副 本 情 报</div>
-            <div class="door-status" id="door-status-dungeon">---</div>
-            <div class="door-slit"></div>
-          </div>
-          <div class="door-alert-light" id="alert-dungeon"></div>
-        </div>
-        <div class="door door-mid" data-target="tab-bag">
-          <div class="door-recess">
-            <div class="door-plate">背 包 与 储 藏 室</div>
-            <div class="door-status" id="door-status-bag">---</div>
-            <div class="door-slit"></div>
-          </div>
-        </div>
-        <div class="door door-far" data-target="tab-attributes">
-          <div class="door-recess">
-            <div class="door-plate">属 性 加 点</div>
-            <div class="door-status" id="door-status-attr">---</div>
-            <div class="door-slit"></div>
-          </div>
-        </div>
-        <div class="wall-scratch right">契约即枷锁</div>
-      </div>
-
-      <!-- 中央：契约者铭牌（替代原尽头传送门） -->
-      <div class="center-plate" data-target="tab-status">
+      <!-- 中央：契约者铭牌（居中，点击跳个人战力面板） -->
+      <div class="center-plate" data-target="tab-power">
         <div class="plate-frame">
           <div class="plate-title">◆ 契 约 者 ◆</div>
           <div class="plate-name" id="plate-name">---</div>
@@ -110,6 +83,33 @@
           <div class="plate-line small">天赋 <span id="plate-talent">无</span></div>
           <div class="plate-line small">血统 <span id="plate-blood">无</span></div>
         </div>
+      </div>
+
+      <div class="wall wall-right">
+        <div class="flesh-veins right"></div>
+        <div class="door door-near" data-target="tab-bag">
+          <div class="door-recess">
+            <div class="door-plate">物 资 · 产 业</div>
+            <div class="door-status" id="door-status-bag">---</div>
+            <div class="door-slit"></div>
+          </div>
+        </div>
+        <div class="door door-mid" data-target="tab-dungeon">
+          <div class="door-recess">
+            <div class="door-plate">副 本 情 报</div>
+            <div class="door-status" id="door-status-dungeon">---</div>
+            <div class="door-slit"></div>
+          </div>
+          <div class="door-alert-light" id="alert-dungeon"></div>
+        </div>
+        <div class="door door-far" data-target="tab-attributes">
+          <div class="door-recess">
+            <div class="door-plate">属 性 加 点</div>
+            <div class="door-status" id="door-status-attr">---</div>
+            <div class="door-slit"></div>
+          </div>
+        </div>
+        <div class="wall-scratch right">契约即枷锁</div>
       </div>
     </div>
 
@@ -148,50 +148,11 @@
           <span class="module-close" id="module-close">╳</span>
         </div>
         <div class="module-panel-body" id="module-panel-body">
-          <!-- ===== 模块 1：契约者档案 ===== -->
-          <div id="tab-status" class="tab-content">
+          <!-- ===== 模块 1：个人战力面板 ===== -->
+          <div id="tab-power" class="tab-content">
             <div class="group-section">
               <div class="group-header">
-                <span class="group-title">【当前环境】</span><span class="group-toggle">▼</span>
-              </div>
-              <div class="group-body">
-                <div class="section">
-                  <div class="section-header">
-                    <span class="section-title">◆ 全局坐标</span><span class="section-toggle">▼</span>
-                  </div>
-                  <div class="section-body">
-                    <div class="row">
-                      <span class="label">当前世界</span><span class="value" id="env-world">现实</span>
-                    </div>
-                    <div class="row">
-                      <span class="label">现实日期</span><span class="value-dim" id="env-real-date">2025年5月10日</span>
-                    </div>
-                    <div class="row">
-                      <span class="label">现实时间</span><span class="value-dim" id="env-real-time">凌晨00:00</span>
-                    </div>
-                    <div class="row">
-                      <span class="label">副本日期</span><span class="value-dim" id="env-dungeon-date">不在副本中</span>
-                    </div>
-                    <div class="row">
-                      <span class="label">副本时间</span><span class="value-dim" id="env-dungeon-time">不在副本中</span>
-                    </div>
-                    <div class="row">
-                      <span class="label">客观时间</span><span class="value-dim" id="env-obj-time">不在副本中</span>
-                    </div>
-                    <div class="row">
-                      <span class="label">地点</span><span class="value-dim" id="env-loc">未知</span>
-                    </div>
-                    <div class="row">
-                      <span class="label">阶段进度</span><span class="value-dim" id="env-prog">0%</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
-
-            <div class="group-section">
-              <div class="group-header">
-                <span class="group-title">【核心状态总览】</span><span class="group-toggle">▼</span>
+                <span class="group-title">【契约者 · 属性 · 状态】</span><span class="group-toggle">▼</span>
               </div>
               <div class="group-body">
                 <div class="section">
@@ -308,7 +269,7 @@
 
                 <div class="section">
                   <div class="section-header">
-                    <span class="section-title">◆ 状态 &amp; 经济</span><span class="section-toggle">▼</span>
+                    <span class="section-title">◆ 状态</span><span class="section-toggle">▼</span>
                   </div>
                   <div class="section-body">
                     <div class="row">
@@ -318,40 +279,6 @@
                       <div class="sub-title">特殊状态</div>
                       <div id="state-special"><span class="empty-hint">无</span></div>
                     </div>
-                    <div class="row" style="margin-top: 8px">
-                      <span class="label">UP</span><span class="value" id="eco-up">0</span>
-                    </div>
-                  </div>
-                </div>
-
-                <div class="section">
-                  <div class="section-header">
-                    <span class="section-title">◆ 个人产业</span><span class="section-toggle collapsed">▼</span>
-                  </div>
-                  <div class="section-body hidden"><div id="industry-info"></div></div>
-                </div>
-
-                <div class="section">
-                  <div class="section-header">
-                    <span class="section-title">◆ 赛季 &amp; 排行</span><span class="section-toggle collapsed">▼</span>
-                  </div>
-                  <div class="section-body hidden">
-                    <div class="row">
-                      <span class="label">当前赛季</span><span class="value" id="season-num">21</span>
-                    </div>
-                    <div class="row">
-                      <span class="label">副本周期</span><span class="value-dim" id="season-cycle">0 / 10</span>
-                    </div>
-                    <div class="bar-wrap"><div class="bar-fill bar-exp" id="bar-cycle" style="width: 0%"></div></div>
-                    <div class="row">
-                      <span class="label">资格分</span><span class="value" id="qual-points">0</span>
-                    </div>
-                    <div class="row">
-                      <span class="label">排行榜</span><span class="value-none" id="rank-pos">未上榜</span>
-                    </div>
-                    <div class="row">
-                      <span class="label">排行被动</span><span class="value-none" id="rank-passive">无</span>
-                    </div>
                   </div>
                 </div>
               </div>
@@ -359,7 +286,7 @@
 
             <div class="group-section">
               <div class="group-header">
-                <span class="group-title">【战力与物资库】</span><span class="group-toggle">▼</span>
+                <span class="group-title">【职业 · 技能 · 装备】</span><span class="group-toggle">▼</span>
               </div>
               <div class="group-body">
                 <div class="section">
@@ -409,26 +336,6 @@
                     <span class="section-title">◆ 装备</span><span class="section-toggle collapsed">▼</span>
                   </div>
                   <div class="section-body hidden"><div id="equip-list"></div></div>
-                </div>
-              </div>
-            </div>
-
-            <div class="group-section">
-              <div class="group-header">
-                <span class="group-title">【人际与过往记录】</span><span class="group-toggle collapsed">▼</span>
-              </div>
-              <div class="group-body hidden">
-                <div class="section">
-                  <div class="section-header">
-                    <span class="section-title">◆ 副本经历</span><span class="section-toggle collapsed">▼</span>
-                  </div>
-                  <div class="section-body hidden"><div id="dungeon-history"></div></div>
-                </div>
-                <div class="section">
-                  <div class="section-header">
-                    <span class="section-title">◆ 人际关系</span><span class="section-toggle collapsed">▼</span>
-                  </div>
-                  <div class="section-body hidden"><div id="rel-list"></div></div>
                 </div>
               </div>
             </div>
@@ -511,6 +418,32 @@
                 </div>
               </div>
             </div>
+            <div class="group-section">
+              <div class="group-header group-dungeon">
+                <span class="group-title">【副本经历与赛季】</span><span class="group-toggle collapsed">▼</span>
+              </div>
+              <div class="group-body hidden">
+                <div class="section">
+                  <div class="section-header dungeon-header">
+                    <span class="section-title">◈ 副本经历</span><span class="section-toggle collapsed">▼</span>
+                  </div>
+                  <div class="section-body hidden"><div id="dungeon-history"></div></div>
+                </div>
+                <div class="section">
+                  <div class="section-header dungeon-header">
+                    <span class="section-title">◈ 赛季与排行</span><span class="section-toggle collapsed">▼</span>
+                  </div>
+                  <div class="section-body hidden">
+                    <div class="row"><span class="label">当前赛季</span><span class="value" id="season-num">21</span></div>
+                    <div class="row"><span class="label">副本周期</span><span class="value-dim" id="season-cycle">0 / 10</span></div>
+                    <div class="bar-wrap"><div class="bar-fill bar-exp" id="bar-cycle" style="width: 0%"></div></div>
+                    <div class="row"><span class="label">资格分</span><span class="value" id="qual-points">0</span></div>
+                    <div class="row"><span class="label">排行榜</span><span class="value-none" id="rank-pos">未上榜</span></div>
+                    <div class="row"><span class="label">排行被动</span><span class="value-none" id="rank-passive">无</span></div>
+                  </div>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- ===== 模块 3：实体名单 ===== -->
@@ -564,6 +497,19 @@
                     <span class="section-toggle">▼</span>
                   </div>
                   <div class="section-body" style="padding-top: 6px"><div id="contractor-list"></div></div>
+                </div>
+              </div>
+            </div>
+            <div class="group-section">
+              <div class="group-header">
+                <span class="group-title">【人际关系】</span><span class="group-toggle collapsed">▼</span>
+              </div>
+              <div class="group-body hidden">
+                <div class="section">
+                  <div class="section-header">
+                    <span class="section-title">◈ 关系名录</span><span class="section-toggle collapsed">▼</span>
+                  </div>
+                  <div class="section-body hidden"><div id="rel-list"></div></div>
                 </div>
               </div>
             </div>
@@ -777,6 +723,27 @@
                 </div>
                 <div id="storage-gate-hint"></div>
                 <div id="storage-list"></div>
+              </div>
+            </div>
+            <div class="group-section">
+              <div class="group-header">
+                <span class="group-title">【经济与产业】</span><span class="group-toggle">▼</span>
+              </div>
+              <div class="group-body">
+                <div class="section">
+                  <div class="section-header">
+                    <span class="section-title">◆ 经济</span><span class="section-toggle">▼</span>
+                  </div>
+                  <div class="section-body">
+                    <div class="row"><span class="label">UP</span><span class="value" id="eco-up">0</span></div>
+                  </div>
+                </div>
+                <div class="section">
+                  <div class="section-header">
+                    <span class="section-title">◆ 个人产业</span><span class="section-toggle collapsed">▼</span>
+                  </div>
+                  <div class="section-body hidden"><div id="industry-info"></div></div>
+                </div>
               </div>
             </div>
           </div>

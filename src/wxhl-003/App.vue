@@ -28,13 +28,15 @@
         ref="panelRef"
         class="phone-frame"
         :class="{ 'sb-open': currentView === 'statusbar' }"
-        :style="panelAnimStyle"
+        :style="[panelAnimStyle, phoneVars]"
       >
-        <div class="status-bar">
-          <span class="status-time">{{ clockTime }}</span
-          ><span class="status-label">◆ 回廊终端 · v2</span>
-        </div>
         <button class="minimize-btn" @click.stop="collapse"><span></span></button>
+        <!-- 内容层：字体缩放（zoom）只作用于它，手机框外壳不随之变形 -->
+        <div class="phone-content">
+          <div class="status-bar">
+            <span class="status-time">{{ clockTime }}</span
+            ><span class="status-label">◆ 回廊终端 · v2</span>
+          </div>
 
         <!-- ============ DESKTOP ============ -->
         <div v-if="currentView === 'desktop'" class="desktop-view" :style="desktopBg">
@@ -434,6 +436,9 @@
             <button class="menu-btn" @click="settingsPage = 'wallpaper'">
               <span class="menu-icon">🖼️</span><span>壁纸设置</span><span class="menu-arrow">›</span>
             </button>
+            <button class="menu-btn" @click="settingsPage = 'display'">
+              <span class="menu-icon">🔤</span><span>显示与字体</span><span class="menu-arrow">›</span>
+            </button>
             <button class="menu-btn" @click="settingsPage = 'workshop-author'">
               <span class="menu-icon">🗃️</span><span>收录契约者</span><span class="menu-arrow">›</span>
             </button>
@@ -664,6 +669,58 @@
                   <span class="wp-preset-label">{{ wp.name }}</span>
                 </div>
               </div>
+            </div>
+          </div>
+        </div>
+
+        <div v-if="currentView === 'settings' && settingsPage === 'display'" class="app-page">
+          <div class="app-header">
+            <button class="hdr-btn" @click="settingsPage = ''">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6" />
+              </svg></button
+            ><span class="hdr-title">显示与字体</span><span class="hdr-spacer"></span>
+          </div>
+          <div class="scroll-area settings-inner">
+            <div class="set-block">
+              <div class="set-label">字体</div>
+              <div class="set-row">
+                <select class="prof-select" v-model="store.settings.fontFamily">
+                  <option v-for="f in FONT_OPTIONS" :key="f.label" :value="f.value">{{ f.label }}</option>
+                </select>
+              </div>
+              <div class="set-hint">只作用于小手机内部，与酒馆页面字体隔离</div>
+            </div>
+            <div class="set-block">
+              <div class="set-label">
+                手机尺寸 <span class="set-val">{{ Math.round(store.settings.phoneScale * 100) }}%</span>
+              </div>
+              <input
+                class="set-range"
+                type="range"
+                min="0.8"
+                max="1.5"
+                step="0.05"
+                v-model.number="store.settings.phoneScale"
+              />
+              <div class="set-hint">小手机窗口与字体一起等比放大缩小；手机端会自动贴合屏幕</div>
+            </div>
+            <div class="set-block">
+              <div class="set-label">
+                字体大小 <span class="set-val">{{ Math.round(store.settings.fontScale * 100) }}%</span>
+              </div>
+              <input
+                class="set-range"
+                type="range"
+                min="0.85"
+                max="1.4"
+                step="0.05"
+                v-model.number="store.settings.fontScale"
+              />
+              <div class="set-hint">在「手机尺寸」的基础上，再单独放大 / 缩小文字</div>
+            </div>
+            <div class="set-block">
+              <button class="set-reset-btn" @click="resetDisplay">恢复默认（100%）</button>
             </div>
           </div>
         </div>
@@ -2082,6 +2139,7 @@
           </div>
           <div ref="sbBodyRef" class="sb-body"></div>
         </div>
+        </div>
       </div></div
   ></Transition>
 </template>
@@ -2714,6 +2772,38 @@ const wallpaperPreviewStyle = computed(() =>
     ? { backgroundImage: `url(${store.settings.wallpaper})`, backgroundSize: 'cover', backgroundPosition: 'center' }
     : { background: 'var(--bg)' },
 );
+
+/** 字体预设（Settings.fontFamily 直接存 CSS font-family 串；'' = 用默认黑体栈） */
+const FONT_OPTIONS = [
+  { label: '默认（黑体）', value: '' },
+  { label: '宋体 / 衬线', value: "'Noto Serif SC', 'SimSun', serif" },
+  { label: '楷体', value: "'KaiTi', 'STKaiti', 'Kaiti SC', serif" },
+  { label: '圆体', value: "'Yuanti SC', 'PingFang SC', 'Microsoft YaHei', sans-serif" },
+  { label: '等宽', value: "'JetBrains Mono', 'Courier New', monospace" },
+];
+const DEFAULT_FONT = "'Noto Sans SC', 'PingFang SC', system-ui, sans-serif";
+
+/** 手机框 CSS 变量：
+ *  --ps 手机尺寸缩放（窗口与字体**等比**放大，保持一致）
+ *  --fs 字体大小（在窗口缩放的基础上，再单独缩放文字）
+ *  --cz 内容层实际缩放 = --ps × --fs（content zoom）：窗口按 --ps 变大、内容按 --cz 放大，
+ *      于是「手机尺寸」把窗口与字一起放大，「字体大小」只额外放大字。 */
+const phoneVars = computed(() => {
+  const ps = store.settings.phoneScale || 1;
+  const fs = store.settings.fontScale || 1;
+  return {
+    '--wxhl-font': store.settings.fontFamily || DEFAULT_FONT,
+    '--ps': String(ps),
+    '--fs': String(fs),
+    '--cz': String(ps * fs),
+  };
+});
+
+function resetDisplay() {
+  store.settings.fontFamily = '';
+  store.settings.phoneScale = 1;
+  store.settings.fontScale = 1;
+}
 
 function onWallpaperUpload(e: Event) {
   const file = (e.target as HTMLInputElement).files?.[0];
@@ -3384,8 +3474,11 @@ onUnmounted(() => {
   }
 }
 .phone-frame {
-  width: 320px;
-  height: 640px;
+  width: min(calc(320px * var(--ps, 1)), 92vw);
+  height: min(calc(640px * var(--ps, 1)), 88vh);
+  /* 字体与颜色锁定在小手机内部：font-family/color 均可继承，隔离酒馆页面的环境样式 */
+  font-family: var(--wxhl-font, 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif);
+  color: var(--chalk, #f0e8da);
   border-radius: 42px;
   background: linear-gradient(180deg, #241812, #150e0a);
   border: 2px solid rgba(140, 100, 60, 0.25);
@@ -3397,6 +3490,26 @@ onUnmounted(() => {
   overflow: hidden;
   display: flex;
   flex-direction: column;
+}
+/* 内容层：字体缩放在此层，手机外壳不随字号变形。
+   用 zoom（会影响布局）而非 transform：宽高先除以 --cz、zoom 再乘回来，
+   布局盒仍等于手机框内尺寸 → flex/百分比定位都正确，而内部文字按 --cz 放大。
+   --cz = --ps × --fs：手机尺寸把窗口与字等比放大，字体大小再额外放大字。
+   @supports 兜底：不支持 zoom 的浏览器退回普通铺满（只是不缩放字体，不会错位）。 */
+.phone-content {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+@supports (zoom: 1) {
+  .phone-content {
+    flex: none;
+    zoom: var(--cz, 1);
+    width: calc(100% / var(--cz, 1));
+    height: calc(100% / var(--cz, 1));
+  }
 }
 /* 手机外壳四角铆钉 */
 .phone-frame::before {
@@ -4458,6 +4571,32 @@ onUnmounted(() => {
   opacity: 0.6;
   padding: 4px 0;
 }
+/* 显示与字体 */
+.set-val {
+  color: var(--amber);
+  font-size: 11px;
+  margin-left: 6px;
+}
+.set-range {
+  width: 100%;
+  accent-color: var(--amber-d, #c8a860);
+  cursor: pointer;
+}
+.set-reset-btn {
+  width: 100%;
+  padding: 8px;
+  background: rgba(46, 30, 20, 0.7);
+  border: 1px solid rgba(140, 100, 60, 0.35);
+  border-radius: 6px;
+  color: var(--chalk-d);
+  font-size: 12px;
+  cursor: pointer;
+  transition: all 0.2s;
+  &:hover {
+    background: rgba(70, 44, 26, 0.8);
+    color: var(--chalk);
+  }
+}
 .mode-btn {
   flex: 1;
   padding: 8px;
@@ -4799,9 +4938,9 @@ onUnmounted(() => {
 }
 @media (min-width: 481px) and (max-width: 768px) {
   .phone-frame.phone-frame {
-    width: 320px !important;
+    width: calc(320px * var(--ps, 1)) !important;
     max-width: 92vw !important;
-    height: 600px !important;
+    height: calc(600px * var(--ps, 1)) !important;
     max-height: calc(100vh - 30px) !important;
     max-height: calc(100dvh - 30px) !important;
   }
