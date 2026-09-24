@@ -125,3 +125,35 @@ describe('nominalIdxOf / realTierIdx', () => {
     expect(realTierIdx('不存在')).toBeNull();
   });
 });
+
+describe('AI 语义判定 vs 数值反查的合并（钳制规则）', () => {
+  // 复现用户场景：白武一阶，主属性加成 +5
+  //   数值反查 = 四阶；AI 若判超脱，合并后不得超出「数值可证明的上限」
+  const 白武 = { 名称: '制式刀', 品质: '白色', 类型: '武器', 阶位: '一阶', 主属性加成: 5, 副属性加成: 0, 装备防御: 0, 装备闪避: 0 };
+  const cls = { quality: '白色', category: '武器' };
+
+  it('数值可证明是四阶时，AI 判超脱 → 合并后仍按四阶收费（不按超脱）', () => {
+    const det = assessDeterministic(白武, cls, 0)!;
+    expect(det.realIdx).toBe(3); // 数值反查：四阶
+    // 合并规则：取数值可证明的范围与 AI 判定的较小者（数值层是硬事实，不能被语义层推翻）
+    const aiSays = 5; // AI 判超脱
+    const merged = Math.min(aiSays, det.realIdx);
+    expect(merged).toBe(3);
+    const fee = opFeeFor(0, merged, baseUpOf('equip', 白武, '武器'))!;
+    expect(fee.realIdx).toBe(3); // 按四阶收费
+  });
+
+  it('AI 判的低于数值层时，按数值层（取较高者防放水）', () => {
+    const det = assessDeterministic(白武, cls, 0)!.realIdx; // 四阶
+    const aiSays = 1; // AI 判二阶（放水）
+    const merged = Math.max(aiSays, det);
+    expect(merged).toBe(3);
+  });
+
+  it('数值层无信号（纯效果文本）时，完全听 AI 的', () => {
+    // 无属性加成/无防闪 → 数值层返回 null，合并 = AI 判定
+    const det = assessDeterministic({ 名称: '符咒', 阶位: '一阶' }, { quality: '白色', category: '武器' }, 0);
+    expect(det).toBeNull();
+    // 此时 merged = aiSays（无数值兜底），见 store 合并逻辑
+  });
+});

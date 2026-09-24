@@ -23,6 +23,7 @@ import {
 } from './aiReview';
 import { assessDeterministic, baseUpOf, nominalIdxOf, opFeeFor, realTierName } from './fee';
 import { useMarketNotices } from './notify';
+import { pushSyslog } from '../syslog';
 import { aiGenerate, extractJSON, getActiveCfg, useForumStore } from '../store';
 
 // ================================================================
@@ -260,14 +261,19 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
         continue;
       }
       const nominal = nominalById.get(item.name) ?? 0;
-      let realIdx = v.realIdx ?? nominal;
       const points = [...v.opPoints];
+      // 真实阶位合并规则（2026-09-24 修复）：
+      //   有数值信号（属性加成/防闪）时，数值反查是硬事实，AI 语义判定不能超出它
+      //   ——否则「主属性加成+5」这类纯数字会被模型误判成超脱；
+      //   无数值信号（纯效果文本）时，完全听 AI 的语义判定。
+      let realIdx = v.realIdx ?? nominal;
       if (item.kind === 'equip') {
         const cls = classify({ ...item.snapshot, 名称: item.name });
         if (cls.kind === 'equip') {
           const det = assessDeterministic({ ...item.snapshot, 名称: item.name }, cls, nominal);
           if (det) {
-            realIdx = Math.max(realIdx, det.realIdx);
+            realIdx = Math.max(realIdx, det.realIdx); // 数值层下界（防 AI 放水）
+            realIdx = Math.min(realIdx, det.realIdx); // 数值层上界（防 AI 误判夸大）
             points.push(...det.points);
           }
         }
@@ -380,6 +386,18 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
       }
     }
 
+    // 系统日志（#5）：逐件记一笔成功上架，让 AI 知道这些物品离开背包、挂进了市场。
+    // 独立一次落档（费用结算只在有费时落档，0 费单也要留痕），只记成功件、与费用结算互不干扰。
+    if (succeeded.length > 0) {
+      const r = readContractor();
+      if (r) {
+        for (const e of succeeded) {
+          pushSyslog(r.mvu, `你在自由市场上架了「${e.name}」×${e.qty}，单价 ${e.price} UP`);
+        }
+        await commit(r.mvu, r.mid, []);
+      }
+    }
+
     if (succeeded.length > 0) {
       const feeLine = feeUp > 0 || feeRp > 0 ? `，支付税费/超模费 UP ${feeUp}${feeRp > 0 ? ` + RP ${feeRp}` : ''}` : '';
       toastr.success(`已上架 ${succeeded.length} 件${feeLine}`);
@@ -434,6 +452,8 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
     }
     _.set(r.mvu, ['stat_data', '契约者', '经济', 'UP'], up - pay);
     _.set(r.mvu, ['stat_data', '契约者', '背包'], bagAdd((r.c.背包 ?? {}) as Bag, l.item, 买));
+    // 系统日志（#5）：与本次扣费入包同一事务落档，AI 由此知道背包里这件东西的来源
+    pushSyslog(r.mvu, `你在自由市场购买了「${l.item.名称}」×${买}，实付 ${pay} UP`);
     await commit(r.mvu, r.mid, [[['stat_data', '契约者', '经济', 'UP'], up - pay]]);
     toastr.success(`购得「${l.item.名称}」×${买}，实付 ${pay} UP（含手续费 ${fee}）`);
     await refresh();
