@@ -593,7 +593,10 @@ describe('C4 · 多核心材料：按类别映射到核心需求、扣该需求�
     备料();
     expect(await 开工(单核, ['精铁', '狼牙'])).toBeNull();
     expect(提示[0]).toContain('狼牙');
-    expect(提示[0]).toContain('对不上本配方的核心需求');
+    // 新文案：点名该材料属于哪类、本配方核心需要哪类、以及两条去路（换选 / 到材料页改类别）
+    expect(提示[0]).toContain('怪物素材');
+    expect(提示[0]).toContain('金属');
+    expect(提示[0]).toContain('对不上');
     expect(存有('精铁')).toBe(10);
   });
 

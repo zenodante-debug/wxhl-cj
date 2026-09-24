@@ -1,7 +1,7 @@
 <div id="container">
   <div class="scene">
-    <!-- ============ 顶檐：吊灯 + 全局坐标 ============ -->
-    <div class="scene-ceiling">
+    <!-- ============ 顶檐：吊灯 + 全局坐标（点顶檐展开完整全局坐标） ============ -->
+    <div class="scene-ceiling" id="scene-ceiling" title="点击查看完整全局坐标">
       <div class="ceiling-bulb">
         <div class="bulb-wire"></div>
         <div class="bulb-glass"></div>
@@ -20,6 +20,24 @@
         </div>
         <div class="ceiling-item">
           <span class="ceiling-label">进度</span><span class="ceiling-value" id="ceil-prog">0%</span>
+        </div>
+        <div class="ceiling-item ceiling-more"><span class="ceiling-value" id="ceil-toggle">坐标 ▾</span></div>
+      </div>
+    </div>
+
+    <!-- 顶檐点开：完整全局坐标浮层（默认隐藏） -->
+    <div class="coord-overlay hidden" id="coord-overlay">
+      <div class="coord-panel">
+        <div class="coord-title">◆ 全局坐标</div>
+        <div class="coord-grid">
+          <div class="row"><span class="label">当前世界</span><span class="value" id="cx-world">现实</span></div>
+          <div class="row"><span class="label">现实日期</span><span class="value-dim" id="cx-real-date">---</span></div>
+          <div class="row"><span class="label">现实时间</span><span class="value-dim" id="cx-real-time">---</span></div>
+          <div class="row"><span class="label">副本日期</span><span class="value-dim" id="cx-dungeon-date">不在副本中</span></div>
+          <div class="row"><span class="label">副本时间</span><span class="value-dim" id="cx-dungeon-time">不在副本中</span></div>
+          <div class="row"><span class="label">客观时间</span><span class="value-dim" id="cx-obj-time">不在副本中</span></div>
+          <div class="row"><span class="label">地点</span><span class="value-dim" id="cx-loc">未知</span></div>
+          <div class="row"><span class="label">阶段进度</span><span class="value-dim" id="cx-prog">0%</span></div>
         </div>
       </div>
     </div>
@@ -42,9 +60,9 @@
             <div class="door-slit"></div>
           </div>
         </div>
-        <div class="door door-far" data-target="tab-jobtree">
+        <div class="door door-far" data-target="tab-mapjob">
           <div class="door-recess">
-            <div class="door-plate">职 业 树</div>
+            <div class="door-plate">地 图 · 职 业 树</div>
             <div class="door-status" id="door-status-jobtree">---</div>
             <div class="door-slit"></div>
           </div>
@@ -62,10 +80,10 @@
           </div>
           <div class="door-alert-light" id="alert-dungeon"></div>
         </div>
-        <div class="door door-mid" data-target="tab-map">
+        <div class="door door-mid" data-target="tab-bag">
           <div class="door-recess">
-            <div class="door-plate">回 廊 地 图</div>
-            <div class="door-status" id="door-status-map">---</div>
+            <div class="door-plate">背 包 与 储 藏 室</div>
+            <div class="door-status" id="door-status-bag">---</div>
             <div class="door-slit"></div>
           </div>
         </div>
@@ -392,12 +410,6 @@
                   </div>
                   <div class="section-body hidden"><div id="equip-list"></div></div>
                 </div>
-                <div class="section">
-                  <div class="section-header">
-                    <span class="section-title">◆ 背包</span><span class="section-toggle collapsed">▼</span>
-                  </div>
-                  <div class="section-body hidden"><div id="bag-list"></div></div>
-                </div>
               </div>
             </div>
 
@@ -557,13 +569,13 @@
             </div>
           </div>
 
-          <!-- ===== 模块 4：回廊地图 ===== -->
-          <div id="tab-map" class="tab-content">
+          <!-- ===== 模块：回廊地图 · 职业树（没什么人看，默认折叠） ===== -->
+          <div id="tab-mapjob" class="tab-content">
             <div class="group-section">
               <div class="group-header group-map">
-                <span class="group-title">【全区地图导航】</span><span class="group-toggle">▼</span>
+                <span class="group-title">【回廊地图】</span><span class="group-toggle collapsed">▼</span>
               </div>
-              <div class="group-body">
+              <div class="group-body hidden">
                 <div class="section">
                   <div class="section-header map-header">
                     <span class="section-title">◈ 回廊广场枢纽</span><span class="section-toggle">▼</span>
@@ -732,16 +744,40 @@
                 </div>
               </div>
             </div>
-          </div>
 
-          <!-- ===== 模块 5：职业树 ===== -->
-          <div id="tab-jobtree" class="tab-content">
             <div class="group-section" style="border-color: #4a3a28">
               <div class="group-header" style="border-left-color: #b8a070">
-                <span class="group-title" style="color: #b8a070">【成长路线锚定】</span>
-                <span class="group-toggle">▼</span>
+                <span class="group-title" style="color: #b8a070">【职业树】</span><span class="group-toggle collapsed">▼</span>
               </div>
-              <div class="group-body"><div id="job-tree-content"></div></div>
+              <div class="group-body hidden"><div id="job-tree-content"></div></div>
+            </div>
+          </div>
+
+          <!-- ===== 模块：背包与储藏室（背包=变量，储藏室=本机 localStorage） ===== -->
+          <div id="tab-bag" class="tab-content">
+            <div class="group-section">
+              <div class="group-header">
+                <span class="group-title">【背包】</span><span class="group-toggle">▼</span>
+              </div>
+              <div class="group-body">
+                <div class="storage-hint">
+                  随身携带的物品。点物品上的「存入」可将整堆移入储藏室——移出背包后不再随正文发给 AI，节省 token。
+                </div>
+                <div id="bag-list"></div>
+              </div>
+            </div>
+            <div class="group-section">
+              <div class="group-header">
+                <span class="group-title">【储藏室】</span><span class="group-toggle">▼</span>
+              </div>
+              <div class="group-body">
+                <div class="storage-hint">
+                  储藏室仅保存在<b>本机浏览器</b>，不随聊天 / 角色卡 / 服务器同步；里面的物品 AI
+                  看不到。仅「回廊 / 现实」可存取（副本内摸不到储藏室）。
+                </div>
+                <div id="storage-gate-hint"></div>
+                <div id="storage-list"></div>
+              </div>
             </div>
           </div>
 

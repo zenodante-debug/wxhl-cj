@@ -2126,6 +2126,7 @@ import {
 } from './dice';
 import { clamp固有角色等级 } from './dungeonRules';
 import { mountStatusbar } from './statusbar/core';
+import { canUseHubFacility, HUB_GATE_HINT } from './hubGate';
 import './statusbar/theme.scss';
 
 const store = useForumStore();
@@ -2173,6 +2174,24 @@ function getVH(): number {
     } catch (e) {}
   }
   return h > 0 ? h : 600;
+}
+
+/**
+ * 手机布局判定（与 mobile-compat.js 的 isPhone 同口径：粗指针 / 无悬停 / 视口 ≤768）。
+ * 手机端悬浮按钮由 mobile-compat 独占定位与拖动（指针捕获 + visualViewport 夹取 + 位置持久化），
+ * Vue 这套（btnStyle 内联 + mobile/tablet-mode 强制 CSS + 触摸拖动）在手机端一律让位，
+ * 否则两套互相 removeProperty / placeButton 吸回，把按钮顶到角落锁死（bug #2）。
+ */
+function isMobileLayout(): boolean {
+  try {
+    const w = window.parent !== window ? window.parent : window;
+    const coarse = w.matchMedia?.('(pointer: coarse)')?.matches;
+    const noHover = w.matchMedia?.('(hover: none)')?.matches;
+    const vw = w.visualViewport?.width || w.innerWidth || 9999;
+    return Boolean(coarse || noHover || vw <= 768);
+  } catch (e) {
+    return false;
+  }
 }
 
 // ============ 状态 ============
@@ -2354,16 +2373,30 @@ function openDungeonRoll() {
 }
 
 function openMarket() {
+  // 世界限定（#6）：自由市场仅在回廊/现实可用，副本内禁用
+  if (!canUseHubFacility()) {
+    toastr.warning(HUB_GATE_HINT);
+    return;
+  }
   currentView.value = 'market';
 }
 
 /** 工坊→市场联动：记录待上架物品名，切到市场后由 MarketView 预选 */
 function onGotoMarket(name: string) {
+  if (!canUseHubFacility()) {
+    toastr.warning(HUB_GATE_HINT);
+    return;
+  }
   marketStore.pendingSell = name;
   currentView.value = 'market';
 }
 
 function openCrafting() {
+  // 世界限定（#6）：工坊仅在回廊/现实可用，副本内禁用
+  if (!canUseHubFacility()) {
+    toastr.warning(HUB_GATE_HINT);
+    return;
+  }
   currentView.value = 'crafting';
 }
 
@@ -2577,6 +2610,11 @@ const lastErrorSection = ref('');
 let clockTimer = 0;
 
 function updateDeviceMode() {
+  // 手机端让位给 mobile-compat：不更新 mobile/tablet 强制定位类、不清理它的内联样式
+  if (isMobileLayout()) {
+    deviceMode.value = 'desktop';
+    return;
+  }
   const w = getVW();
   deviceMode.value = w <= 480 ? 'mobile' : w <= 768 ? 'tablet' : 'desktop'; // 始终更新CSS类名，让媒体查询生效
   if (userDragged.value) return; // 用户已手动拖动：保留其自定义位置，只更新类名
@@ -2698,6 +2736,7 @@ function cl(n: number, lo: number, hi: number) {
   return Math.max(lo, Math.min(hi, n));
 }
 function onDragStart(e: MouseEvent) {
+  if (isMobileLayout()) return; // 手机端拖动交给 mobile-compat（指针捕获）
   if (e.button !== 0) return;
   dsx = e.clientX;
   dsy = e.clientY;
@@ -2733,6 +2772,7 @@ function onDragEnd() {
   }
 }
 function onTouchStart(e: TouchEvent) {
+  if (isMobileLayout()) return; // 手机端拖动交给 mobile-compat（指针捕获）
   const t = e.touches[0];
   dsx = t.clientX;
   dsy = t.clientY;
@@ -2741,6 +2781,7 @@ function onTouchStart(e: TouchEvent) {
   hasMoved = false;
 }
 function onTouchMove(e: TouchEvent) {
+  if (isMobileLayout()) return; // 手机端拖动交给 mobile-compat；此处理不可再读残留坐标误判 hasMoved
   const t = e.touches[0];
   const dx = dsx - t.clientX,
     dy = dsy - t.clientY;
@@ -2756,6 +2797,7 @@ function onTouchMove(e: TouchEvent) {
   }
 }
 function onTouchEnd() {
+  if (isMobileLayout()) return; // 手机端点按打开由 mobile-compat 统一触发（__WXHL_OPEN_PHONE__）
   isDragging.value = false;
   if (hasMoved) {
     userDragged.value = true;
@@ -3137,12 +3179,12 @@ function loadPos() {
         right >= 0 &&
         right <= vw - 64
       ) {
-        // 仅在桌面/平板模式恢复保存的位置；手机上始终使用移动端定位
-        if (vw > 480) {
+        // 仅桌面端恢复 Vue 保存的位置；移动布局（手机/平板）一律让位给 mobile-compat 的定位
+        if (!isMobileLayout()) {
           btnBottom.value = cl(bottom, 0, vh - 64);
           btnRight.value = cl(right, 0, vw - 64);
           userDragged.value = true;
-          deviceMode.value = vw <= 768 ? 'tablet' : 'desktop';
+          deviceMode.value = 'desktop';
           restored = true;
         } else {
           localStorage.removeItem(SK);
@@ -3176,11 +3218,18 @@ onMounted(() => {
   clockTimer = window.setInterval(tick, 30000);
   window.addEventListener('resize', onResize);
   if (window.visualViewport) window.visualViewport.addEventListener('resize', onResize);
+  // 暴露「打开小手机」给 mobile-compat：手机端悬浮球的点按打开由它统一触发（避免与 Vue 这套点按判定打架）
+  try {
+    (window.parent as any).__WXHL_OPEN_PHONE__ = expand;
+  } catch (_) {}
 });
 onUnmounted(() => {
   window.clearInterval(clockTimer);
   window.removeEventListener('resize', onResize);
   if (window.visualViewport) window.visualViewport.removeEventListener('resize', onResize);
+  try {
+    if ((window.parent as any).__WXHL_OPEN_PHONE__ === expand) delete (window.parent as any).__WXHL_OPEN_PHONE__;
+  } catch (_) {}
   pageDoc.removeEventListener('mousemove', onDragMove);
   pageDoc.removeEventListener('mouseup', onDragEnd);
 });

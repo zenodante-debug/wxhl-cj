@@ -62,6 +62,7 @@ import {
 } from './settlementRules';
 import { buildSettlementPrompt, buildSettlementEnterPrompt } from './settlementGen';
 import { sanitizeJsonSchema } from './schemaSanitize';
+import { pushSyslog } from './syslog';
 
 const SK = 'wxhl003_settings';
 
@@ -2567,6 +2568,9 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
         // 数组路径: 每个元素都是字面量 key, 名字含「.」也不会被 lodash 当作层级分隔
         _.set(mvu, ['stat_data', '契约者', key], value);
       }
+      // 系统日志（#5）：与本次副本写入同一事务落档，AI 由此知道玩家生成了哪个副本
+      const 副本名 = String((vars['当前副本元数据'] as any)?.副本名称 ?? '未知副本');
+      pushSyslog(mvu, `你生成了新副本「${副本名}」`);
       await Mvu.replaceMvuData(mvu, { type: 'message', message_id });
       // 回读校验: MVU 按注册的 zod schema 处理写入, 未声明的键会被静默剥掉 —— 这里主动暴露, 避免"看起来写成功"
       const after = Mvu.getMvuData({ type: 'message', message_id });
@@ -3151,6 +3155,12 @@ export const useSettlementStore = defineStore('settlement', () => {
       // 这一对赋值之间是唯一的窗口: 之后变量就一定在存档里了（无论回读校验过不过）。
       // 把 已提交 夹在 replaceMvuData 两侧, 是为了让「没写」与「写了但没核对上」在 catch 里可分辨。
       已提交 = false;
+      // 系统日志（#5）：与本次结算同一事务落档，AI 由此知道这轮副本的收获（数值与写入同源）
+      const c0 = 预览.计算结果;
+      pushSyslog(
+        mvu,
+        `你完成了副本「${预览.快照.副本名称}」的结算：EXP +${c0.最终EXP}、UP +${c0.最终UP}、RP +${c0.RP}、PEXP +${c0.PEXP}`,
+      );
       await Mvu.replaceMvuData(mvu, { type: 'message', message_id });
       已提交 = true;
 

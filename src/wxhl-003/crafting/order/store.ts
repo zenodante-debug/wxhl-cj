@@ -30,6 +30,7 @@ import { appendHistory } from './rep/history';
 import { 弃单扣分, 退货扣分, 验收加分 } from './rep/score';
 import { readShopName, type ShopRankBoard } from './rep/shop';
 import { 成品体积检查, 需求单摘要, type 需求单 } from './spec';
+import { logSyslog, pushSyslog } from '../../syslog';
 
 // —— MVU 三助手：与 crafting/store.ts 逐字一致（楼层探测 → _.set → replaceMvuData → 回读校验）——
 function messageId(): number | 'latest' {
@@ -179,7 +180,14 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
       return false;
     }
     busy.value = true; lastError.value = '';
-    try { await acceptOrder(id, playerName.value, shop); toastr.success(`接单成功，订金已到你名下（店铺「${shop}」）`); await refresh(); return true; }
+    try {
+      await acceptOrder(id, playerName.value, shop);
+      // 系统日志（#5）：接单只调服务器、不落本地变量，故用独立日志让 AI 知道这笔订金与这单生意
+      await logSyslog(`你以店铺「${shop}」接取了一张订单，订金已到账`);
+      toastr.success(`接单成功，订金已到你名下（店铺「${shop}」）`);
+      await refresh();
+      return true;
+    }
     catch (e: any) { lastError.value = e?.message || '接单失败'; toastr.error(lastError.value); return false; }
     finally { busy.value = false; }
   }
@@ -225,6 +233,8 @@ export const useOrderStore = defineStore('wxhl003-order', () => {
       return false;
     }
     _.set(rr.mvu, ['stat_data', '契约者', '背包'], 新背包);
+    // 系统日志（#5）：与本次出包同一事务落档，AI 由此知道这件成品去了哪里
+    pushSyslog(rr.mvu, `你交付了订单成品「${物品名}」，等待发单人验收`);
     await commit(rr.mvu, rr.mid, [[['stat_data', '契约者', '背包'], 新背包]]);
     toastr.success('已交付，等待发单人验收');
     await refresh();

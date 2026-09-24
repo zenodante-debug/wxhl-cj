@@ -12,6 +12,8 @@ import imgStr from './assets/str.webp?url';
 import imgAgi from './assets/agi.webp?url';
 import imgCon from './assets/cons.webp?url';
 import imgPer from './assets/per.webp?url';
+import { deposit, loadStorage, saveStorage, withdraw, type StorageRoom } from './storage';
+import { canUseHubFacility, HUB_GATE_HINT } from '../hubGate';
 
 /** 挂载状态栏到 root 元素，返回卸载函数 */
 export function mountStatusbar(root: HTMLElement): () => void {
@@ -20,6 +22,8 @@ export function mountStatusbar(root: HTMLElement): () => void {
   const $c = $root.find('#container');
 
   /* ==================== UI折叠状态记忆（localStorage持久化） ==================== */
+  /* 没什么人看的合并模块「回廊地图 · 职业树」：首次加载默认折叠（用户展开后会记住、不再强制） */
+  const DEFAULT_COLLAPSED_GROUPS = ['grp:【回廊地图】', 'grp:【职业树】'];
   function loadUiState() {
     try {
       const raw = localStorage.getItem('mvu_statusbar_ui_state');
@@ -39,7 +43,7 @@ export function mountStatusbar(root: HTMLElement): () => void {
       expand_entities: new Set<string>(),
       expand_subs: new Set<string>(),
       collapsed_sections: new Set<string>(),
-      collapsed_groups: new Set<string>(),
+      collapsed_groups: new Set<string>(DEFAULT_COLLAPSED_GROUPS),
     };
   }
   const _ui = loadUiState();
@@ -791,7 +795,7 @@ export function mountStatusbar(root: HTMLElement): () => void {
     return h;
   }
 
-  function renderBagHtml(bagData: any, bagPathPrefix: string, canEdit: boolean) {
+  function renderBagHtml(bagData: any, bagPathPrefix: string, canEdit: boolean, canStore: boolean = true) {
     const keys = Object.keys(bagData || {});
     if (keys.length === 0) return '<span class="empty-hint">背包为空</span>';
     let html = '';
@@ -888,10 +892,48 @@ export function mountStatusbar(root: HTMLElement): () => void {
             '<select class="equip-slot-select"><option value="头部">头部</option><option value="躯干">躯干</option><option value="手部">手部</option><option value="下装">下装</option><option value="饰品">饰品</option><option value="主武器" selected>主武器</option><option value="副武器">副武器</option></select>';
           html += '<button class="btn-equip" data-itemname="' + safeK + '">装备</button>';
         }
+        // 存入储藏室（整堆移入本机储藏室、从背包变量移除以省 token）；副本内不可用
+        if (canStore) html += '<button class="btn-store" data-itemname="' + safeK + '">存入</button>';
         html += '<button class="btn-delete-bag" data-itemname="' + safeK + '">删除</button>';
         html += '</div>';
       }
 
+      html += '</div>';
+    });
+    return html;
+  }
+
+  /* 储藏室列表（本机 localStorage，不随变量；只读展示 + 取出按钮）。hubOk=false 时隐藏取出按钮 */
+  function renderStorageHtml(storage: StorageRoom, hubOk: boolean): string {
+    const keys = Object.keys(storage || {});
+    if (keys.length === 0) return '<span class="empty-hint">储藏室为空</span>';
+    let html = '';
+    keys.forEach(function (k) {
+      const item = storage[k] || {};
+      const count = _.get(item, '数量', 1);
+      const quality = _.get(item, '品质', '');
+      const rank = _.get(item, '阶位', '');
+      const type = _.get(item, '类型', '');
+      const desc = _.get(item, '描述', '');
+      let tagClass = 'tag-gray';
+      if (quality === '金色') tagClass = 'tag-orange';
+      else if (quality === '蓝色') tagClass = 'tag-blue';
+      else if (quality === '绿色') tagClass = 'tag-green';
+      else if (quality === '银色' || quality === '紫色') tagClass = 'tag-purple';
+
+      html += '<div class="bag-simple-item"><div class="bag-item-head">';
+      html += '<span class="bag-item-name">' + k + '</span>';
+      if (quality && quality !== '无')
+        html += '<span class="tag ' + tagClass + '">' + quality + (rank && rank !== '无' ? ' ' + rank : '') + '</span>';
+      if (type && type !== '无') html += '<span class="tag tag-blue">' + type + '</span>';
+      html += '<span style="color:#e0c080;">×' + count + '</span></div>';
+      if (desc && desc !== '无') html += '<div class="bag-item-desc">' + desc + '</div>';
+      if (hubOk) {
+        html +=
+          '<div class="bag-item-ctrls"><button class="btn-withdraw" data-itemname="' +
+          escapeAttr(k) +
+          '">取出</button></div>';
+      }
       html += '</div>';
     });
     return html;
@@ -1996,7 +2038,16 @@ export function mountStatusbar(root: HTMLElement): () => void {
         targetOptionsHtml += `<option value="契约者.其他契约者.${ck}">${ck}</option>`;
       });
 
-      $c.find('#bag-list').html(renderBagHtml(d('契约者.背包', {}), '契约者.背包', true));
+      // 世界门禁（#6）：副本内不可存入/取出储藏室
+      const hubOk = canUseHubFacility();
+      $c.find('#bag-list').html(renderBagHtml(d('契约者.背包', {}), '契约者.背包', true, hubOk));
+
+      /* 储藏室（本机 localStorage，不随变量发给 AI；仅回廊/现实可存取） */
+      const storage = loadStorage();
+      $c
+        .find('#storage-gate-hint')
+        .html(hubOk ? '' : '<div class="storage-gate-warn">⚠ 当前不在回廊 / 现实，储藏室暂不可存取</div>');
+      $c.find('#storage-list').html(renderStorageHtml(storage, hubOk));
 
       /* 副本经历渲染到 dungeon-history */
       let dungeons = d('契约者.副本经历', {}),
@@ -2368,6 +2419,16 @@ export function mountStatusbar(root: HTMLElement): () => void {
       $c.find('#ceil-loc').text(d('契约者.当前时间.地点', '未知'));
       $c.find('#ceil-prog').text(d('契约者.当前时间.阶段进度', '0%'));
 
+      /* 顶檐点开的完整全局坐标浮层（8 字段，可编辑，与契约者档案内同路径） */
+      $c.find('#cx-world').html(editText(d('契约者.当前世界', '现实'), '契约者.当前世界'));
+      $c.find('#cx-real-date').html(editText(d('契约者.当前时间.现实日期', '---'), '契约者.当前时间.现实日期'));
+      $c.find('#cx-real-time').html(editText(d('契约者.当前时间.现实时间', '---'), '契约者.当前时间.现实时间'));
+      $c.find('#cx-dungeon-date').html(editText(d('契约者.当前时间.副本日期', '不在副本中'), '契约者.当前时间.副本日期'));
+      $c.find('#cx-dungeon-time').html(editText(d('契约者.当前时间.副本时间', '不在副本中'), '契约者.当前时间.副本时间'));
+      $c.find('#cx-obj-time').html(editText(d('契约者.当前时间.客观时间', '不在副本中'), '契约者.当前时间.客观时间'));
+      $c.find('#cx-loc').html(editText(d('契约者.当前时间.地点', '未知'), '契约者.当前时间.地点'));
+      $c.find('#cx-prog').html(editText(d('契约者.当前时间.阶段进度', '0%'), '契约者.当前时间.阶段进度'));
+
       $c.find('#plate-name').text(d('契约者.头部.姓名', '---'));
       $c.find('#plate-lv').text('Lv.' + d('契约者.头部.等级', 1));
       $c.find('#plate-rank').text(d('契约者.头部.阶位', '一阶'));
@@ -2387,7 +2448,7 @@ export function mountStatusbar(root: HTMLElement): () => void {
       const dgActive = !!doorDgName && doorDgName !== '未生成' && doorDgName !== '无';
       $c.find('#door-status-dungeon').text(dgActive ? doorDgName : '无活跃副本');
       $c.find('#alert-dungeon').toggleClass('on', dgActive);
-      $c.find('#door-status-map').text(d('契约者.头部.军衔', '列兵') + ' · ' + d('契约者.当前世界', '现实'));
+      $c.find('#door-status-bag').text(`背包 ${Object.keys(d('契约者.背包', {})).length} · 储藏 ${Object.keys(storage).length}`);
       $c.find('#door-status-attr').text(`可分配 ${d('契约者.属性.未分配属性点', 0)} 点`);
 
       renderAttrHome();
@@ -2437,8 +2498,8 @@ export function mountStatusbar(root: HTMLElement): () => void {
     'tab-status': '契 约 者 档 案',
     'tab-dungeon': '副 本 情 报',
     'tab-entity': '实 体 名 单',
-    'tab-map': '回 廊 地 图',
-    'tab-jobtree': '职 业 树',
+    'tab-bag': '背 包 与 储 藏 室',
+    'tab-mapjob': '回 廊 地 图 · 职 业 树',
     'tab-attributes': '属 性 加 点',
   };
 
@@ -2446,6 +2507,10 @@ export function mountStatusbar(root: HTMLElement): () => void {
     $c.find('.tab-content').removeClass('active');
     $c.find('#' + target).addClass('active');
     $c.find('#module-panel-title').text(MODULE_TITLES[target] || '---');
+    // 收起可能开着的全局坐标浮层（模块面板会盖住它，状态也一并复位）
+    $c.find('#coord-overlay').addClass('hidden');
+    $c.find('#scene-ceiling').removeClass('coord-open');
+    $c.find('#ceil-toggle').text('坐标 ▾');
     $c.find('#module-overlay').fadeIn(160);
   }
 
@@ -2685,6 +2750,74 @@ export function mountStatusbar(root: HTMLElement): () => void {
       } catch (e2) {
         console.error('物品删除失败', e2);
       }
+    });
+
+    /* 存入背包物品 → 储藏室（整堆移入本机 localStorage，从背包变量移除以省 token） */
+    $c.on('click', '.btn-store', async function (this: HTMLElement, e: JQuery.Event) {
+      e.stopPropagation();
+      if (!canUseHubFacility()) {
+        alert(HUB_GATE_HINT);
+        return;
+      }
+      const itemName = $(this).data('itemname');
+      try {
+        const data = Mvu.getMvuData({ type: 'message', message_id: 'latest' });
+        const item = _.cloneDeep(_.get(data.stat_data, '契约者.背包.' + itemName));
+        if (!item) return;
+        const count = Number(item.数量 ?? 1) || 1;
+        _.unset(data.stat_data, '契约者.背包.' + itemName);
+        saveStorage(deposit(loadStorage(), itemName, item));
+        appendSystemLog(data, `你把「${itemName}」×${count} 存入了储藏室`);
+        await Mvu.replaceMvuData(data, { type: 'message', message_id: 'latest' });
+        populateCharacterData();
+      } catch (e2) {
+        console.error('存入储藏室失败', e2);
+      }
+    });
+
+    /* 从储藏室取出 → 背包（整堆搬回，恢复进背包变量） */
+    $c.on('click', '.btn-withdraw', async function (this: HTMLElement, e: JQuery.Event) {
+      e.stopPropagation();
+      if (!canUseHubFacility()) {
+        alert(HUB_GATE_HINT);
+        return;
+      }
+      const itemName = $(this).data('itemname');
+      try {
+        const w = withdraw(loadStorage(), itemName);
+        if (!w) return;
+        const count = Number(w.item.数量 ?? 1) || 1;
+        const data = Mvu.getMvuData({ type: 'message', message_id: 'latest' });
+        const bagPath = '契约者.背包.' + itemName;
+        const exist = _.get(data.stat_data, bagPath);
+        if (exist) _.set(data.stat_data, bagPath + '.数量', (Number(exist.数量 ?? 1) || 1) + count);
+        else _.set(data.stat_data, bagPath, { ...w.item, 数量: count });
+        saveStorage(w.next);
+        appendSystemLog(data, `你从储藏室取出了「${itemName}」×${count}`);
+        await Mvu.replaceMvuData(data, { type: 'message', message_id: 'latest' });
+        populateCharacterData();
+      } catch (e2) {
+        console.error('从储藏室取出失败', e2);
+      }
+    });
+
+    /* 顶檐点开 / 收起完整全局坐标浮层（模态：点背板或再点顶檐收起，点面板内部不收起以便编辑） */
+    function toggleCoord(open?: boolean) {
+      const $ov = $c.find('#coord-overlay');
+      const opening = open !== undefined ? open : $ov.hasClass('hidden');
+      $ov.toggleClass('hidden', !opening);
+      $c.find('#scene-ceiling').toggleClass('coord-open', opening);
+      $c.find('#ceil-toggle').text(opening ? '坐标 ▴' : '坐标 ▾');
+    }
+    $c.on('click', '#scene-ceiling', function (this: HTMLElement, e: JQuery.Event) {
+      e.stopPropagation();
+      toggleCoord();
+    });
+    $c.on('click', '#coord-overlay', function (this: HTMLElement, e: JQuery.Event) {
+      if (e.target === this) toggleCoord(false);
+    });
+    $c.on('click', '#coord-overlay .coord-panel', function (this: HTMLElement, e: JQuery.Event) {
+      e.stopPropagation();
     });
 
     /* 脱下装备 */

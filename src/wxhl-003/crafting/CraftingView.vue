@@ -203,7 +203,10 @@
           </label>
           <div class="crf-multi">
             <div class="cm-title">核心材料（需 {{ 核心需求文本 }}，可多选）</div>
-            <div v-if="!coreCandidates.length" class="crf-empty">背包里没有「{{ 核心需求文本 }}」类材料</div>
+            <div v-if="!coreCandidates.length" class="crf-empty">
+              背包里没有归到「{{ 核心需求文本 }}」类的材料。<br />
+              若其实有、只是自动归类不对，到上方「材料」页签把它的类别改对即可。
+            </div>
             <label v-for="n in coreCandidates" :key="n" class="crf-check">
               <input type="checkbox" :checked="form.核心材料.includes(n)" @change="toggle核心材料(n)" />
               {{ n }}（×{{ store.bag[n]?.数量 }} · {{ store.codex[n]?.类别 ?? '未分类' }}）
@@ -214,7 +217,9 @@
               :class="核心自检.未覆盖.length || 核心自检.多余.length ? 'bad' : 'ok'"
             >
               <template v-if="核心自检.未覆盖.length">还差：{{ 核心自检.未覆盖.join('、') }}</template>
-              <template v-else-if="核心自检.多余.length">这几件对不上核心需求：{{ 核心自检.多余.join('、') }}</template>
+              <template v-else-if="核心自检.多余.length"
+                >这几件对不上核心需求：{{ 核心自检.多余.join('、') }}（类别不对可到「材料」页签改）</template
+              >
               <template v-else>核心需求已齐（按档案类别认领，归类不对可在下面改）</template>
             </div>
           </div>

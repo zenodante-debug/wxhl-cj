@@ -58,6 +58,29 @@
     };
   };
 
+  /**
+   * 把元素定位到「视口坐标」(targetVL, targetVT)，对 fixed 包含块偏移免疫。
+   * 手机端 fixed 的包含块可能不是视口（祖先 transform/filter/backdrop-filter 或 pinch-zoom），
+   * 此时直接 left/top=视口坐标会跑偏（悬浮球被顶到角落、面板漂出屏幕——bug #1/#2 的共同根因）。
+   * 做法：先按视口坐标设一次，再用 getBoundingClientRect（同为视口坐标）量出实际偏差并抵消，
+   * 无论包含块如何都能落准。设置与校正在同一同步块内完成，中间无绘制、无闪烁。
+   */
+  const placeAtViewport = (el, targetVL, targetVT) => {
+    setImportant(el, {
+      left: `${targetVL}px`,
+      top: `${targetVT}px`,
+      right: 'auto',
+      bottom: 'auto',
+      transform: 'none',
+    });
+    const rect = el.getBoundingClientRect();
+    const dx = targetVL - rect.left;
+    const dy = targetVT - rect.top;
+    if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) {
+      setImportant(el, { left: `${targetVL + dx}px`, top: `${targetVT + dy}px` });
+    }
+  };
+
   const placeButton = button => {
     if (!isPhone() || button.dataset.wxhlTouchDragging === '1') return;
     const viewport = getViewport();
@@ -71,13 +94,8 @@
     const position = clampPosition(initial.left, initial.top, width, height);
     setImportant(button, {
       position: 'fixed',
-      left: `${position.left}px`,
-      top: `${position.top}px`,
-      right: 'auto',
-      bottom: 'auto',
       width: `${width}px`,
       height: `${height}px`,
-      transform: 'none',
       visibility: 'visible',
       opacity: '1',
       display: 'flex',
@@ -85,6 +103,7 @@
       'touch-action': 'none',
       'z-index': '2147483647',
     });
+    placeAtViewport(button, position.left, position.top);
   };
 
   const bindTouchDrag = button => {
@@ -109,13 +128,8 @@
           moved: false,
         };
         button.dataset.wxhlTouchDragging = '1';
-        setImportant(button, {
-          left: `${rect.left}px`,
-          top: `${rect.top}px`,
-          right: 'auto',
-          bottom: 'auto',
-          transform: 'none',
-        });
+        // 固定在当前视口位置（自校正包含块偏移），避免拖动起点跳变
+        placeAtViewport(button, rect.left, rect.top);
         try {
           button.setPointerCapture(event.pointerId);
         } catch (_) {
@@ -135,13 +149,7 @@
         if (!drag.moved) return;
         event.preventDefault();
         const position = clampPosition(drag.left + deltaX, drag.top + deltaY, drag.width, drag.height);
-        setImportant(button, {
-          left: `${position.left}px`,
-          top: `${position.top}px`,
-          right: 'auto',
-          bottom: 'auto',
-          transform: 'none',
-        });
+        placeAtViewport(button, position.left, position.top);
       },
       { capture: true, passive: false },
     );
@@ -156,13 +164,22 @@
       } catch (_) {
         /* 忽略 */
       }
-      const rect = button.getBoundingClientRect();
       if (moved) {
+        const rect = button.getBoundingClientRect();
         savePosition(rect.left, rect.top);
         suppressClickUntil = Date.now() + 500;
         event.preventDefault();
+        placeButton(button);
+      } else {
+        // 干净点按（未拖动）：统一由本补丁触发打开小手机。
+        // 手机端悬浮球的「拖动」与「点按打开」都归这套管 —— 不再走 Vue 那套 hasMoved 点按判定，
+        // 它会被残留坐标污染而把点按误判成拖动，导致关掉面板后再也点不开（本次修复的 bug）。
+        try {
+          hostWindow.__WXHL_OPEN_PHONE__?.();
+        } catch (_) {
+          /* 忽略 */
+        }
       }
-      placeButton(button);
     };
     button.addEventListener('pointerup', finishDrag, { capture: true });
     button.addEventListener('pointercancel', finishDrag, { capture: true });
@@ -184,38 +201,36 @@
     const overlay = root?.querySelector('.panel-overlay');
     if (!overlay) return;
     const viewport = getViewport();
+    // 覆盖层作背板，贴满可视视口（含 URL 栏 / pinch-zoom 补偿；位置同样自校正）
     setImportant(overlay, {
       position: 'fixed',
       inset: 'auto',
-      left: `${viewport.left}px`,
-      top: `${viewport.top}px`,
       width: `${viewport.width}px`,
       height: `${viewport.height}px`,
-      padding: '10px',
+      padding: '0',
       'box-sizing': 'border-box',
-      'align-items': 'center',
-      'justify-content': 'center',
       overflow: 'hidden',
     });
+    placeAtViewport(overlay, viewport.left, viewport.top);
+
     const frame = overlay.querySelector('.phone-frame');
     if (frame) {
-      // 状态栏页（sb-open）在手机端贴满可见视口；其余页保持小手机尺寸
-      if (frame.classList.contains('sb-open')) {
-        setImportant(frame, {
-          width: `${viewport.width - 12}px`,
-          height: `${viewport.height - 12}px`,
-          'max-width': `${viewport.width - 12}px`,
-          'max-height': `${viewport.height - 12}px`,
-          'border-radius': '14px',
-        });
-      } else {
-        setImportant(frame, {
-          width: `${Math.max(280, Math.min(390, viewport.width - 20))}px`,
-          height: `${Math.max(360, Math.min(640, viewport.height - 20))}px`,
-          'max-width': `${Math.max(280, viewport.width - 20)}px`,
-          'max-height': `${Math.max(360, viewport.height - 20)}px`,
-        });
-      }
+      // 状态栏页（sb-open）贴满可视视口；其余页保持小手机尺寸
+      const isSb = frame.classList.contains('sb-open');
+      const fw = isSb ? viewport.width - 12 : Math.max(280, Math.min(390, viewport.width - 20));
+      const fh = isSb ? viewport.height - 12 : Math.max(360, Math.min(640, viewport.height - 20));
+      setImportant(frame, {
+        position: 'fixed',
+        width: `${fw}px`,
+        height: `${fh}px`,
+        'max-width': `${fw}px`,
+        'max-height': `${fh}px`,
+        margin: '0',
+        'border-radius': isSb ? '14px' : '28px',
+      });
+      // 显式居中（不再靠 flex）。overlay 的 backdrop-filter 会让 fixed 的包含块变成它而非视口，
+      // 直接 left/top=视口坐标会跑偏——placeAtViewport 量出实际偏差自校正，掰回可视视口正中。
+      placeAtViewport(frame, viewport.left + (viewport.width - fw) / 2, viewport.top + (viewport.height - fh) / 2);
     }
     const minimize = overlay.querySelector('.minimize-btn');
     if (minimize) {
