@@ -39,9 +39,9 @@ export function realTierIdx(name: string): number | null {
 export interface OpFee {
   /** 名义..真实 修正系数之和 */
   sum: number;
-  /** RP 费 = 50 × sum */
+  /** RP 费 = 50 × sum（超脱 + 20 RP 上架费） */
   rp: number;
-  /** UP 费 = 基准价 × 真实阶位定价系数 × sum */
+  /** UP 费 = 基准价 × 真实阶位定价系数 × sum（超脱再加 基准价 × 50%） */
   up: number;
   realIdx: number;
 }
@@ -49,12 +49,19 @@ export interface OpFee {
 /**
  * 超模上架费。nominalIdx/realIdx：0..4=一阶~五阶，5=超脱。
  * realIdx <= nominalIdx → null（符合规格，不走手续）。
+ * 超脱（realIdx=5）在上超模费之外，另收「超脱上架费」：20 RP + 基准价 × 50% UP。
  */
 export function opFeeFor(nominalIdx: number, realIdx: number, baseUp: number): OpFee | null {
   if (realIdx <= nominalIdx) return null;
   let sum = 0;
   for (let i = Math.max(0, nominalIdx); i <= Math.min(5, realIdx); i++) sum += TIER_COEFS[i];
-  return { sum, rp: 50 * sum, up: baseUp * priceCoef(realIdx) * sum, realIdx };
+  const transFee = realIdx === 5;
+  return {
+    sum,
+    rp: 50 * sum + (transFee ? 20 : 0),
+    up: baseUp * priceCoef(realIdx) * sum + (transFee ? Math.floor(baseUp * 0.5) : 0),
+    realIdx,
+  };
 }
 
 /**
@@ -78,22 +85,24 @@ export interface OpAssessment {
   points: string[];
 }
 
-/** 在基准行里反查数值所属的最低真实阶位（含容差）；超出全部行 → 超脱(5) */
-function invertBench(value: number, bench: number[], tolerance: number): number {
+/** 在基准行里反查数值所属的最低阶位（超出该阶位最高值即升阶）；超出全部行 → 超脱(5) */
+function invertBench(value: number, bench: number[]): number {
   for (let i = 0; i < bench.length; i++) {
-    if (value <= bench[i] + tolerance) return i;
+    if (value <= bench[i]) return i;
   }
   return 5;
 }
 
-/** 属性加成容差：真实存档与基准表存在 ±2 小幅偏差（不收费），显著超出才计费 */
-const ATTR_TOLERANCE = 2;
-/** 防/闪容差（与旧软上限一致：15×倍率+6） */
+/** 超模宽松度：每阶每品质的最高基准属性加成，再放宽 +5（2026-09-24 用户定稿） */
+const ATTR_SLACK = 5;
+/** 防/闪容差（真实存档与基准表存在小幅偏差） */
 const ARMOR_TOLERANCE = 6;
 
 /**
- * 确定性超模反查（不需要 AI）：主/副属性加成、装备防御/闪避超出名义阶位基准时，
- * 反推它实际达到的阶位。返回 null = 数值层面没有超出名义阶位。
+ * 确定性超模反查（不需要 AI）：**属性加成超出该品质当前阶位的最高值 → 往上升一阶，算超模**。
+ * 饰品强化等级计入属性加成上限（强化每级 +1 属性加成，世界书<装备与消耗品系统>）。
+ * 防御/闪避按各阶位合理上限（15 × 修正系数）反查，防具强化不计入（已有上限表）。
+ * 返回 null = 数值层面没有超出名义阶位。
  */
 export function assessDeterministic(
   item: MarketItemSnapshot,
@@ -109,35 +118,42 @@ export function assessDeterministic(
   let realIdx = nominalIdx;
 
   if (row) {
-    const 主 = num(item.主属性加成);
-    if (主 > 0) {
-      const idx = invertBench(主, row, ATTR_TOLERANCE);
-      if (idx > nominalIdx) {
-        realIdx = Math.max(realIdx, idx);
-        points.push(`主属性加成 ${主} 已达到「${realTierName(idx)}」规格（${cls.quality}·${cls.category}名义阶位基准约 ${row[nominalIdx] ?? 0}）`);
+    // 超脱阶（5）数值无上限（用户定稿）；仅一~五阶做反查
+    if (nominalIdx < 5) {
+      // 饰品强化直接加属性加成（主/副属性由玩家选择），上限 = 基准+强化+宽松度
+      const 强化 = cls.category === '饰品' ? Math.max(0, num(item.强化等级)) : 0;
+      const 主 = num(item.主属性加成);
+      if (主 > 0) {
+        const idx = invertBench(主, row.map(v => v + 强化 + ATTR_SLACK));
+        if (idx > nominalIdx) {
+          realIdx = Math.max(realIdx, idx);
+          points.push(`主属性加成 ${主} 已达到「${realTierName(idx)}」规格（${cls.quality}·${cls.category}名义阶位最高约 ${row[nominalIdx] ?? 0}${强化 > 0 ? `+强化${强化}` : ''}，放宽+${ATTR_SLACK}）`);
+        }
       }
-    }
-    const 副 = num(item.副属性加成);
-    if (副 > 0) {
-      const bench = row.map(v => Math.floor(v * 0.5));
-      const idx = invertBench(副, bench, ATTR_TOLERANCE);
-      if (idx > nominalIdx) {
-        realIdx = Math.max(realIdx, idx);
-        points.push(`副属性加成 ${副} 已达到「${realTierName(idx)}」规格（名义阶位基准约 ${bench[nominalIdx] ?? 0}）`);
+      const 副 = num(item.副属性加成);
+      if (副 > 0) {
+        const bench = row.map(v => Math.floor(v * 0.5) + 强化 + ATTR_SLACK);
+        const idx = invertBench(副, bench);
+        if (idx > nominalIdx) {
+          realIdx = Math.max(realIdx, idx);
+          points.push(`副属性加成 ${副} 已达到「${realTierName(idx)}」规格（名义阶位最高约 ${Math.floor((row[nominalIdx] ?? 0) * 0.5)}${强化 > 0 ? `+强化${强化}` : ''}，放宽+${ATTR_SLACK}）`);
+        }
       }
     }
   }
 
-  // 防御/闪避：各阶位合理上限 = 15 × 修正系数（+容差）
-  const 防 = Math.abs(num(item.装备防御));
-  const 闪 = Math.abs(num(item.装备闪避));
-  const capBench = ARMOR_MULT.map(m => 15 * m);
-  for (const [label, v] of [['装备防御', 防], ['装备闪避', 闪]] as const) {
-    if (v > 0) {
-      const idx = invertBench(v, capBench, ARMOR_TOLERANCE);
-      if (idx > nominalIdx) {
-        realIdx = Math.max(realIdx, idx);
-        points.push(`${label} ${v} 已达到「${realTierName(idx)}」规格（名义阶位合理上限约 ${capBench[nominalIdx] ?? 15}）`);
+  // 防御/闪避：各阶位合理上限 = 15 × 修正系数（+容差）；超脱阶无上限
+  if (nominalIdx < 5) {
+    const 防 = Math.abs(num(item.装备防御));
+    const 闪 = Math.abs(num(item.装备闪避));
+    const capBench = ARMOR_MULT.map(m => 15 * m + ARMOR_TOLERANCE);
+    for (const [label, v] of [['装备防御', 防], ['装备闪避', 闪]] as const) {
+      if (v > 0) {
+        const idx = invertBench(v, capBench);
+        if (idx > nominalIdx) {
+          realIdx = Math.max(realIdx, idx);
+          points.push(`${label} ${v} 已达到「${realTierName(idx)}」规格（名义阶位合理上限约 ${capBench[nominalIdx] ?? 21}）`);
+        }
       }
     }
   }

@@ -186,7 +186,7 @@ function priceTierOf(item: MarketItemSnapshot, sellerTier: string): string {
 
 export function checkPrice(kind: MarketKind, item: MarketItemSnapshot, sellerTier: string, price: number): PriceCheck {
   const fail = (reason: string, min = 0, max = 0): PriceCheck => ({ ok: false, min, max, reason });
-  if (!Number.isFinite(price) || price < 0 || price > 9_999_999) return fail('价格超出允许范围');
+  if (!Number.isFinite(price) || price < 0 || price > 1_000_000_000) return fail('价格超出允许范围');
 
   const 阶位 = priceTierOf(item, sellerTier);
   const f = tierFactor(阶位);

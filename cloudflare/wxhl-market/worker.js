@@ -41,16 +41,15 @@ const PRICE_CEIL_RATE = 2;
 // 道具按所填品质查武器基准（与前端 GOODS_BASE_CATEGORY 一致）
 const GOODS_BASE_CATEGORY = '武器';
 
-// ———— 装备规则基准（世界书<装备与消耗品系统>主属性加成基准表；银色数值等同紫色） ————
+// ———— 装备规则基准（世界书<装备与消耗品系统>主属性加成最高值表；含超脱档 = 五阶×1.2 取整） ————
 const BONUS = {
-  武器: { 白色: [1, 1, 2, 4, 6], 蓝色: [1, 2, 4, 6, 9], 金色: [2, 3, 5, 9, 12], 紫色: [3, 5, 8, 13, 18], 银色: [3, 5, 8, 13, 18] },
-  防具: { 白色: [0, 1, 1, 2, 3], 蓝色: [0, 1, 2, 3, 5], 金色: [1, 2, 3, 4, 6], 紫色: [2, 3, 4, 7, 10], 银色: [2, 3, 4, 7, 10] },
-  饰品: { 白色: [0, 1, 1, 2, 3], 蓝色: [0, 1, 2, 3, 5], 金色: [1, 2, 3, 5, 7], 紫色: [1, 3, 5, 8, 11], 银色: [1, 3, 5, 8, 11] },
+  武器: { 白色: [1, 1, 2, 4, 6, 7], 蓝色: [1, 2, 4, 6, 9, 11], 金色: [2, 3, 5, 9, 12, 14], 紫色: [3, 5, 8, 13, 18, 22], 银色: [3, 5, 8, 13, 18, 22] },
+  防具: { 白色: [0, 1, 1, 2, 3, 4], 蓝色: [0, 1, 2, 3, 5, 6], 金色: [1, 2, 3, 4, 6, 7], 紫色: [2, 3, 4, 7, 10, 12], 银色: [2, 3, 4, 7, 10, 12] },
+  饰品: { 白色: [0, 1, 1, 2, 3, 4], 蓝色: [0, 1, 2, 3, 5, 6], 金色: [1, 2, 3, 5, 7, 8], 紫色: [1, 3, 5, 8, 11, 14], 银色: [1, 3, 5, 8, 11, 14] },
 };
 const ARMOR_MULT = [1, 2, 4, 7, 11]; // 防具防/闪阶位倍率
 const ARMOR_MAX_T1 = 15;             // 一阶防/闪绝对值上限（紫银极重防御）
 const ARMOR_TOLERANCE = 6;
-const BONUS_TOLERANCE = 2;           // 数值容差（真实存档与基准表存在小幅偏差）
 const DICE_FACES = [4, 6, 8, 10, 12, 20, 40];
 const DICE_RE = /^(\d*)d(\d+)$/i;
 const DICE_COUNT_MAX = 20;
@@ -131,7 +130,7 @@ function parseCategory(item) {
 // （发福利用）。玩家端拿不到这个密钥，价格下限对他们依旧严格。
 export function checkPrice(kind, item, sellerTier, price, opsKey, welfareKey) {
   const fail = (reason, min = 0, max = 0) => ({ ok: false, min, max, reason });
-  if (!Number.isFinite(Number(price)) || Number(price) < 0 || Number(price) > 9999999)
+  if (!Number.isFinite(Number(price)) || Number(price) < 0 || Number(price) > 1000000000)
     return fail('价格超出允许范围');
   const 运营 = Number(price) === 0 && !!welfareKey && opsKey === welfareKey;
   const tier = String(item?.阶位 ?? '') || String(sellerTier ?? '一阶');
@@ -175,12 +174,12 @@ function validateHard(item, quality, category, tierIdx, opDeclared) {
   if (!opDeclared && tierIdx < 5) {
     const 强化加成 = category === '饰品' ? Math.max(0, num(item.强化等级)) : 0;
     const bench = (BONUS[category][quality] || [])[tierIdx] ?? 0;
-    const 主上限 = bench + 强化加成 + BONUS_TOLERANCE;
-    const 副上限 = Math.floor(bench * 0.5) + 强化加成 + BONUS_TOLERANCE;
+    const 主上限 = bench + 强化加成;
+    const 副上限 = Math.floor(bench * 0.5) + 强化加成;
     if (num(item.主属性加成) > 主上限)
-      return `主属性加成 ${num(item.主属性加成)} 超出该阶位基准（约 ${bench}，含容差上限 ${主上限}）——该物品属超模物品，需支付超模上架费`;
+      return `主属性加成 ${num(item.主属性加成)} 超出该阶位最高值（${quality}${category}最高约 ${bench}${强化加成 > 0 ? `，强化+${强化加成}` : ''}）——该物品属超模物品，需支付超模上架费`;
     if (num(item.副属性加成) > 副上限)
-      return `副属性加成 ${num(item.副属性加成)} 超出该阶位基准（含容差上限 ${副上限}）——该物品属超模物品，需支付超模上架费`;
+      return `副属性加成 ${num(item.副属性加成)} 超出该阶位最高值（含强化上限 ${副上限}）——该物品属超模物品，需支付超模上架费`;
 
     const 防闪上限 = ARMOR_MAX_T1 * (ARMOR_MULT[tierIdx] ?? 1) + ARMOR_TOLERANCE;
     if (Math.abs(num(item.装备防御)) > 防闪上限)
@@ -221,8 +220,8 @@ function parseOp(b) {
   const op = b.op;
   if (typeof op !== 'object' || Array.isArray(op)) return { error: 'op 字段格式非法' };
   if (!TIER_NAMES_ALL.includes(op.tier)) return { error: 'op.tier 须为 一阶~五阶/超脱' };
-  if (!Number.isInteger(Number(op.rp)) || Number(op.rp) < 0 || Number(op.rp) > 9999999) return { error: 'op.rp 非法' };
-  if (!Number.isInteger(Number(op.up)) || Number(op.up) < 0 || Number(op.up) > 9999999) return { error: 'op.up 非法' };
+  if (!Number.isInteger(Number(op.rp)) || Number(op.rp) < 0 || Number(op.rp) > 1000000000) return { error: 'op.rp 非法' };
+  if (!Number.isInteger(Number(op.up)) || Number(op.up) < 0 || Number(op.up) > 1000000000) return { error: 'op.up 非法' };
   return { declared: true, tier: String(op.tier), rp: Number(op.rp), up: Number(op.up) };
 }
 

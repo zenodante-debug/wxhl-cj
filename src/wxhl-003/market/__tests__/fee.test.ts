@@ -38,14 +38,22 @@ describe('opFeeFor · 费用曲线（蓝武一阶基准 100 的工作表逐行�
   it('一阶→五阶：和25，RP1250，UP62500', () => {
     expect(opFeeFor(0, 4, base)).toEqual({ sum: 25, rp: 1250, up: 62500, realIdx: 4 });
   });
-  it('一阶→超脱：和45，RP2250，UP2250000（实质挂不出去）', () => {
-    expect(opFeeFor(0, 5, base)).toEqual({ sum: 45, rp: 2250, up: 2250000, realIdx: 5 });
+  it('一阶→超脱：超模费 45×50=2250 RP + 超脱上架费 20 RP = 2270 RP；UP = 基准×500×45 + 基准×50%', () => {
+    const f = opFeeFor(0, 5, base)!;
+    expect(f.sum).toBe(45);
+    expect(f.rp).toBe(2250 + 20); // 超模 2250 + 超脱上架费 20
+    expect(f.up).toBe(100 * 500 * 45 + Math.floor(100 * 0.5)); // 2,250,000 + 50
   });
-  it('用户原例：名义三阶→真实超脱 = 50×(4+7+11+20)=2100 RP', () => {
+  it('用户原例：名义三阶→真实超脱 = 超模 50×(4+7+11+20)+超脱费20 = 2120 RP；UP = 400×500×42 + 400×0.5', () => {
     const f = opFeeFor(2, 5, 400)!; // 金武
     expect(f.sum).toBe(4 + 7 + 11 + 20);
-    expect(f.rp).toBe(2100);
-    expect(f.up).toBe(400 * 500 * 42); // 8,400,000
+    expect(f.rp).toBe(50 * 42 + 20); // 2100 + 20
+    expect(f.up).toBe(400 * 500 * 42 + 200); // 8,400,000 + 200
+  });
+  it('非超脱不收超脱上架费（一阶→五阶）', () => {
+    const f = opFeeFor(0, 4, base)!;
+    expect(f.rp).toBe(1250);
+    expect(f.up).toBe(62500);
   });
   it('符合名义阶位 / 名义高于真实 → 不收费', () => {
     expect(opFeeFor(2, 2, 100)).toBeNull();
@@ -73,26 +81,24 @@ describe('baseUpOf · 一阶基准价', () => {
   });
 });
 
-describe('assessDeterministic · 数值超基准反查真实阶位', () => {
+describe('assessDeterministic · 数值超基准反查真实阶位（最高属性加成阈值，含超脱档）', () => {
   const 蓝武 = { 名称: '制式长刀', 品质: '蓝色', 类型: '武器', 阶位: '一阶', 主属性: 'STR', 伤害骰: '无' };
-  // 蓝·武器 主属性基准 [1,2,4,6,9]
-  it('主属性加成 8 → 四阶规格（含容差 8≤6+2）', () => {
-    const r = assessDeterministic({ ...蓝武, 主属性加成: 8 }, { quality: '蓝色', category: '武器' }, 0)!;
-    expect(r.realIdx).toBe(3);
+  // 蓝·武器 主属性加成最高值表 [1,2,4,6,9,11]
+  it('主属性加成 10 → 四阶（最高值+5 宽松：10 ≤ 四阶 6+5=11）', () => {
+    const r = assessDeterministic({ ...蓝武, 主属性加成: 10 }, { quality: '蓝色', category: '武器' }, 0)!;
+    expect(r.realIdx).toBe(3); // 10 > 三阶 4+5=9，≤ 四阶 6+5=11 → 四阶
     expect(r.points[0]).toContain('四阶');
   });
-  it('主属性加成 20 → 超出全部基准 → 超脱', () => {
-    const r = assessDeterministic({ ...蓝武, 主属性加成: 20 }, { quality: '蓝色', category: '武器' }, 0)!;
-    expect(r.realIdx).toBe(5);
-    expect(r.points[0]).toContain('超脱');
-  });
-  it('基准内+容差（2≤1+2）→ 不触发（真实存档回归：小幅偏差不收费）', () => {
-    expect(assessDeterministic({ ...蓝武, 主属性加成: 2 }, { quality: '蓝色', category: '武器' }, 0)).toBeNull();
-  });
-  it('副属性按 floor(主×0.5)+容差 反查：4 → 三阶（4≤2+2）', () => {
-    const r = assessDeterministic({ ...蓝武, 副属性加成: 4 }, { quality: '蓝色', category: '武器' }, 0)!;
+  it('主属性加成 8 → 三阶（宽松：8 > 二阶 2+5=7，≤ 三阶 4+5=9）', () => {
+    const r = assessDeterministic({ ...蓝武, 主属性加成: 8 }, { quality: '蓝色', category: '武器' }, 0)!;
     expect(r.realIdx).toBe(2);
     expect(r.points[0]).toContain('三阶');
+  });
+  it('基准内（2 ≤ 二阶 2）→ 不触发', () => {
+    expect(assessDeterministic({ ...蓝武, 主属性加成: 2 }, { quality: '蓝色', category: '武器' }, 1)).toBeNull();
+  });
+  it('副属性 4 ≤ 一阶最高 floor(1×0.5)+5=5 → 不触发（宽松）', () => {
+    expect(assessDeterministic({ ...蓝武, 副属性加成: 4 }, { quality: '蓝色', category: '武器' }, 0)).toBeNull();
   });
   it('防御 200 超出各阶上限（15×[1,2,4,7,11]+6=171）→ 超脱', () => {
     const r = assessDeterministic({ ...蓝武, 装备防御: 200 }, { quality: '蓝色', category: '武器' }, 0)!;
@@ -101,6 +107,14 @@ describe('assessDeterministic · 数值超基准反查真实阶位', () => {
   it('真实存档回归：夜翼披风（闪避2/一阶）与制式重甲（防御6/闪避-6/一阶）不触发', () => {
     expect(assessDeterministic({ 装备闪避: 2 }, { quality: '蓝色', category: '防具' }, 0)).toBeNull();
     expect(assessDeterministic({ 装备防御: 6, 装备闪避: -6 }, { quality: '白色', category: '防具' }, 0)).toBeNull();
+  });
+  it('饰品强化计入属性上限（基准+强化+5；+5 宽松对武器/防具/饰品一视同仁）', () => {
+    // 蓝·饰品 主属性基准 [0,1,2,3,5,6]，强化+2 且 +5 宽松 → 一阶上限 = 0+2+5=7
+    const cls = { quality: '蓝色', category: '饰品' };
+    expect(assessDeterministic({ 名称: '戒', 品质: '蓝色', 类型: '饰品', 阶位: '一阶', 主属性加成: 3, 强化等级: 2 }, cls, 0)).toBeNull(); // 3 ≤ 7
+    const r = assessDeterministic({ 名称: '戒', 品质: '蓝色', 类型: '饰品', 阶位: '一阶', 主属性加成: 8, 强化等级: 2 }, cls, 0)!;
+    expect(r.realIdx).toBe(1); // 8 > 7，≤ 二阶 1+2+5=8 → 二阶
+    expect(r.points[0]).toContain('强化');
   });
   it('多维度同时超模取较高者', () => {
     const r = assessDeterministic(
@@ -132,22 +146,9 @@ describe('AI 语义判定 vs 数值反查的合并（钳制规则）', () => {
   const 白武 = { 名称: '制式刀', 品质: '白色', 类型: '武器', 阶位: '一阶', 主属性加成: 5, 副属性加成: 0, 装备防御: 0, 装备闪避: 0 };
   const cls = { quality: '白色', category: '武器' };
 
-  it('数值可证明是四阶时，AI 判超脱 → 合并后仍按四阶收费（不按超脱）', () => {
-    const det = assessDeterministic(白武, cls, 0)!;
-    expect(det.realIdx).toBe(3); // 数值反查：四阶
-    // 合并规则：取数值可证明的范围与 AI 判定的较小者（数值层是硬事实，不能被语义层推翻）
-    const aiSays = 5; // AI 判超脱
-    const merged = Math.min(aiSays, det.realIdx);
-    expect(merged).toBe(3);
-    const fee = opFeeFor(0, merged, baseUpOf('equip', 白武, '武器'))!;
-    expect(fee.realIdx).toBe(3); // 按四阶收费
-  });
-
-  it('AI 判的低于数值层时，按数值层（取较高者防放水）', () => {
-    const det = assessDeterministic(白武, cls, 0)!.realIdx; // 四阶
-    const aiSays = 1; // AI 判二阶（放水）
-    const merged = Math.max(aiSays, det);
-    expect(merged).toBe(3);
+  it('数值可证明合规（一阶）时，AI 判超脱 → 数值层不超模，不收超模费', () => {
+    // 白武+5：白武最高值 [1,1,2,4,6]+5 → 5 ≤ 一阶 6 → 数值层返回 null（合规）
+    expect(assessDeterministic(白武, cls, 0)).toBeNull();
   });
 
   it('数值层无信号（纯效果文本）时，完全听 AI 的', () => {

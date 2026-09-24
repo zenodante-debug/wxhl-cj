@@ -282,11 +282,12 @@ export const useMarketStore = defineStore('wxhl003-market', () => {
       // 上架税：总价（数量×单价）的 20%，0 元单免税
       item.tax = Math.ceil(item.qty * item.price * 0.2);
       if (fee) {
+        const transFee = fee.realIdx === 5;
         item.op = { realTier: realTierName(fee.realIdx), realIdx: fee.realIdx, rp: fee.rp, up: fee.up, points };
         item.opField = { tier: realTierName(fee.realIdx), rp: fee.rp, up: fee.up };
         add(
-          '超模提醒',
-          `「${item.name}」效果达到「${realTierName(fee.realIdx)}」规格，上架需额外支付 RP ${fee.rp} + UP ${fee.up}。\n${points.join('\n')}`,
+          transFee ? '超脱上架费' : '超模提醒',
+          `「${item.name}」效果达到「${realTierName(fee.realIdx)}」规格，上架需支付 RP ${fee.rp} + UP ${fee.up}${transFee ? '（含超脱上架费 20 RP + 基准价×50% UP）' : ''}。\n${points.join('\n')}`,
         );
       }
     }
