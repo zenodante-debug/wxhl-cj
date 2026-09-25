@@ -4,8 +4,11 @@
     "build": "webpack --mode production",
     "watch": "webpack --mode development --watch --progress",
     "format": "prettier --write \"src/**/*.{ts,tsx,js,jsx,css,scss,html,vue}\" --no-error-on-unmatched-pattern",
+<<<<<<< HEAD
     "test": "vitest run",
     "test:watch": "vitest",
+=======
+>>>>>>> f447e54f4effc7980891d89ab7e9b3c9aa02737e
     "lint": "eslint",
     "lint:fix": "eslint --fix",
     "dump": "node dump_schema.ts",
@@ -70,7 +73,10 @@
     "typescript-eslint": "^8.70.1",
     "unplugin-auto-import": "^21.1.0",
     "unplugin-vue-components": "^32.1.0",
+<<<<<<< HEAD
     "vitest": "^5.0.1",
+=======
+>>>>>>> f447e54f4effc7980891d89ab7e9b3c9aa02737e
     "vue-eslint-parser": "^10.4.1",
     "vue-loader": "^17.4.2",
     "vue-style-loader": "^4.1.3",
