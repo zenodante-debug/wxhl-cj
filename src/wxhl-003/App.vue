@@ -1632,7 +1632,7 @@
                   <span class="roll-map">{{ r.映射 }}</span>
                 </div>
               </div>
-              <div v-if="dungeonGenStore.current.build && current晋升" class="set-hint">
+              <div v-if="current晋升" class="set-hint set-hint-inset">
                 本次为晋升试炼，第 3 条支线的奖励由系统指定（不取上表第 3 组支线骰）
               </div>
               <button class="confirm-btn" :disabled="dungeonGenStore.generating" @click="onGenerateDungeon">
@@ -2426,14 +2426,13 @@ const playerCycle = ref<number>(1);
 const playerTierName = ref<string>('一阶');
 /** 契约者 CR: 决定同人契约者开关是否可用（与 `buildMatchPool` 的 `cr <= 4` 同一条分界线） */
 const playerCR = ref(0);
-/** 契约者阶位: 供 `current晋升` 判定用（`playerLevel` 与 ACHIEVEMENT_TIERS 同处、在本段下方声明） */
-const playerRank = ref('一阶');
-/** 各阶位等级上限（与 store 的晋升阶位上限同口径；五阶不在表内 ⇒ Lv.100 不触发） */
-const 晋升阶位上限 = [20, 40, 60, 80];
-const current晋升 = computed(() => {
-  const idx = 归一位阶(playerRank.value);
-  return idx !== undefined && idx <= 3 && playerLevel.value >= 晋升阶位上限[idx];
-});
+/**
+ * 本轮是否晋升试炼 —— 读条目上**掷骰时**记下的快照。
+ *
+ * 不在这里重算: 判定（阶位上限表 + 边界谓词）的唯一来源是 store 的 `readPlayerBrief`,
+ * 面板再抄一份的话, 改了那边忘了这边, 这条提示就会对奖励说谎。
+ */
+const current晋升 = computed(() => dungeonGenStore.current?.晋升试炼 ?? false);
 const playerCycleLabel = computed(() =>
   isNewbieDungeon(playerCycle.value, playerTierName.value)
     ? '当前副本周期 1 · 新手副本 · 强制和平 · 仅 1 名 IP 队友'
@@ -2460,12 +2459,10 @@ function refreshPlayerCycle() {
     playerCycle.value = Number(vars?.stat_data?.契约者?.赛季信息?.当前副本周期) || 1;
     playerTierName.value = String(vars?.stat_data?.契约者?.头部?.阶位 ?? '') || '一阶';
     playerLevel.value = Number(vars?.stat_data?.契约者?.头部?.等级) || 1;
-    playerRank.value = String(vars?.stat_data?.契约者?.头部?.阶位 ?? '') || '一阶';
     playerCR.value = Number(vars?.stat_data?.契约者?.头部?.CR) || 0;
   } catch (_) {
     playerCycle.value = 1;
     playerTierName.value = '一阶';
-    playerRank.value = '一阶';
     playerCR.value = 0;
   }
 }
@@ -6087,5 +6084,11 @@ onUnmounted(() => {
   align-items: center;
   gap: 6px;
   cursor: pointer;
+}
+// 直接挂在 .scroll-area 上的 .set-hint 要自己补 12px 内缩 —— .scroll-area 没有 padding, 而它上下的
+// .roll-section / .roll-btn 都落在 12px 线上。只能做修饰类: 其余 9 处 .set-hint 都在已有 padding 的
+// 容器里, 给共享的 .set-hint 加 margin 会把那 9 处双重缩进。
+.set-hint-inset {
+  margin: 0 12px;
 }
 </style>

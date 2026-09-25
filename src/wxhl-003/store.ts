@@ -2317,6 +2317,16 @@ export interface RolledDungeon {
   事件开关?: boolean;
   /** 本次渲染出的生效事件名（由 generate 写入, 供界面展示） */
   触发的动态事件?: string[];
+  /**
+   * 掷骰那一刻的「是否晋升试炼」快照（等级已满当前位阶上限）, 供掷骰明细里显示提示。
+   *
+   * 判定**只有 `readPlayerBrief` 一份来源**, 这里只取它的结果、不另算一遍 —— 面板若自己再抄一份
+   * 阶位上限表和一个谓词, 改了那边忘了这边, 提示就会对奖励说谎。
+   *
+   * 与 `generate()` 的关系: 这是**掷骰时**的值, 而 `generate()` 用的是**生成时**重新读到的值。
+   * 两者不会打架 —— 升级只发生在结算流程里, 那之后玩家会重新掷骰, 掷骰与生成之间没有升级路径。
+   */
+  晋升试炼?: boolean;
 }
 
 function loadRolledDungeons(): RolledDungeon[] {
@@ -2477,6 +2487,7 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
         同人开关: 同人.开关,
         同人性别: 同人.性别,
         事件开关: 事件, // 默认开（用户 2026-09-25 拍板）
+        晋升试炼: player.晋升试炼, // 掷骰时的快照, 见 RolledDungeon.晋升试炼
       };
       rolledDungeons.value.unshift(entry);
     } catch (e: any) {
@@ -2525,6 +2536,7 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
         同人开关: 同人.开关,
         同人性别: 同人.性别,
         事件开关: 事件,
+        晋升试炼: player.晋升试炼, // 掷骰时的快照, 见 RolledDungeon.晋升试炼
       };
       rolledDungeons.value.unshift(entry);
     } catch (e: any) {
