@@ -2670,11 +2670,20 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     }
   }
 
-  /** 重roll: 丢弃当前展示条目的 AI 产物, 重新掷骰 */
-  function reroll() {
+  /**
+   * 重roll: 丢弃当前展示条目的 AI 产物, 重新掷骰。
+   *
+   * 两个开关的签名与 `doRoll` **逐字同款**并原样透传 —— 重 roll 是「同一轮再来一次」,
+   * 界面在掷骰那一刻记下的开关必须跟着走; 若这里仍调无参的 `doRoll()`, 玩家勾了同人开关、
+   * 掷完不满意、点重 roll, 开关就会被静默重置回默认值（同人 → 关）。
+   */
+  function reroll(
+    同人: { 开关: boolean; 性别: '男' | '女' | '不限' } = { 开关: false, 性别: '不限' },
+    事件 = true,
+  ) {
     const entry = current.value;
     if (entry) rolledDungeons.value = rolledDungeons.value.filter(d => d.id !== entry.id);
-    doRoll();
+    doRoll(同人, 事件);
   }
 
   /** 把生成结果写进 MVU 变量。逐条 _.set, 不清空不覆盖无关字段 */

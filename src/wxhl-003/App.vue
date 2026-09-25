@@ -1577,6 +1577,29 @@
               </div>
             </div>
 
+            <div class="cp-field">
+              <label class="cp-label">
+                <input v-model="eventEnabled" type="checkbox" :disabled="dungeonGenStore.rolling || dungeonGenStore.generating" />
+                读取动态事件
+              </label>
+              <span class="set-hint">按赛季/周期/阶位判定本轮生效的事件，其优先级高于骰值与自选</span>
+            </div>
+            <div class="cp-field">
+              <label class="cp-label">
+                <input v-model="mateEnabled" type="checkbox" :disabled="(playerCR ?? 0) <= 4 || dungeonGenStore.rolling || dungeonGenStore.generating" />
+                匹配同人契约者
+              </label>
+              <select v-model="mateGender" class="cp-select" :disabled="!mateEnabled">
+                <option value="不限">不限</option>
+                <option value="男">男</option>
+                <option value="女">女</option>
+              </select>
+              <span v-if="(playerCR ?? 0) <= 4" class="set-hint">低 CR 没有榜单可退，队友本就是 IP 契约者</span>
+            </div>
+            <div v-if="eventEnabled && rollMode === 'custom'" class="refresh-err">
+              ⚠️ 已开启动态事件：其优先级高于上方所有自选字段，冲突时以事件为准。
+            </div>
+
             <button
               class="roll-btn"
               :disabled="dungeonGenStore.rolling || dungeonGenStore.generating"
@@ -1607,12 +1630,19 @@
                   <span class="roll-map">{{ r.映射 }}</span>
                 </div>
               </div>
+              <div v-if="dungeonGenStore.current.build && current晋升" class="set-hint">
+                本次为晋升试炼，第 3 条支线的奖励由系统指定（不取上表第 3 组支线骰）
+              </div>
               <button class="confirm-btn" :disabled="dungeonGenStore.generating" @click="onGenerateDungeon">
                 {{ dungeonGenStore.generating ? '生成中...' : '生成副本' }}
               </button>
 
               <div v-if="dungeonGenStore.current?.result" class="dungeon-card">
                 <div class="dc-name">{{ dungeonGenStore.current.result.副本名称 }}</div>
+                <div v-if="dungeonGenStore.current.触发的动态事件?.length" class="dc-line">
+                  <span class="dc-key">动态事件</span>
+                  <span>{{ dungeonGenStore.current.触发的动态事件.join('、') }}</span>
+                </div>
                 <div class="dc-meta">{{ dungeonGenStore.current.result.副本来源 }}</div>
                 <div class="dc-meta">
                   【{{ dungeonGenStore.current.build.副本类型 }}】 · {{ dungeonGenStore.current.build.时间限制天 }}天 ·
@@ -2392,6 +2422,16 @@ async function onRemoveContract(name: string) {
 const playerCycle = ref<number>(1);
 // 注: 不能叫 playerTier —— 该名已被下方排行榜的 computed 占用
 const playerTierName = ref<string>('一阶');
+/** 契约者 CR: 决定同人契约者开关是否可用（与 `buildMatchPool` 的 `cr <= 4` 同一条分界线） */
+const playerCR = ref(0);
+/** 契约者阶位: 供 `current晋升` 判定用（`playerLevel` 与 ACHIEVEMENT_TIERS 同处、在本段下方声明） */
+const playerRank = ref('一阶');
+/** 各阶位等级上限（与 store 的晋升阶位上限同口径；五阶不在表内 ⇒ Lv.100 不触发） */
+const 晋升阶位上限 = [20, 40, 60, 80];
+const current晋升 = computed(() => {
+  const idx = 归一位阶(playerRank.value);
+  return idx !== undefined && idx <= 3 && playerLevel.value >= 晋升阶位上限[idx];
+});
 const playerCycleLabel = computed(() =>
   isNewbieDungeon(playerCycle.value, playerTierName.value)
     ? '当前副本周期 1 · 新手副本 · 强制和平 · 仅 1 名 IP 队友'
@@ -2418,9 +2458,13 @@ function refreshPlayerCycle() {
     playerCycle.value = Number(vars?.stat_data?.契约者?.赛季信息?.当前副本周期) || 1;
     playerTierName.value = String(vars?.stat_data?.契约者?.头部?.阶位 ?? '') || '一阶';
     playerLevel.value = Number(vars?.stat_data?.契约者?.头部?.等级) || 1;
+    playerRank.value = String(vars?.stat_data?.契约者?.头部?.阶位 ?? '') || '一阶';
+    playerCR.value = Number(vars?.stat_data?.契约者?.头部?.CR) || 0;
   } catch (_) {
     playerCycle.value = 1;
     playerTierName.value = '一阶';
+    playerRank.value = '一阶';
+    playerCR.value = 0;
   }
 }
 
@@ -2462,15 +2506,16 @@ function openRank() {
   currentView.value = 'rank';
 }
 
-function onRollDungeon() {
-  dungeonGenStore.doRoll();
-}
-
 // ============ 副本生成 · 自选模式 ============
 const rollMode = ref<'random' | 'custom'>('random');
 const customWorld = ref('');
 const customMateWorld = ref('');
 const customMateNames = ref('');
+/** 每轮单独选: 是否额外匹配 1 名同人契约者（CR≥5 时才有意义, 低 CR 会禁用） */
+const mateEnabled = ref(false);
+const mateGender = ref<'男' | '女' | '不限'>('不限');
+/** 每轮单独选: 是否读取 EJS 动态事件。默认开（用户 2026-09-25 拍板） */
+const eventEnabled = ref(true);
 const customPicks = ref<Record<string, string>>({
   媒介来源: '',
   题材大类: '',
@@ -2486,8 +2531,9 @@ const CUSTOM_OPTIONS = [
   { key: '副模块', label: '副模块', values: SUB_MODULES },
 ] as const;
 function onRollClick() {
+  const 同人 = { 开关: mateEnabled.value, 性别: mateGender.value };
   if (rollMode.value === 'random') {
-    onRollDungeon();
+    dungeonGenStore.doRoll(同人, eventEnabled.value);
     return;
   }
   const overrides: BuildOverrides = {};
@@ -2495,7 +2541,9 @@ function onRollClick() {
     const v = customPicks.value[o.key];
     if (v) overrides[o.key] = v;
   }
-  dungeonGenStore.doCustomRoll(overrides, customWorld.value, customMateWorld.value, customMateNames.value);
+  dungeonGenStore.doCustomRoll(
+    overrides, customWorld.value, customMateWorld.value, customMateNames.value, 同人, eventEnabled.value,
+  );
 }
 async function onGenerateDungeon() {
   await dungeonGenStore.generate();
@@ -2551,7 +2599,8 @@ async function onFillDungeonInput(id: number) {
   await dungeonGenStore.fillInput(id);
 }
 function onRerollDungeonGen() {
-  dungeonGenStore.reroll();
+  // 透传当前面板的开关: 重 roll 是「同一轮再来一次」, 不该把玩家勾的开关悄悄重置
+  dungeonGenStore.reroll({ 开关: mateEnabled.value, 性别: mateGender.value }, eventEnabled.value);
 }
 
 /** 复制 <Panel Enhancement> 面板文本, 用于贴给别人或存底 */
