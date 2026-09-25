@@ -88,6 +88,84 @@ describe('buildDungeonPrompt', () => {
   });
 });
 
+describe('buildDungeonPrompt · 队友来源锚定段', () => {
+  const p = buildDungeonPrompt(build, records, '契约者: 刘林', '', '人榜候选…', '一阶', 11, '危机四伏');
+
+  it('写明本次队友标签', () => {
+    expect(p).toContain('赛博朋克/矩阵空间');
+    expect(p).toContain('队友来源锚定');
+  });
+
+  it('写明「不得与本次副本世界观相同」', () => {
+    expect(p).toContain('不得与本次副本世界观相同');
+  });
+
+  it('写明等级锚定与新手例外', () => {
+    expect(p).toContain('资深契约者');
+    expect(p).toContain('Lv.1 新人');
+  });
+
+  it('同人开关关闭时, 不出现「恰好 1 名同人契约者」', () => {
+    const 关 = buildDungeonPrompt(build, records, '契约者: 刘林', '', '池', '一阶', 11, '危机四伏',
+      undefined, undefined, { 同人契约者: { 开关: false, 性别: '不限' } });
+    expect(关).not.toContain('恰好匹配 1 名同人契约者');
+
+    const 开 = buildDungeonPrompt(build, records, '契约者: 刘林', '', '池', '一阶', 11, '危机四伏',
+      undefined, undefined, { 同人契约者: { 开关: true, 性别: '女' } });
+    expect(开).toContain('恰好匹配 1 名同人契约者');
+    expect(开).toContain('女');
+  });
+});
+
+describe('buildDungeonPrompt · 动态事件段', () => {
+  it('不传事件段时, 整段不出现', () => {
+    const p = buildDungeonPrompt(build, records, 'c', '', '池', '一阶', 11, '危机四伏');
+    expect(p).not.toContain('本次副本的动态事件');
+  });
+
+  it('传了事件段时, 插在「回廊难度评估」之后、「契约者数据」之前', () => {
+    const p = buildDungeonPrompt(build, records, 'c', '', '池', '一阶', 11, '危机四伏',
+      undefined, undefined, { 动态事件段: '【事件_白焰降临】\n正文在这里' });
+    expect(p).toContain('正文在这里');
+    expect(p.indexOf('回廊难度评估')).toBeLessThan(p.indexOf('正文在这里'));
+    expect(p.indexOf('正文在这里')).toBeLessThan(p.indexOf('============ 契约者数据'));
+  });
+
+  it('事件段存在时, 锁定骰值段末尾追加「以动态事件为准」的例外', () => {
+    const p = buildDungeonPrompt(build, records, 'c', '', '池', '一阶', 11, '危机四伏',
+      undefined, undefined, { 动态事件段: 'X' });
+    expect(p).toContain('以动态事件为准');
+  });
+
+  it('事件段不存在时, 那句话一个字都不出现（不给不开事件的玩家引入松动）', () => {
+    const p = buildDungeonPrompt(build, records, 'c', '', '池', '一阶', 11, '危机四伏');
+    expect(p).not.toContain('以动态事件为准');
+  });
+});
+
+describe('buildDungeonPrompt · 晋升试炼段', () => {
+  it('触发时含「第 3 条支线必须就是【专属晋升任务】」', () => {
+    const p = buildDungeonPrompt(build, records, 'c', '', '池', '一阶', 11, '危机四伏',
+      undefined, undefined, { 晋升试炼: true });
+    expect(p).toContain('第 3 条支线任务**必须就是【专属晋升任务】');
+    expect(p).toContain('不干涉淘汰赛的生存与排名规则');
+  });
+
+  it('未触发时不含该段', () => {
+    const p = buildDungeonPrompt(build, records, 'c', '', '池', '一阶', 11, '危机四伏');
+    expect(p).not.toContain('【专属晋升任务】');
+  });
+});
+
+describe('buildDungeonPrompt · 事件点名角色输出契约', () => {
+  const p = buildDungeonPrompt(build, records, 'c', '', '池', '一阶', 11, '危机四伏');
+
+  it('JSON 契约与说明里都声明了「事件点名角色」, 且禁止把契约者本人列进去', () => {
+    expect(p).toContain('事件点名角色');
+    expect(p).toContain('不要把契约者本人');
+  });
+});
+
 describe('buildEnterPrompt', () => {
   const result = { 副本名称: '夜雨霓虹' } as any;
   const p = buildEnterPrompt(result, build);
