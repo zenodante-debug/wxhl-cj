@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import type { BuildRoll, RewardSet } from '../dice';
-import { DungeonGenResultSchema, assemblePanelText, mapToVariables, clamp固有角色等级 } from '../dungeonRules';
+import { 晋升奖励前缀 } from '../dice';
+import {
+  点名缺席者,
+  晋升奖励表,
+  DungeonGenResultSchema,
+  assemblePanelText,
+  mapToVariables,
+  clamp固有角色等级,
+  type DungeonGenResult,
+} from '../dungeonRules';
 import { buildEnemyPrompt } from '../dungeonGen';
 import { 基准等级 } from '../crTable';
 
@@ -67,9 +76,10 @@ const result = {
     { 真名: '陈默', 称号: '无', 等级: 11, 阵营: '中立' },
     { 真名: '林晚', 称号: '夜莺', 等级: 12, 阵营: '特管局' },
   ],
+  事件点名角色: [],
 };
 
-const player = { 姓名: '刘林', 等级: 11, 阶位: '一阶', CR: 4.5 };
+const player = { 姓名: '刘林', 等级: 11, 阶位: '一阶', CR: 4.5, 晋升试炼: false };
 
 describe('DungeonGenResultSchema', () => {
   it('接受合法结果', () => {
@@ -233,5 +243,83 @@ describe('assemblePanelText', () => {
 
   it('固有角色格式为 名称 (Lv.X | 阶位)', () => {
     expect(text).toContain('摩根·黑手 (Lv.70 | 四阶)');
+  });
+});
+
+const 最小结果 = (over: Partial<DungeonGenResult> = {}) =>
+  DungeonGenResultSchema.parse({
+    副本名称: '血色黎明', 副本来源: '《某作品》（动漫作品）', 副本背景: '…',
+    主线任务: { 名称: '主线', 说明: '…' },
+    支线任务: [
+      { 名称: '支线甲', 说明: '…', 物品名: '甲' },
+      { 名称: '支线乙', 说明: '…', 物品名: '乙' },
+      { 名称: '支线丙', 说明: '…', 物品名: '丙' },
+    ],
+    世界事件: [ { 名称: 'E1', 说明: '…', 影响: '…' }, { 名称: 'E2', 说明: '…', 影响: '…' } ],
+    隐藏任务: [ { 名称: 'H1', 说明: '…', 物品名: '' }, { 名称: 'H2', 说明: '…', 物品名: '' } ],
+    副本成就: ['★', '★★', '★★★', '★★★★', '★★★★★', '★★★★★★'].map((_, i) => ({
+      名称: 'A' + i, 说明: '…', 难度: '…', 物品名: '',
+    })),
+    固有角色: [],
+    其他契约者: [],
+    ...over,
+  });
+
+describe('晋升试炼 · 第 3 条支线奖励覆盖', () => {
+  // ⚠️ 四组奖励都要给全 —— `mapToVariables` 会按 result 的条数逐条取
+  // `rewards.隐藏[i]` / `rewards.成就[i]`，给空数组会取到 `undefined` 并在 `composeRewardText` 里抛错。
+  const 一条 = { up: 10, exp: 5, rp: 0, quality: '白色' as const, itemType: '消耗品' as const };
+  const 假奖励 = {
+    主线: { up: 1, exp: 1, rp: 0, quality: '金色' as const, itemType: '装备' as const },
+    支线: [0, 1, 2].map(() => ({ ...一条 })),
+    隐藏: [0, 1].map(() => ({ ...一条 })),
+    成就: [0, 1, 2, 3, 4, 5].map(() => ({ ...一条 })),
+  };
+
+  it('晋升试炼=true → 第 3 条支线奖励是晋升前缀, 且不含 UP/EXP 字样', () => {
+    const r = 最小结果();
+    const v: any = mapToVariables(r, { 队友标签: 'x', 队友标签骰: 1 } as any, 假奖励 as any,
+      { 姓名: '刘林', 等级: 20, 阶位: '一阶', CR: 3, 晋升试炼: true });
+    const 第三条: any = Object.values(v.当前副本任务.支线任务)[2];
+    expect(第三条.奖励.startsWith(晋升奖励前缀)).toBe(true);
+    expect(第三条.奖励).not.toContain('UP');
+    expect(第三条.奖励).not.toContain('EXP');
+    expect(第三条.奖励).toContain('等级上限+20');
+  });
+
+  it('晋升试炼=false → 第 3 条支线走原 composeRewardText 路径', () => {
+    const r = 最小结果();
+    const v: any = mapToVariables(r, { 队友标签: 'x', 队友标签骰: 1 } as any, 假奖励 as any,
+      { 姓名: '刘林', 等级: 11, 阶位: '一阶', CR: 3, 晋升试炼: false });
+    expect(Object.values(v.当前副本任务.支线任务)[2]).toMatchObject({ 奖励: '10 UP + 5 EXP + 【白色】消耗品：丙' });
+  });
+
+  it('四阶玩家的晋升奖励是「完全体形态」那条', () => {
+    const r = 最小结果();
+    const v: any = mapToVariables(r, { 队友标签: 'x', 队友标签骰: 1 } as any, 假奖励 as any,
+      { 姓名: '刘林', 等级: 80, 阶位: '四阶', CR: 9, 晋升试炼: true });
+    const 第三条: any = Object.values(v.当前副本任务.支线任务)[2];
+    expect(第三条.奖励).toBe(晋升奖励前缀 + 晋升奖励表[3]);
+  });
+});
+
+describe('点名缺席者', () => {
+  it('点名人出现在其他契约者 → 不算缺席', () => {
+    const r = 最小结果({ 事件点名角色: ['塞拉菲娜'], 其他契约者: [{ 真名: '塞拉菲娜', 称号: '无', 等级: 20, 阵营: '教会' }] });
+    expect(点名缺席者(r)).toEqual([]);
+  });
+
+  it('点名人出现在固有角色 → 也不算缺席', () => {
+    const r = 最小结果({ 事件点名角色: ['弗尔弗尔'], 固有角色: [{ 名称: '弗尔弗尔', 位阶: '一阶', 等级: 20 }] });
+    expect(点名缺席者(r)).toEqual([]);
+  });
+
+  it('两边都没有 → 进缺席名单', () => {
+    const r = 最小结果({ 事件点名角色: ['塞拉菲娜', '弗尔弗尔'] });
+    expect(点名缺席者(r)).toEqual(['塞拉菲娜', '弗尔弗尔']);
+  });
+
+  it('事件点名角色缺省（AI 没回）→ 缺席名单为空, 不误报', () => {
+    expect(点名缺席者(最小结果())).toEqual([]);
   });
 });

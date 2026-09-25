@@ -2289,6 +2289,9 @@ function saveRolledDungeons(list: RolledDungeon[]) {
   } catch (_) {}
 }
 
+/** 各阶位的等级上限（下标 = `归一位阶` 的返回值 0..3）。五阶不在表内 —— 用户 2026-09-25 拍板 Lv.100 不触发晋升试炼 */
+const 晋升阶位上限 = [20, 40, 60, 80] as const;
+
 /** 按 CR 决定队友匹配池（规则 §三 与用户口径: ≥6 升一阶, ≥7 升两阶, =10 天榜） */
 function buildMatchPool(cr: number, 阶位: string): string {
   // 归一交给 `dice.ts` 的 `归一位阶`（一阶/1阶/一/1/第一阶/全角…都认）;
@@ -2347,7 +2350,12 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
 
   /** 读 stat_data 里的副本周期与玩家简报 */
   function readPlayerBrief(): { 副本周期: number; player: PlayerBrief; text: string; 队伍最高等级: number } {
-    const 兜底 = { 副本周期: 1, player: { 姓名: '', 等级: 1, 阶位: '一阶', CR: 3 }, text: '', 队伍最高等级: 1 };
+    const 兜底 = {
+      副本周期: 1,
+      player: { 姓名: '', 等级: 1, 阶位: '一阶', CR: 3, 晋升试炼: false },
+      text: '',
+      队伍最高等级: 1,
+    };
     try {
       let vars: any = {};
       try {
@@ -2367,11 +2375,16 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
       const c = vars?.stat_data?.契约者;
       if (!c) return 兜底;
       const h = c.头部 ?? {};
+      // 晋升试炼判定: 等级满了当前位阶上限。用 `>=` 而非 `==` —— 多给的经验不至于漏判。
+      // 阶位认不出或为五阶（idx === 4）时一律不触发。
+      const 阶位序 = 归一位阶(h.阶位);
+      const 晋升试炼 = 阶位序 !== undefined && 阶位序 <= 3 && (Number(h.等级) || 1) >= 晋升阶位上限[阶位序];
       const player: PlayerBrief = {
         姓名: h.姓名 || '未知契约者',
         等级: Number(h.等级) || 1,
         阶位: h.阶位 || '一阶',
         CR: Number(h.CR) || 3,
+        晋升试炼,
       };
       const 副本周期 = Number(c.赛季信息?.当前副本周期) || 1;
       // 队伍最高等级: 玩家自身与小队成员的最高等级 (成员为空时 Math.max 仍安全)

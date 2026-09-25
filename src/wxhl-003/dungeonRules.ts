@@ -1,5 +1,5 @@
 import type { BuildRoll, RewardSet } from './dice';
-import { composeRewardText } from './dice';
+import { composeRewardText, 归一位阶, 晋升奖励前缀 } from './dice';
 import { 基准等级 } from './crTable';
 
 // ================================================================
@@ -38,6 +38,17 @@ export function clamp固有角色等级(位阶: string, 等级: number): number 
   return Math.min(Math.max(等级, 区间[0]), 区间[1]);
 }
 
+/**
+ * 晋升试炼奖励原文（逐字照 `<晋升试炼>` 文档, 下标 = `归一位阶(阶位)` 的返回值 0..3）。
+ * 五阶不在表内 —— 用户 2026-09-25 拍板「五阶 Lv.100 不触发」。
+ */
+export const 晋升奖励表 = [
+  '一阶→二阶: 等级上限+20，+3自由属性点，天赋品质强制提升1级。',
+  '二阶→三阶: 等级上限+20，+5自由属性点，天赋品质强制提升1级。',
+  '三阶→四阶: 等级上限+20，+5自由属性点，天赋品质强制提升1级。',
+  '四阶→五阶: 等级上限+20，+8自由属性点，天赋进入完全体形态。',
+] as const;
+
 const 主线任务Schema = z.object({ 名称: z.string(), 说明: z.string() });
 const 支线任务Schema = z.object({ 名称: z.string(), 说明: z.string(), 物品名: z.string().prefault('') });
 const 隐藏任务Schema = z.object({ 名称: z.string(), 说明: z.string(), 物品名: z.string().prefault('') });
@@ -69,6 +80,12 @@ export const DungeonGenResultSchema = z.object({
   其他契约者: z.array(
     z.object({ 真名: z.string().min(1), 称号: z.string(), 等级: z.coerce.number().int().min(1).max(200), 阵营: z.string() }),
   ),
+  /**
+   * 本次生效的动态事件**强制要求在场**的人物（真名, 逐字）。
+   * 由 AI 复述 —— 事件正文是自然语言, 从散文里正则抠名字必然漏（`{{user}}`、称号、全名/简称混用）。
+   * `.prefault([])`: 不开事件、或 AI 不回这个字段时都不报错。
+   */
+  事件点名角色: z.array(z.string()).prefault([]),
 });
 
 export type DungeonGenResult = z.output<typeof DungeonGenResultSchema>;
@@ -78,6 +95,25 @@ export interface PlayerBrief {
   等级: number;
   阶位: string;
   CR: number;
+  /** 是否触发晋升试炼（等级满了当前位阶上限）。由 `readPlayerBrief` 算好, 见 store.ts */
+  晋升试炼: boolean;
+}
+
+/**
+ * 事件点名了、但名单里找不到的人。
+ *
+ * 只在 `其他契约者` 与 `固有角色` **两边都找不到**时才算缺席 ——
+ * 事件可能点名契约者（如塞拉菲娜、弗尔弗尔）, 也可能点名副本世界的固有角色, 两种都合法。
+ *
+ * **只报警、不阻断**（由 store 写进 lastError）: AI 的输出仍是最终结果,
+ * 照本项目「宁可难看也不圆上」的一贯口径 —— 不静默吞掉, 也不替 AI 改名单。
+ */
+export function 点名缺席者(result: DungeonGenResult): string[] {
+  const 在场 = new Set<string>([
+    ...result.其他契约者.map(c => c.真名),
+    ...result.固有角色.map(r => r.名称),
+  ]);
+  return result.事件点名角色.filter(名 => !在场.has(名));
 }
 
 /**
@@ -102,11 +138,19 @@ export function mapToVariables(
     基准等级: 基准等级(player.等级, player.CR),
   };
 
+  // 晋升试炼: 第 3 条支线的奖励**替换**为晋升奖励原文（用户 2026-09-25 拍板「替换掉第 3 条」）。
+  // 下标 2 是硬编码的 —— 契约就是「恰好 3 条」, 见 DungeonGenResultSchema 的 .length(3)。
+  // 前缀由 dice.ts 定义, 结算侧 parseRewardText 靠它识别「非数值奖励」。
+  const 晋升下标 = player.晋升试炼 ? 归一位阶(player.阶位) : undefined;
+  const 晋升奖励 = 晋升下标 !== undefined && 晋升下标 <= 3
+    ? 晋升奖励前缀 + 晋升奖励表[晋升下标]
+    : undefined;
+
   const 支线任务: Record<string, unknown> = {};
   result.支线任务.forEach((t, i) => {
     支线任务[t.名称] = {
       说明: t.说明,
-      奖励: composeRewardText(rewards.支线[i], t.物品名),
+      奖励: i === 2 && 晋升奖励 ? 晋升奖励 : composeRewardText(rewards.支线[i], t.物品名),
       状态: '进行中',
     };
   });
