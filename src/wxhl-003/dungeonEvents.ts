@@ -67,6 +67,36 @@ const 段落尾 = [
 // （用户 2026-09-25 拍板）。后来者不要"好心"补一句「以更具体者为准」之类的规则 —— 那会推翻这个决定。
 
 /**
+ * 超时哨兵 —— 把「超时」与「真失败」分开。
+ *
+ * 若共用一条 `catch` 并统一加前缀, 超时会被渲染成「控制器渲染失败: 控制器渲染超时」,
+ * 而 spec §八 把两者列为**两条不同文案**（超时就是「控制器渲染超时」, 不带前缀）。
+ *
+ * 用标记属性而不是 `instanceof 子类`: 跨 realm / 打包后子类判定不稳, 而标记一定在。
+ */
+function 超时错误(): Error {
+  const e: any = new Error('控制器渲染超时');
+  e.是超时 = true;
+  return e;
+}
+
+/** 给 promise 套上超时。无论谁先结束都清掉定时器; 超时用带标记的错误 */
+function 带超时<T>(p: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((res, rej) => {
+    const t = setTimeout(() => rej(超时错误()), ms);
+    p.then(
+      v => { clearTimeout(t); res(v); },
+      e => { clearTimeout(t); rej(e); },
+    );
+  });
+}
+
+/** 超时走它自己的文案, 其余走调用方给的文案 */
+function 跳过原因文案(e: any, 非超时: string): string {
+  return e?.是超时 ? '控制器渲染超时' : 非超时;
+}
+
+/**
  * 渲染控制器 → 取出生效的 `事件_*` 条目 → 拼成 prompt 段落。
  *
  * **任何失败都降级为「跳过」，绝不抛**：副本生成不该因为一个渲染故障整次白跑。
@@ -98,16 +128,20 @@ export async function buildEventSection(args: {
     return 正文;
   };
 
+  const 超时 = args.超时毫秒 ?? 5000;
+
+  // `prepareContext()` **也必须在超时内** —— 修复前它是全模块唯一一条不在超时里的失败路径,
+  // 一旦挂住: `generate()` 永不返回 → `generating` 永为 true → UI 永远显示「生成中...」
+  // 且**没有任何提示** —— 正是 spec §八 最想避免的那种表现（看起来还在转）。
   let ctx: Record<string, unknown>;
   try {
-    ctx = await args.prepareContext();
+    ctx = await 带超时(args.prepareContext(), 超时);
   } catch (e: any) {
-    return { ...空, 跳过原因: '插件环境初始化失败: ' + (e?.message ?? e) };
+    return { ...空, 跳过原因: 跳过原因文案(e, '插件环境初始化失败: ' + (e?.message ?? e)) };
   }
 
   try {
-    const 超时 = args.超时毫秒 ?? 5000;
-    await Promise.race([
+    await 带超时(
       Promise.all(
         控制器.map(c =>
           // currentWorld 强制成「副本」: 控制器第一行是
@@ -116,10 +150,10 @@ export async function buildEventSection(args: {
           args.evalTemplate(c.正文, { ...ctx, currentWorld: '副本', getwi: 只读Getwi }),
         ),
       ),
-      new Promise((_, rej) => setTimeout(() => rej(new Error('控制器渲染超时')), 超时)),
-    ]);
+      超时,
+    );
   } catch (e: any) {
-    return { ...空, 缺失, 跳过原因: '控制器渲染失败: ' + (e?.message ?? e) };
+    return { ...空, 缺失, 跳过原因: 跳过原因文案(e, '控制器渲染失败: ' + (e?.message ?? e)) };
   }
 
   // 只留事件条目、去重保序。

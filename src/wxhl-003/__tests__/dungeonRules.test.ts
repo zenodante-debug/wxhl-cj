@@ -265,6 +265,14 @@ const 最小结果 = (over: Partial<DungeonGenResult> = {}) =>
     ...over,
   });
 
+describe('晋升奖励前缀 · 字面值契约', () => {
+  it('前缀的字面值被钉死', () => {
+    // 其余测试都用常量自身构造载荷, 所以把常量改成别的字符串全仓仍然全绿;
+    // 而结算侧 parseRewardText、以及外部按字面量产出的奖励文本会**静默失配**。
+    expect(晋升奖励前缀).toBe('【晋升试炼】');
+  });
+});
+
 describe('晋升试炼 · 第 3 条支线奖励覆盖', () => {
   // ⚠️ 四组奖励都要给全 —— `mapToVariables` 会按 result 的条数逐条取
   // `rewards.隐藏[i]` / `rewards.成就[i]`，给空数组会取到 `undefined` 并在 `composeRewardText` 里抛错。
@@ -280,11 +288,35 @@ describe('晋升试炼 · 第 3 条支线奖励覆盖', () => {
     const r = 最小结果();
     const v: any = mapToVariables(r, { 队友标签: 'x', 队友标签骰: 1 } as any, 假奖励 as any,
       { 姓名: '刘林', 等级: 20, 阶位: '一阶', CR: 3, 晋升试炼: true });
-    const 第三条: any = Object.values(v.当前副本任务.支线任务)[2];
-    expect(第三条.奖励.startsWith(晋升奖励前缀)).toBe(true);
-    expect(第三条.奖励).not.toContain('UP');
-    expect(第三条.奖励).not.toContain('EXP');
-    expect(第三条.奖励).toContain('等级上限+20');
+    const 三条: any[] = Object.values(v.当前副本任务.支线任务);
+    expect(三条[2].奖励.startsWith(晋升奖励前缀)).toBe(true);
+    expect(三条[2].奖励).not.toContain('UP');
+    expect(三条[2].奖励).not.toContain('EXP');
+    expect(三条[2].奖励).toContain('等级上限+20');
+  });
+
+  it('覆盖的**恰好**是第 3 条 —— 前两条不得被晋升奖励顶掉', () => {
+    // 「恰好是第 3 条」是这个功能的契约本身（prompt 里也写着「且**恰好是第 3 条**（不改条数）」）。
+    // 删掉 `下标 === 2 &&` 守卫会让三条奖励全被晋升奖励覆盖, 而只看 [2] 的断言发现不了。
+    const r = 最小结果();
+    const v: any = mapToVariables(r, { 队友标签: 'x', 队友标签骰: 1 } as any, 假奖励 as any,
+      { 姓名: '刘林', 等级: 20, 阶位: '一阶', CR: 3, 晋升试炼: true });
+    const 三条: any[] = Object.values(v.当前副本任务.支线任务);
+    expect(三条[0].奖励).not.toContain(晋升奖励前缀);
+    expect(三条[1].奖励).not.toContain(晋升奖励前缀);
+    expect(三条[0].奖励).toBe('10 UP + 5 EXP + 【白色】消耗品：甲');
+  });
+
+  it('面板文本的第 3 条支线奖励同样带前缀（与存档同源, 不给两份打架的事实）', () => {
+    // 存档说「【晋升试炼】一阶→二阶…」而复制出去的面板印数值奖励 = 同一次生成给出两份打架的事实
+    const r = 最小结果();
+    const player = { 姓名: '刘林', 等级: 20, 阶位: '一阶', CR: 3, 晋升试炼: true };
+    const text = assemblePanelText(r, { 队友标签: 'x' } as any, 假奖励 as any, player);
+    const 奖励行 = [...text.matchAll(/^奖励: (.*)$/gm)].map(m => m[1]);
+    // 顺序: [0] 主线, [1..3] 支线 1~3, [4..5] 隐藏 1~2
+    expect(奖励行[3]).toBe(晋升奖励前缀 + 晋升奖励表[0]);
+    expect(奖励行[1]).not.toContain(晋升奖励前缀);
+    expect(奖励行[2]).not.toContain(晋升奖励前缀);
   });
 
   it('晋升试炼=false → 第 3 条支线走原 composeRewardText 路径', () => {

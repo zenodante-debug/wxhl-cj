@@ -11,7 +11,8 @@ const 空奖励: RewardNumbers = { UP: 0, EXP: 0, RP: 0 };
  *
  * 格式由 dice.ts:composeRewardText 固定生成。**格式非法时抛错, 绝不静默当 0** ——
  * 静默当 0 会让玩家少拿奖励而无人察觉, 与本模块「宁可难看也不圆上」的口径一致。
- * 只有「无」与空串是合法的「没有奖励」。
+ * 合法的「没有数值奖励」共三种: 「无」、空串、以及以 `晋升奖励前缀` 开头的晋升奖励
+ * （它给的是「等级上限+20」这类不可用数值表达的东西, 见下方分支）。
  */
 export function parseRewardText(文本: string): RewardNumbers {
   const t = (文本 ?? '').trim();

@@ -1,4 +1,4 @@
-import type { BuildRoll, RewardSet } from './dice';
+import type { BuildRoll, RewardRoll, RewardSet } from './dice';
 import { composeRewardText, 归一位阶, 晋升奖励前缀 } from './dice';
 import { 基准等级 } from './crTable';
 
@@ -48,6 +48,32 @@ export const 晋升奖励表 = [
   '三阶→四阶: 等级上限+20，+5自由属性点，天赋品质强制提升1级。',
   '四阶→五阶: 等级上限+20，+8自由属性点，天赋进入完全体形态。',
 ] as const;
+
+/**
+ * 本次该发的晋升奖励原文（含前缀）; `undefined` = 不触发晋升试炼。
+ *
+ * **唯一一份谓词**: 变量映射与面板文本都调它。分开写就会出现「存档说晋升、复制出去的面板印数值」
+ * 的两份打架事实 —— prompt 刚告诉过 AI「你不要输出 UP / EXP / RP 相关文字」。
+ *
+ * 阶位认不出（`undefined`）与五阶（下标 4, 不在表内）一律不触发 —— 用户 2026-09-25 拍板
+ * 「五阶 Lv.100 不触发」。
+ */
+export function 晋升奖励Of(player: PlayerBrief): string | undefined {
+  if (!player.晋升试炼) return undefined;
+  const 下标 = 归一位阶(player.阶位);
+  if (下标 === undefined || 下标 > 3) return undefined;
+  return 晋升奖励前缀 + 晋升奖励表[下标];
+}
+
+/**
+ * 第 3 条（下标 2）支线的奖励文本。
+ *
+ * 「**恰好是第 3 条**」是这个功能契约本身（prompt 里也写着「且**恰好是第 3 条**（不改条数）」），
+ * 故这个下标判断只在这里写一次 —— 变量映射与面板文本都调它, 两处不可能漂移。
+ */
+function 支线奖励文本(下标: number, 晋升奖励: string | undefined, roll: RewardRoll, 物品名: string): string {
+  return 下标 === 2 && 晋升奖励 ? 晋升奖励 : composeRewardText(roll, 物品名);
+}
 
 const 主线任务Schema = z.object({ 名称: z.string(), 说明: z.string() });
 const 支线任务Schema = z.object({ 名称: z.string(), 说明: z.string(), 物品名: z.string().prefault('') });
@@ -139,18 +165,15 @@ export function mapToVariables(
   };
 
   // 晋升试炼: 第 3 条支线的奖励**替换**为晋升奖励原文（用户 2026-09-25 拍板「替换掉第 3 条」）。
-  // 下标 2 是硬编码的 —— 契约就是「恰好 3 条」, 见 DungeonGenResultSchema 的 .length(3)。
   // 前缀由 dice.ts 定义, 结算侧 parseRewardText 靠它识别「非数值奖励」。
-  const 晋升下标 = player.晋升试炼 ? 归一位阶(player.阶位) : undefined;
-  const 晋升奖励 = 晋升下标 !== undefined && 晋升下标 <= 3
-    ? 晋升奖励前缀 + 晋升奖励表[晋升下标]
-    : undefined;
+  // 谓词与下标判断都收在 `晋升奖励Of` / `支线奖励文本` 里, 与 `assemblePanelText` 同源。
+  const 晋升奖励 = 晋升奖励Of(player);
 
   const 支线任务: Record<string, unknown> = {};
   result.支线任务.forEach((t, i) => {
     支线任务[t.名称] = {
       说明: t.说明,
-      奖励: i === 2 && 晋升奖励 ? 晋升奖励 : composeRewardText(rewards.支线[i], t.物品名),
+      奖励: 支线奖励文本(i, 晋升奖励, rewards.支线[i], t.物品名),
       状态: '进行中',
     };
   });
@@ -223,6 +246,9 @@ export function assemblePanelText(
   player: PlayerBrief,
 ): string {
   const L: string[] = [];
+  // 与 `mapToVariables` 共用同一份晋升谓词与同一条「第 3 条」下标判断 ——
+  // 两处若各写一份, 复制出去的面板就会给晋升支线印上数值奖励, 与存档打架。
+  const 晋升奖励 = 晋升奖励Of(player);
   L.push('<Panel Enhancement>');
   L.push('<副本任务>');
   L.push(`## 副本名称: ${result.副本名称}`);
@@ -239,7 +265,7 @@ export function assemblePanelText(
     L.push(`## 支线任务${i + 1}`);
     L.push(`名称: ${t.名称}`);
     L.push(`描述: ${t.说明}`);
-    L.push(`奖励: ${composeRewardText(rewards.支线[i], t.物品名)}`);
+    L.push(`奖励: ${支线奖励文本(i, 晋升奖励, rewards.支线[i], t.物品名)}`);
   });
   result.隐藏任务.forEach((t, i) => {
     L.push(`## 隐藏任务${i + 1}`);

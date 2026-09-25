@@ -56,6 +56,22 @@ describe('buildEventSection · 只留事件条目', () => {
     expect(r.段落).not.toContain('规则正文');
   });
 
+  it('段落两端的「三条死命令」必须真的进了段落（把 + 段落尾 删掉就该红）', async () => {
+    // 这三句是「事件优先级最高」这个需求的**唯一**落地物（spec §五.2 自称「三句硬话, 缺一不可」）。
+    // 只断言事件正文进了段落的话, 整个 `段落尾` 被删掉都不会有测试变红。
+    const r = await buildEventSection({
+      条目表: [
+        { 名称: 'EJS/x', 正文: `<%- await getwi('事件_甲') %>` },
+        事件('事件_甲', '甲的正文'),
+      ],
+      ...假环境(),
+    });
+    expect(r.触发).toEqual(['事件_甲']);
+    expect(r.段落).toContain('【三条死命令】');
+    expect(r.段落).toContain('一律不生效');
+    expect(r.段落).toContain('完全由事件接管');
+  });
+
   it('段落在无事件时是空串, 且跳过原因为空（不是失败）', async () => {
     const r = await buildEventSection({ 条目表: [假控制器()], ...假环境() });
     expect(r.触发).toEqual([]);
@@ -91,7 +107,7 @@ describe('buildEventSection · 失败一律降级不抛', () => {
     expect(r.跳过原因).toContain('模板炸了');
   });
 
-  it('超时 → 跳过原因是超时, 不一直挂着', async () => {
+  it('超时 → 跳过原因就是超时文案本身, **不叠**「控制器渲染失败」前缀', async () => {
     const r = await buildEventSection({
       条目表: [假控制器()],
       prepareContext: async () => ({}),
@@ -99,7 +115,22 @@ describe('buildEventSection · 失败一律降级不抛', () => {
       超时毫秒: 30,
     });
     expect(r.段落).toBe('');
-    expect(r.跳过原因).toContain('超时');
+    // spec §八 把「渲染失败」与「超时」列为两行两条文案; 共用一个 catch 加前缀会渲染成
+    // 「控制器渲染失败: 控制器渲染超时」那种自相矛盾的句子
+    expect(r.跳过原因).toBe('控制器渲染超时');
+  });
+
+  it('prepareContext 永不 resolve → 也在超时内降级, 不把 UI 卡在「生成中...」', async () => {
+    // 它是全模块唯一一条会「挂住」的失败路径: 挂在 race 之外 →
+    // generate() 永不返回 → 界面永远显示「生成中...」且没有任何提示
+    const r = await buildEventSection({
+      条目表: [假控制器()],
+      prepareContext: () => new Promise(() => {}),
+      evalTemplate: async () => '',
+      超时毫秒: 30,
+    });
+    expect(r.段落).toBe('');
+    expect(r.跳过原因).toBe('控制器渲染超时');
   });
 });
 

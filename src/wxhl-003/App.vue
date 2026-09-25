@@ -2471,6 +2471,8 @@ function openDungeonRoll() {
   currentView.value = 'dungeonRoll';
   dungeonGenStore.lastError = '';
   refreshPlayerCycle();
+  // 进入面板时也同步一次 —— 选中没变时上面的 watch 不会触发, 而面板必须反映当前条目的开关
+  syncSwitchesFromCurrent();
 }
 
 function openMarket() {
@@ -2520,6 +2522,7 @@ const customPicks = ref<Record<string, string>>({
   题材大类: '',
   时代背景: '',
   核心特色标签: '',
+  队友标签: '',
   副模块: '',
 });
 const CUSTOM_OPTIONS = [
@@ -2527,8 +2530,32 @@ const CUSTOM_OPTIONS = [
   { key: '题材大类', label: '题材大类', values: GENRES },
   { key: '时代背景', label: '时代背景', values: ERAS },
   { key: '核心特色标签', label: '特色标签', values: FEATURE_TAGS },
+  // 队友标签是独立于核心特色标签的第二颗 1d50（圈定 IP 队友来源范围）, 故单列一项。
+  // 它的覆盖分支（含 markRecordSelfPick）在 dice.ts 里早已就绪 —— 少了这个下拉, 那条路径
+  // 在产品里没有任何入口, 从 UI 侧看就是死代码。
+  { key: '队友标签', label: '队友标签', values: FEATURE_TAGS },
   { key: '副模块', label: '副模块', values: SUB_MODULES },
 ] as const;
+
+/**
+ * 把面板开关同步成「当前条目的事实」。
+ *
+ * `generate()` 读的是**条目**上的 `事件开关` / `同人开关`（掷骰那一刻记下的）, 而面板控件是
+ * **下一次掷骰的「输入」** —— 两者是不同的东西。选中一条历史条目时若不单向同步, 面板会显示
+ * 与这一轮实际行为不符的勾选, 最坏是一条误导性警告: 面板写着「事件优先」而这一轮根本不注入事件。
+ *
+ * 不做成 computed: 控件仍必须能被用户自由编辑。
+ */
+function syncSwitchesFromCurrent() {
+  const cur = dungeonGenStore.current;
+  if (!cur) return;
+  eventEnabled.value = cur.事件开关 ?? true;
+  mateEnabled.value = cur.同人开关 ?? false;
+  mateGender.value = cur.同人性别 ?? '不限';
+}
+// 选中历史条目（`select` 只改 selectedId, `current` 是 computed → id 一变就触发）时同步
+watch(() => dungeonGenStore.current?.id, syncSwitchesFromCurrent);
+
 function onRollClick() {
   const 同人 = { 开关: mateEnabled.value, 性别: mateGender.value };
   if (rollMode.value === 'random') {

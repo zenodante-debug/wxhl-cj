@@ -105,6 +105,30 @@ describe('buildDungeonPrompt · 队友来源锚定段', () => {
     expect(p).toContain('Lv.1 新人');
   });
 
+  it('旧条目缺「队友标签」→ 整段不注入, 也绝不出现字面量 undefined', () => {
+    // base 版本掷出的旧 localStorage 条目没有这个键（store.ts 的 JSON.parse **无迁移**）,
+    // 而 `current` 在未选中时回落到 rolledDungeons[0] → 这条路径日常可达。
+    // 缺标签 ⇒ 没有 IP 范围可圈, 诚实降级（整段不注入）比给 AI 一段「= undefined」强。
+    const 旧条目 = { ...build, 队友标签: undefined } as any;
+    const p旧 = buildDungeonPrompt(旧条目, records, 'c', '', '池', '一阶', 11, '危机四伏');
+    expect(p旧).not.toContain('队友来源锚定');
+    expect(p旧).not.toContain('undefined');
+    expect(p旧).not.toContain('本次【队友标签】=');
+  });
+
+  it('上文有「队友指定」时, 本段写明以队友指定为准（阶梯: 指定压过标签）', () => {
+    const p指定 = buildDungeonPrompt(build, records, '契约者: 刘林', '', '池', '一阶', 11, '危机四伏',
+      undefined, { 来源世界观: '原神', 人物: '刻晴' });
+    expect(p指定).toContain('队友指定');
+    // 这句例外是**条件句**（「若上文…」）, 故它常驻在本段里 —— 无论有没有指定都不会误导:
+    // 没指定时条件不成立。断言钉在整句上, 防止后来者把它删掉又只留「本段只约束…」。
+    expect(p指定).toContain('上文「队友指定」若已指定来源世界观或人物，**以它为准**');
+    expect(p指定).toContain('本段只约束其余未被指定的 IP 队友');
+    // 指定段本身必须先出现, 否则「上文」就没有指向
+    expect(p指定.indexOf('队友指定（契约者自选, 强制）')).toBeGreaterThan(-1);
+    expect(p指定.indexOf('队友指定（契约者自选, 强制）')).toBeLessThan(p指定.indexOf('队友来源锚定（强制）'));
+  });
+
   it('同人开关关闭时, 不出现「恰好 1 名同人契约者」', () => {
     const 关 = buildDungeonPrompt(build, records, '契约者: 刘林', '', '池', '一阶', 11, '危机四伏',
       undefined, undefined, { 同人契约者: { 开关: false, 性别: '不限' } });
