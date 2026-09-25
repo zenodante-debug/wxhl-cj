@@ -3566,25 +3566,22 @@ onUnmounted(() => {
   display: flex;
   flex-direction: column;
 }
-/* 内容层：字体缩放在此层，手机外壳不随字号变形。
-   用 zoom（会影响布局）而非 transform：宽高先除以 --cz、zoom 再乘回来，
-   布局盒仍等于手机框内尺寸 → flex/百分比定位都正确，而内部文字按 --cz 放大。
-   --cz = --ps × --fs：手机尺寸把窗口与字等比放大，字体大小再额外放大字。
-   @supports 兜底：不支持 zoom 的浏览器退回普通铺满（只是不缩放字体，不会错位）。 */
+/* 内容层：缩放只作用于它，手机外壳不随之变形。
+   用 transform: scale（**不影响布局**，各浏览器语义一致）而非 zoom：zoom 在部分浏览器
+   只缩放内容渲染、不把除掉的尺寸乘回布局盒，于是内容溢位被裁、框内留白。
+   transform 的确定性做法：宽高先除以 --cz（布局盒变小），再以左上角为原点放大 --cz 倍，
+   渲染结果正好等于手机框内尺寸 —— 铺满、不溢位、不裁切。
+   --cz = --ps × --fs：手机尺寸把窗口与内容等比放大，字体大小再额外放大文字。 */
 .phone-content {
-  flex: 1;
-  min-height: 0;
+  flex: none;
+  width: calc(100% / var(--cz, 1));
+  height: calc(100% / var(--cz, 1));
+  transform: scale(var(--cz, 1));
+  transform-origin: top left;
   display: flex;
   flex-direction: column;
+  min-height: 0;
   overflow: hidden;
-}
-@supports (zoom: 1) {
-  .phone-content {
-    flex: none;
-    zoom: var(--cz, 1);
-    width: calc(100% / var(--cz, 1));
-    height: calc(100% / var(--cz, 1));
-  }
 }
 /* 手机外壳四角铆钉 */
 .phone-frame::before {
