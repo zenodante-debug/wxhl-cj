@@ -1577,27 +1577,29 @@
               </div>
             </div>
 
-            <div class="cp-field">
-              <label class="cp-label">
-                <input v-model="eventEnabled" type="checkbox" :disabled="dungeonGenStore.rolling || dungeonGenStore.generating" />
-                读取动态事件
-              </label>
-              <span class="set-hint">按赛季/周期/阶位判定本轮生效的事件，其优先级高于骰值与自选</span>
-            </div>
-            <div class="cp-field">
-              <label class="cp-label">
-                <input v-model="mateEnabled" type="checkbox" :disabled="(playerCR ?? 0) <= 4 || dungeonGenStore.rolling || dungeonGenStore.generating" />
-                匹配同人契约者
-              </label>
-              <select v-model="mateGender" class="cp-select" :disabled="!mateEnabled">
-                <option value="不限">不限</option>
-                <option value="男">男</option>
-                <option value="女">女</option>
-              </select>
-              <span v-if="(playerCR ?? 0) <= 4" class="set-hint">低 CR 没有榜单可退，队友本就是 IP 契约者</span>
-            </div>
-            <div v-if="eventEnabled && rollMode === 'custom'" class="refresh-err">
-              ⚠️ 已开启动态事件：其优先级高于上方所有自选字段，冲突时以事件为准。
+            <div class="roll-options">
+              <div class="cp-field">
+                <label class="cp-label cp-label-check">
+                  <input v-model="eventEnabled" type="checkbox" :disabled="dungeonGenStore.rolling || dungeonGenStore.generating" />
+                  读取动态事件
+                </label>
+                <span class="set-hint">按赛季/周期/阶位判定本轮生效的事件，其优先级高于骰值与自选</span>
+              </div>
+              <div class="cp-field">
+                <label class="cp-label cp-label-check">
+                  <input v-model="mateEnabled" type="checkbox" :disabled="(playerCR ?? 0) <= 4 || dungeonGenStore.rolling || dungeonGenStore.generating" />
+                  匹配同人契约者
+                </label>
+                <select v-model="mateGender" class="cp-select" :disabled="!mateEnabled">
+                  <option value="不限">不限</option>
+                  <option value="男">男</option>
+                  <option value="女">女</option>
+                </select>
+                <span v-if="(playerCR ?? 0) <= 4" class="set-hint">低 CR 没有榜单可退，队友本就是 IP 契约者</span>
+              </div>
+              <div v-if="eventEnabled && rollMode === 'custom'" class="refresh-err">
+                ⚠️ 已开启动态事件：其优先级高于上方所有自选字段，冲突时以事件为准。
+              </div>
             </div>
 
             <button
@@ -1640,7 +1642,7 @@
               <div v-if="dungeonGenStore.current?.result" class="dungeon-card">
                 <div class="dc-name">{{ dungeonGenStore.current.result.副本名称 }}</div>
                 <div v-if="dungeonGenStore.current.触发的动态事件?.length" class="dc-line">
-                  <span class="dc-key">动态事件</span>
+                  <b>动态事件</b>
                   <span>{{ dungeonGenStore.current.触发的动态事件.join('、') }}</span>
                 </div>
                 <div class="dc-meta">{{ dungeonGenStore.current.result.副本来源 }}</div>
@@ -6047,5 +6049,43 @@ onUnmounted(() => {
   margin-top: 6px;
   font-size: 11px;
   color: var(--amber);
+}
+// 副本生成的两个开关（动态事件 / 同人契约者）: 沿用 .custom-panel 的那套盒子与 12px 内缩 ——
+// 它们在**两种掷骰模式下**都要显示, 所以不能塞进只属于自选模式的 .custom-panel, 只能另起一个
+// 同款容器; 字段因此和上方的自选字段落在同一条竖线上（12px 边距 + 10px 内边距）。
+.roll-options {
+  margin: 0 12px 10px;
+  padding: 10px;
+  border: 1px solid rgba(120, 80, 40, 0.35);
+  border-radius: 8px;
+  background: rgba(30, 20, 15, 0.5);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+
+  // 提示文字比「标签 + 下拉」长得多, 让它独占一行（全仓的 .set-hint 本来也都是独占一行的块）。
+  // 否则它带着内容宽度参与同一行的伸缩, 会把同一行里的下拉挤到只剩 padding + border 的十几像素
+  // —— CR≤4 时同人性别下拉正好与提示同排。
+  .cp-field {
+    flex-wrap: wrap;
+  }
+  .set-hint {
+    flex-basis: 100%;
+  }
+  // .refresh-err 自带 4px/8px 边距: 进了本容器要归零, 否则比同排的开关行多缩 8px
+  .refresh-err {
+    margin: 0;
+  }
+}
+// 复选框标签: 内容是「复选框 + 六七个汉字」, 直接套 .cp-label 的 56px 定宽会溢出、压到右侧提示。
+// 用 min-width 而非 width —— 两行的控件因此仍从同一条竖线开始, 字再长也只是把它撑开, 不会被裁。
+// 104px = 复选框 13 + 间距 6 + 七个汉字 77 + 余量。
+.cp-label-check {
+  width: auto;
+  min-width: 104px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  cursor: pointer;
 }
 </style>
