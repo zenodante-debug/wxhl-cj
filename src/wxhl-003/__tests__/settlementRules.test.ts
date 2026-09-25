@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { parseRewardText } from '../settlementRules';
+import { 晋升奖励前缀 } from '../dice';
 
 describe('parseRewardText', () => {
   it('解析标准的奖励文本', () => {
@@ -823,5 +824,25 @@ describe('濒死次数 不是算术入参（终审 #6）', () => {
     const a = computeSettlement(基准输入, 满骰());
     const b = computeSettlement({ ...基准输入, 濒死次数: 5 } as any, 满骰());
     expect(b).toEqual(a);
+  });
+});
+
+describe('parseRewardText · 晋升试炼奖励前缀', () => {
+  it('前缀开头 → 返回零奖励, 不抛错', () => {
+    const 文本 = 晋升奖励前缀 + '一阶→二阶: 等级上限+20，+3自由属性点，天赋品质强制提升1级。';
+    expect(parseRewardText(文本)).toEqual({ UP: 0, EXP: 0, RP: 0 });
+  });
+
+  it('前缀相同但后缀乱写 → 仍返回零奖励（前缀即契约, 不解析后缀）', () => {
+    expect(parseRewardText(晋升奖励前缀 + '随便写点什么 +20 UP')).toEqual({ UP: 0, EXP: 0, RP: 0 });
+  });
+
+  it('四阶→五阶那条也认', () => {
+    expect(parseRewardText(晋升奖励前缀 + '四阶→五阶: 等级上限+20，+8自由属性点，天赋进入完全体形态。'))
+      .toEqual({ UP: 0, EXP: 0, RP: 0 });
+  });
+
+  it('没把闸门放宽: 不带前缀的非法文本仍然抛错', () => {
+    expect(() => parseRewardText('等级上限+20，+3自由属性点')).toThrow();
   });
 });

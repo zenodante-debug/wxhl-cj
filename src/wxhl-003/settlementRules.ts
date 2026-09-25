@@ -1,4 +1,4 @@
-import { rollDie, 归一位阶 } from './dice';
+import { rollDie, 归一位阶, 晋升奖励前缀 } from './dice';
 import { CR区间 } from './crTable';
 
 /** 奖励文本里的三个数值 */
@@ -16,6 +16,10 @@ const 空奖励: RewardNumbers = { UP: 0, EXP: 0, RP: 0 };
 export function parseRewardText(文本: string): RewardNumbers {
   const t = (文本 ?? '').trim();
   if (t === '' || t === '无') return { ...空奖励 };
+  // 非数值奖励（晋升试炼）: **前缀即契约, 不解析后缀** —— 它给的是「等级上限+20」这类
+  // 无法用 UP/EXP 表达的东西。返回零奖励是**合法**表示「这条任务没有数值奖励」,
+  // 与下面的「非法格式抛错」不冲突: 那一条针对的是**看起来像数值奖励却写坏了**的文本。
+  if (t.startsWith(晋升奖励前缀)) return { ...空奖励 };
   // 按 ' + ' 切段后逐段判形状。**不要用单条大正则** —— 末段的 `.+` 是贪婪的,
   // 会把「物品名 + 尾巴」整段吃掉, 于是非法输入被当成合法(见 ledger Ruling 1)。
   const 段 = t.split(' + ');

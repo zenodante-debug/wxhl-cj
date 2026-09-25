@@ -639,6 +639,19 @@ export function rollRewards(): { rewards: RewardSet; records: RollRecord[] } {
   return { rewards: { 主线, 支线, 隐藏, 成就 }, records };
 }
 
+/**
+ * 「非数值奖励」的固定前缀 —— 目前只有晋升试炼用。
+ *
+ * 存在的理由: 奖励文本有两种语义, `composeRewardText` 产出的是**数值**奖励
+ * (`N UP + N EXP …`), 而晋升试炼的奖励是 `等级上限+20，+3自由属性点…` 这类**不可用数值表达**的东西。
+ * `parseRewardText` 是严格格式的、格式不符即抛错, 因此必须有一条**明确可识别**的合法形态,
+ * 否则玩家一完成晋升支线, 整次结算就会被抛错挡下。
+ *
+ * 放这里而不是 `dungeonRules.ts`: 它是奖励文本格式的一半, 另一半 `composeRewardText` 就在本文件;
+ * 且这样 `settlementRules.ts` 不必反向依赖 `dungeonRules.ts`。
+ */
+export const 晋升奖励前缀 = '【晋升试炼】';
+
 /** 拼装奖励文本。物品名为空时省略物品段。RP 为 0 时省略 RP 段 */
 export function composeRewardText(r: RewardRoll, 物品名: string): string {
   const parts = [`${r.up} UP`, `${r.exp} EXP`];
