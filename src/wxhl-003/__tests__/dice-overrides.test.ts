@@ -20,6 +20,8 @@ function makeBuild(over: Partial<BuildRoll> = {}): BuildRoll {
     时代背景: '现代/当代',
     核心特色标签: FEATURE_TAGS[0],
     核心特色标签骰: 1,
+    队友标签: FEATURE_TAGS[0],
+    队友标签骰: 1,
     副模块: SUB_MODULES[0],
     副模块骰: 1,
     IP热度: '较冷门',
