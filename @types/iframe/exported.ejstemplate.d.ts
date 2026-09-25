@@ -74,7 +74,7 @@ declare const EjsTemplate: {
    * const result   = compiled({ 'user': 'fred' });;
    * => result === 'hello user!'
    */
-  evaltemplate: (code: string, context?: Record<string, any>, options?: Record<string, any>) => Promise<string>;
+  evalTemplate: (code: string, context?: Record<string, any>, options?: Record<string, any>) => Promise<string>;
 
   /**
    * 创建模板语法处理使用的执行环境 (上下文)
