@@ -2486,14 +2486,22 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     }
   }
 
-  /** 自选掷骰: 照掷全部骰子, 再用契约者自选覆盖指定项, 并锚定世界观与队友 */
+  /**
+   * 自选掷骰: 照掷全部骰子, 再用契约者自选覆盖指定项, 并锚定世界观与队友。
+   *
+   * 后两个参数带默认值, 与 `doRoll` **逐字同款**（同人默认关、事件默认开 —— 后者是用户
+   * 2026-09-25 拍板的口径）。理由: `App.vue` 的调用点目前仍只传 4 个实参, 少了默认值时
+   * `同人` 会是 `undefined`、一取 `同人.开关` 就抛 TypeError 并被 catch 吞成「自选掷骰失败」——
+   * 分支上「自选掷骰」直接不可用, 而 `.vue` 不在 `tsc` 范围内、测试也不走那条路径,
+   * **两道闸门都看不见**。Task 7 会给调用点补上显式实参来覆盖这两个默认值, 二者不冲突。
+   */
   function doCustomRoll(
     overrides: BuildOverrides,
     worldview: string,
     mateWorld: string,
     mateNames: string,
-    同人: { 开关: boolean; 性别: '男' | '女' | '不限' },
-    事件: boolean,
+    同人: { 开关: boolean; 性别: '男' | '女' | '不限' } = { 开关: false, 性别: '不限' },
+    事件 = true,
   ) {
     rolling.value = true;
     lastError.value = '';
