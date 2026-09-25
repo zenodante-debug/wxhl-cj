@@ -2557,20 +2557,11 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
           // 不能指望 buildEventSection 兜住这个: 它在 store 侧才被解引用, 直接写会在闭包里抛 ReferenceError。
           lastError.value = '本次未注入动态事件：未安装「提示词模板语法」插件';
         } else {
-          // ⚠️ 插件运行时暴露的是 camelCase 的 `evalTemplate`, 而仓库 `@types/iframe/exported.ejstemplate.d.ts`
-          // 把它写成了全小写 `evaltemplate`（笔误）—— 照那写会过不了 `tsc`（TS2551）, 照它写则**运行时拿到
-          // undefined**。已核对插件源码（ST-Prompt-Template `src/modules/exports.ts` 的
-          // `globalThis.EjsTemplate = { evalTemplate, prepareContext, ... }`）: 运行时只有 camelCase 这一个
-          // 名字、没有小写别名, 所以按**运行时名为准**, 在这里用局部类型补齐（而不是改共享的 @types —— 那超出本任务范围）。
-          const EJS = EjsTemplate as unknown as {
-            evalTemplate: (code: string, ctx: Record<string, unknown>) => Promise<string>;
-            prepareContext: () => Promise<Record<string, unknown>>;
-          };
           const 条目表 = await forumStore.getCardWorldbookEntries();
           const 事件 = await buildEventSection({
             条目表,
-            evalTemplate: (code, ctx) => EJS.evalTemplate(code, ctx),
-            prepareContext: () => EJS.prepareContext(),
+            evalTemplate: (code, ctx) => EjsTemplate.evalTemplate(code, ctx),
+            prepareContext: () => EjsTemplate.prepareContext(),
           });
           动态事件段 = 事件.段落;
           触发的动态事件 = 事件.触发;
