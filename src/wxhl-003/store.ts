@@ -37,10 +37,12 @@ import {
   DungeonGenResultSchema,
   assemblePanelText,
   mapToVariables,
+  点名缺席者,
   type DungeonGenResult,
   type PlayerBrief,
 } from './dungeonRules';
 import { buildDungeonPrompt, buildEnterPrompt, buildEnemyPrompt } from './dungeonGen';
+import { buildEventSection } from './dungeonEvents';
 import {
   EnemyGenResultSchema,
   mapEnemyToVariables,
@@ -500,6 +502,39 @@ export const useForumStore = defineStore('forum', () => {
     return parts.join('\n\n');
   }
 
+  /**
+   * 读**卡绑定 + 全局开启**的世界书条目（只读, 不筛条目级 filter）。
+   *
+   * 专供 EJS 控制器用: 控制器与事件条目在卡绑定世界书里, 而玩家的「设置 → 世界书」
+   * 勾选是另一回事（spec §一 要求「不管有没有勾选都要能读」）。
+   * **只读这几本** —— 用户卡上有 91 本世界书, 全量扫描太慢。
+   */
+  async function getCardWorldbookEntries(): Promise<{ 名称: string; 正文: string }[]> {
+    const 名单 = new Set<string>();
+    try {
+      const cb = getCharWorldbookNames('current');
+      if (cb.primary) 名单.add(cb.primary);
+      for (const w of cb.additional ?? []) 名单.add(w);
+    } catch (_) {}
+    try {
+      for (const w of getGlobalWorldbookNames?.() ?? []) 名单.add(w);
+    } catch (_) {}
+
+    const 出: { 名称: string; 正文: string }[] = [];
+    const 已见 = new Set<string>();
+    for (const 名 of 名单) {
+      try {
+        const entries = await getWorldbook(名);
+        for (const e of entries) {
+          if (已见.has(e.name)) continue; // 同名的取先出现的
+          已见.add(e.name);
+          出.push({ 名称: e.name, 正文: e.content ?? '' });
+        }
+      } catch (_) {}
+    }
+    return 出;
+  }
+
   // ---- 读取玩家变量 ----
   function readPlayerData(): string {
     try {
@@ -925,6 +960,7 @@ ${wb || CORE_WORLD}
     generateThreadDetail,
     generateReplies,
     getWorldbookContent,
+    getCardWorldbookEntries,
     extractInfluence,
     clearInfluence,
     createThread,
@@ -2273,6 +2309,14 @@ export interface RolledDungeon {
   mateWorld?: string;
   /** 自选模式: 队友具体人物（指定后其他契约者必须恰好是他们） */
   mateNames?: string;
+  /** 每轮单独选: 是否额外匹配 1 名同人契约者（CR≥5 时面板可选） */
+  同人开关?: boolean;
+  /** 那名同人契约者的性别 */
+  同人性别?: '男' | '女' | '不限';
+  /** 每轮单独选: 是否读取并注入 EJS 动态事件。**默认开** */
+  事件开关?: boolean;
+  /** 本次渲染出的生效事件名（由 generate 写入, 供界面展示） */
+  触发的动态事件?: string[];
 }
 
 function loadRolledDungeons(): RolledDungeon[] {
@@ -2293,7 +2337,7 @@ function saveRolledDungeons(list: RolledDungeon[]) {
 const 晋升阶位上限 = [20, 40, 60, 80] as const;
 
 /** 按 CR 决定队友匹配池（规则 §三 与用户口径: ≥6 升一阶, ≥7 升两阶, =10 天榜） */
-function buildMatchPool(cr: number, 阶位: string): string {
+export function buildMatchPool(cr: number, 阶位: string): string {
   // 归一交给 `dice.ts` 的 `归一位阶`（一阶/1阶/一/1/第一阶/全角…都认）;
   // **失败策略刻意保持 `?? 0`**: 认不出就当一阶, 只影响队友匹配池的档位, 不写任何数值
   const idx = 归一位阶(阶位) ?? 0;
@@ -2403,8 +2447,17 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     }
   }
 
-  /** 掷骰: 只掷, 不调 AI */
-  function doRoll() {
+  /**
+   * 掷骰: 只掷, 不调 AI。
+   *
+   * 两个开关（同人 / 事件）由界面在**掷骰这一刻**传进来、记在条目上 —— 它们是「这一轮副本」的
+   * 属性, 之后的 `generate()` 只读条目、不再看界面控件。否则玩家掷完再改勾选, 生成出来的
+   * 会与他掷骰时看到的不一致。
+   */
+  function doRoll(
+    同人: { 开关: boolean; 性别: '男' | '女' | '不限' } = { 开关: false, 性别: '不限' },
+    事件 = true,
+  ) {
     rolling.value = true;
     lastError.value = '';
     // 掷骰是「新一次副本」的入口: 清掉历史选中, 否则卡片仍停留在旧条目、看不到刚掷出的骰值
@@ -2421,6 +2474,9 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
         rewardRecords,
         build,
         rewards,
+        同人开关: 同人.开关,
+        同人性别: 同人.性别,
+        事件开关: 事件, // 默认开（用户 2026-09-25 拍板）
       };
       rolledDungeons.value.unshift(entry);
     } catch (e: any) {
@@ -2431,7 +2487,14 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
   }
 
   /** 自选掷骰: 照掷全部骰子, 再用契约者自选覆盖指定项, 并锚定世界观与队友 */
-  function doCustomRoll(overrides: BuildOverrides, worldview: string, mateWorld: string, mateNames: string) {
+  function doCustomRoll(
+    overrides: BuildOverrides,
+    worldview: string,
+    mateWorld: string,
+    mateNames: string,
+    同人: { 开关: boolean; 性别: '男' | '女' | '不限' },
+    事件: boolean,
+  ) {
     rolling.value = true;
     lastError.value = '';
     selectedId.value = null;
@@ -2451,6 +2514,9 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
         customWorld: worldview.trim() || undefined,
         mateWorld: mateWorld.trim() || undefined,
         mateNames: mateNames.trim() || undefined,
+        同人开关: 同人.开关,
+        同人性别: 同人.性别,
+        事件开关: 事件,
       };
       rolledDungeons.value.unshift(entry);
     } catch (e: any) {
@@ -2481,6 +2547,37 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     try {
       const { player, text: playerText, 队伍最高等级 } = readPlayerBrief();
       const wb = await forumStore.getWorldbookContent();
+      // 动态事件: **先判开关** —— 关掉时连控制器都不渲染（spec §三 最后一条）。
+      // 任何失败都只降级不阻断: `buildEventSection` 内部已吞掉所有异常并给出跳过原因。
+      let 动态事件段 = '';
+      let 触发的动态事件: string[] = [];
+      if (entry.事件开关 ?? true) {
+        if (typeof EjsTemplate === 'undefined') {
+          // 插件没装 —— 与「渲染失败」同一条降级路径: **只提示, 不阻断**（Review Focus 第 1 条）。
+          // 不能指望 buildEventSection 兜住这个: 它在 store 侧才被解引用, 直接写会在闭包里抛 ReferenceError。
+          lastError.value = '本次未注入动态事件：未安装「提示词模板语法」插件';
+        } else {
+          // ⚠️ 插件运行时暴露的是 camelCase 的 `evalTemplate`, 而仓库 `@types/iframe/exported.ejstemplate.d.ts`
+          // 把它写成了全小写 `evaltemplate`（笔误）—— 照那写会过不了 `tsc`（TS2551）, 照它写则**运行时拿到
+          // undefined**。已核对插件源码（ST-Prompt-Template `src/modules/exports.ts` 的
+          // `globalThis.EjsTemplate = { evalTemplate, prepareContext, ... }`）: 运行时只有 camelCase 这一个
+          // 名字、没有小写别名, 所以按**运行时名为准**, 在这里用局部类型补齐（而不是改共享的 @types —— 那超出本任务范围）。
+          const EJS = EjsTemplate as unknown as {
+            evalTemplate: (code: string, ctx: Record<string, unknown>) => Promise<string>;
+            prepareContext: () => Promise<Record<string, unknown>>;
+          };
+          const 条目表 = await forumStore.getCardWorldbookEntries();
+          const 事件 = await buildEventSection({
+            条目表,
+            evalTemplate: (code, ctx) => EJS.evalTemplate(code, ctx),
+            prepareContext: () => EJS.prepareContext(),
+          });
+          动态事件段 = 事件.段落;
+          触发的动态事件 = 事件.触发;
+          if (事件.跳过原因) lastError.value = '本次未注入动态事件：' + 事件.跳过原因;
+          else if (事件.缺失.length) lastError.value = '控制器引用了找不到的条目：' + 事件.缺失.join('、');
+        }
+      }
       const 匹配池 = buildMatchPool(player.CR, player.阶位);
       // 生机评估: 按 CR 档取出的凶险判定, 只给 AI 定调（数值那一半在敌人生成时由基准等级偏移落地）
       const prompt = buildDungeonPrompt(
@@ -2494,12 +2591,23 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
         生机评估(player.CR),
         entry.customWorld,
         { 来源世界观: entry.mateWorld, 人物: entry.mateNames },
+        {
+          同人契约者: { 开关: entry.同人开关 ?? false, 性别: entry.同人性别 ?? '不限' },
+          动态事件段,
+          晋升试炼: player.晋升试炼,
+        },
       );
       const raw = await aiGenerate(cfg, prompt, {
         name: 'dungeon_generation',
         value: JSON.parse(JSON.stringify(z.toJSONSchema(DungeonGenResultSchema, { io: 'input' }))),
       });
       const parsed = DungeonGenResultSchema.parse(extractJSON(raw));
+      // 软校验: 事件点名的人必须在名单里。**只报警、不阻断**（照本项目「宁可难看也不圆上」的口径）。
+      // **先排除契约者本人** —— 他既不在「其他契约者」也不在「固有角色」里, 而事件正文常用
+      // 「{{user}}」指代他, AI 偶尔会把他列进「事件点名角色」。那是**误报**:
+      // prompt 已明令不要列（Task 5 ⑥b）, 这里再兜一道 —— 误报比不报更糟, 它会让玩家学会无视警告。
+      const 缺席 = 点名缺席者(parsed).filter(名 => 名 !== player.姓名);
+      if (缺席.length) lastError.value = '事件点名的人物未出现在名单里：' + 缺席.join('、');
       const idx = rolledDungeons.value.findIndex(d => d.id === entry.id);
       if (idx < 0) return;
       rolledDungeons.value[idx] = {
@@ -2507,6 +2615,7 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
         result: parsed,
         panelText: assemblePanelText(parsed, entry.build, entry.rewards, player),
         enterPrompt: buildEnterPrompt(parsed, entry.build),
+        触发的动态事件,
       };
     } catch (e: any) {
       lastError.value = e.message || '生成失败';
@@ -2797,6 +2906,8 @@ export const useDungeonGenStore = defineStore('dungeonGen', () => {
     writeToSave,
     fillInput,
     remove,
+    /** 供测试与调试用 —— 面板不直接调它, 但它是判定的唯一入口, 必须能被单测钉住 */
+    readPlayerBrief,
   };
 });
 
