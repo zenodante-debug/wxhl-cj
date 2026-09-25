@@ -166,6 +166,12 @@ export interface BuildRoll {
   时代背景: string;
   核心特色标签: string;
   核心特色标签骰: number;
+  /**
+   * 队友标签: **与核心特色标签互相独立**的第二颗 1d50, 只用来圈定 IP 队友的来源范围。
+   * 与 `核心特色标签` 值相同是允许的（两次独立掷骰本来就可能撞上）—— 代码不得让两者产生关联。
+   */
+  队友标签: string;
+  队友标签骰: number;
   副模块: string;
   副模块骰: number;
   IP热度: string;
@@ -250,7 +256,7 @@ export function isNewbieDungeon(副本周期: number, 阶位: string): boolean {
 
 /**
  * 掷出全部「构建骰」。
- * 顺序与规则一致: 副本类型 → 媒介来源 → 题材大类 → 时代背景 → 核心特色标签 → 副模块 → IP热度 → 时间限制。
+ * 顺序与规则一致: 副本类型 → 媒介来源 → 题材大类 → 时代背景 → 核心特色标签 → 队友标签 → 副模块 → IP热度 → 时间限制。
  * @param 副本周期 stat_data.契约者.赛季信息.当前副本周期
  * @param 阶位 stat_data.契约者.头部.阶位, 与副本周期共同决定是否新手副本
  */
@@ -287,6 +293,12 @@ export function rollBuild(副本周期: number, 阶位: string): { build: BuildR
   const 核心特色标签 = FEATURE_TAGS[标签骰 - 1];
   records.push({ 标签: '核心特色标签', 表达式: '1d50', 骰值: 标签骰, 映射: 核心特色标签 });
   const 是日常副本 = 标签骰 >= 41;
+
+  // ⑤.5 队友标签 (D50) —— 与上一颗骰**互相独立**, 只用来圈 IP 队友的来源范围。
+  // 新手副本也投: 规则里新手副本的队友本就是「来自随机世界观的 IP 角色」, 这颗骰把「随机」具体化。
+  const 队友标签骰 = rollDie(50);
+  const 队友标签 = FEATURE_TAGS[队友标签骰 - 1];
+  records.push({ 标签: '队友标签', 表达式: '1d50', 骰值: 队友标签骰, 映射: 队友标签 });
 
   // 日常副本强制视为和平 (规则 §6 优先级高于 D4)
   let 副本类型被日常规则覆盖 = false;
@@ -328,6 +340,8 @@ export function rollBuild(副本周期: number, 阶位: string): { build: BuildR
       时代背景,
       核心特色标签,
       核心特色标签骰: 标签骰,
+      队友标签,
+      队友标签骰,
       副模块,
       副模块骰,
       IP热度,
@@ -350,6 +364,7 @@ export interface BuildOverrides {
   题材大类?: string;
   时代背景?: string;
   核心特色标签?: string;
+  队友标签?: string;
   副模块?: string;
 }
 
@@ -407,6 +422,13 @@ export function applyBuildOverrides(
     build.核心特色标签 = overrides.核心特色标签;
     build.核心特色标签骰 = 骰;
     records = markRecordSelfPick(records, '核心特色标签', 骰, overrides.核心特色标签);
+  }
+  // 队友标签是独立的一颗骰, 只改自己的值; 日常调和规则只看核心特色标签骰, 不受这里影响
+  if (overrides.队友标签 !== undefined) {
+    const 骰 = indexInTable(FEATURE_TAGS, overrides.队友标签, '队友标签');
+    build.队友标签 = overrides.队友标签;
+    build.队友标签骰 = 骰;
+    records = markRecordSelfPick(records, '队友标签', 骰, overrides.队友标签);
   }
 
   // 按（可能被覆盖的）标签骰重算日常调和规则, 与 rollBuild 的判定口径一致

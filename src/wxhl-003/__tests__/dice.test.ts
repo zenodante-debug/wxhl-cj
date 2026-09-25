@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { FEATURE_TAGS, SUB_MODULES, ipHeatOf, rollBuild, rollDie, tierIndexOf } from '../dice';
+import { applyBuildOverrides, FEATURE_TAGS, SUB_MODULES, ipHeatOf, rollBuild, rollDie, tierIndexOf } from '../dice';
 
 describe('rollDie', () => {
   it('始终落在 1..faces 内', () => {
@@ -133,5 +133,39 @@ describe('rollBuild', () => {
     expect(tierIndexOf('5阶')).toBe(4);
     expect(tierIndexOf('超脱')).toBe(-1);
     expect(tierIndexOf('')).toBe(-1);
+  });
+
+  it('rollBuild 产出「队友标签」骰, 值落在 FEATURE_TAGS 内', () => {
+    const { build, records } = rollBuild(5, '一阶');
+    expect(FEATURE_TAGS).toContain(build.队友标签);
+    expect(build.队友标签骰).toBeGreaterThanOrEqual(1);
+    expect(build.队友标签骰).toBeLessThanOrEqual(50);
+    expect(build.队友标签).toBe(FEATURE_TAGS[build.队友标签骰 - 1]);
+    const rec = records.find(r => r.标签 === '队友标签')!;
+    expect(rec.表达式).toBe('1d50');
+    expect(rec.映射).toBe(build.队友标签);
+  });
+
+  it('新手副本也投队友标签骰', () => {
+    // 规则里新手副本的队友本就是「来自随机世界观的 IP 角色」, 这颗骰把「随机世界观」具体化
+    const { build, records } = rollBuild(1, '一阶');
+    expect(build.是新手副本).toBe(true);
+    expect(records.some(r => r.标签 === '队友标签')).toBe(true);
+  });
+
+  it('覆盖核心特色标签不会改动队友标签（两颗骰互不相干）', () => {
+    const { build, records } = rollBuild(5, '一阶');
+    const { build: b2 } = applyBuildOverrides(build, records, { 核心特色标签: '赛博朋克/矩阵空间' });
+    expect(b2.队友标签).toBe(build.队友标签);
+    expect(b2.队友标签骰).toBe(build.队友标签骰);
+  });
+
+  it('队友标签可被自选覆盖, 并记为「自选」', () => {
+    const { build, records } = rollBuild(5, '一阶');
+    const { build: b2, records: r2 } = applyBuildOverrides(build, records, { 队友标签: '赛博朋克/矩阵空间' });
+    expect(b2.队友标签).toBe('赛博朋克/矩阵空间');
+    const rec = r2.find(r => r.标签 === '队友标签')!;
+    expect(rec.表达式).toBe('自选');
+    expect(rec.映射).toBe('赛博朋克/矩阵空间');
   });
 });
