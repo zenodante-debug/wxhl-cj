@@ -11,8 +11,11 @@ pnpm-debug.log*
 
 auto-imports.d.ts
 components.d.ts
+<<<<<<< HEAD
 
 # 自由市场运营密钥（本地存放，勿提交）
 cloudflare/wxhl-market/.welfare-key.txt
 # 玩家排行榜管理密钥（本地存放，勿提交）
 cloudflare/wxhl-market/.rank-admin-key.txt
+=======
+>>>>>>> 7f92d0b6cabecacd6ca52f5c77d6f18fa6a3b4b9
