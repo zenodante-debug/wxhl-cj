@@ -3,6 +3,8 @@
 // 纯函数，不碰酒馆接口
 // ================================================================
 
+import { rollDie } from './dice';
+
 /** 位阶修正值系数（世界书原文：1、2、4、7、11，对应 1~5 阶，超脱 20） */
 const 位阶系数表: Record<string, number> = {
   一阶: 1,
@@ -21,4 +23,12 @@ export function 属性修正值(实际属性值: number, 阶位: string): number
   const 系数 = 位阶系数表[阶位];
   if (系数 === undefined) throw new Error(`未知阶位: ${阶位}`);
   return (实际属性值 - 5) * 系数;
+}
+
+/**
+ * 先攻判定 = 1d20 + AGI修正
+ * 世界书原文：每回合开始，全体投 D20 + AGI修正；相同则AGI属性高者优先；降序排列行动顺序
+ */
+export function 先攻判定(AGI实际值: number, 阶位: string): number {
+  return rollDie(20) + 属性修正值(AGI实际值, 阶位);
 }
