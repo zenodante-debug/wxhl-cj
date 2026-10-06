@@ -49,13 +49,18 @@ export async function 读取战斗单位(路径: string): Promise<战斗单位> 
   }
 
   // 副本角色.骨卫兵 / 小队.成员.白露露 / 其他契约者.某某
+  // 容器路径段数可变（'小队.成员' 是两段），最后一段是名称，其余是容器路径
   const parts = 路径.split('.');
-  if (parts.length !== 2) {
+  if (parts.length < 2) {
     throw new Error(`无效的单位路径: ${路径}`);
   }
 
-  const [容器, 名称] = parts;
-  const 实体 = stat_data.契约者[容器]?.[名称];
+  const 名称 = parts[parts.length - 1];
+  const 容器 = parts.slice(0, -1).join('.');
+  const 容器对象 = 容器
+    .split('.')
+    .reduce<any>((node, key) => (node ? node[key] : undefined), stat_data.契约者);
+  const 实体 = 容器对象?.[名称];
 
   if (!实体) {
     throw new Error(`单位不存在: ${路径}`);
