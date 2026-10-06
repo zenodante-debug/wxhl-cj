@@ -67,3 +67,51 @@ export function 射程校验(武器: 武器类型 | string, 距离: number): boo
 export function 移动距离计算(AGI实际值: number, 阶位: string, 移动距离额外加成: number): number {
   return 5 + 属性修正值(AGI实际值, 阶位) + 移动距离额外加成;
 }
+
+/**
+ * 移动额度重置
+ * 世界书原文：本回合额度 = 【移动距离】（面板字段），每回合重置为满额，不累积
+ */
+export function 移动额度重置(移动距离: number): number {
+  return 移动距离;
+}
+
+/**
+ * 移动额度消耗
+ * 世界书原文：移动、主要、次要行动在同一回合内任意顺序执行；额度可分段花（移动→攻击→再移动）
+ */
+export function 移动额度消耗(当前额度: number, 消耗: number): number {
+  if (消耗 > 当前额度) {
+    throw new Error(`移动额度不足: 当前 ${当前额度} 米, 需要 ${消耗} 米`);
+  }
+  return 当前额度 - 消耗;
+}
+
+interface 借机攻击免除 {
+  位移技能?: string;      // 脱离者用位移技能（写技能名）
+  脱离准备?: boolean;     // 脱离者以次要行动做脱离准备
+  对方反应已用?: boolean; // 对方本回合已用过反应动作
+  对方被控?: boolean;     // 对方被控/失能
+}
+
+/**
+ * 借机攻击判定
+ * 世界书原文：脱离贴身/近距时触发，消耗对方的【反应动作】（每回合仅 1 次）
+ * 免除只有四种：①位移技能 ②脱离准备 ③对方反应已用 ④对方被控/失能
+ */
+export function 借机攻击判定(原距离: number, 新距离: number, 免除: 借机攻击免除): boolean {
+  const 原带 = 距离带(原距离);
+  const 新带 = 距离带(新距离);
+
+  // 只有从贴身/近距脱离到更远带才触发
+  const 从近战脱离 = (原带 === '贴身' || 原带 === '近距') && (新带 !== '贴身' && 新带 !== '近距');
+  if (!从近战脱离) return false;
+
+  // 检查免除条件
+  if (免除.位移技能) return false;
+  if (免除.脱离准备) return false;
+  if (免除.对方反应已用) return false;
+  if (免除.对方被控) return false;
+
+  return true;
+}

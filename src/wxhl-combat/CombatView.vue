@@ -29,15 +29,17 @@
     </div>
 
     <div class="combat-info">
-      <div>玩家移动距离: {{ 玩家移动距离 }}米</div>
+      <div>玩家移动距离: {{ 玩家移动距离 }}米 | 当前额度: {{ 状态.单位.玩家.额度 }}米</div>
       <div>近战可攻击: {{ 近战可攻击 ? '✔' : '✗' }}</div>
     </div>
 
     <div class="combat-actions">
       <button @click="开始回合">开始回合</button>
       <button @click="攻击" :disabled="!近战可攻击">攻击</button>
-      <button @click="移动('前进')">前进 5米</button>
-      <button @click="移动('后退')">后退 5米</button>
+      <button @click="移动('前进', 5)">前进 5米</button>
+      <button @click="移动('前进', 10)">前进 10米</button>
+      <button @click="移动('后退', 5)">后退 5米</button>
+      <button @click="移动('后退', 10)">后退 10米</button>
     </div>
 
     <div class="combat-log">
@@ -52,7 +54,7 @@
 import { ref, computed } from 'vue';
 import { 推进 } from '../engine/turn';
 import { 攻击结算 } from '../engine/damage';
-import { 射程校验, 移动距离计算, 距离带 } from '../engine/distance';
+import { 射程校验, 移动距离计算, 距离带, 移动额度消耗, 借机攻击判定 } from '../engine/distance';
 import { 行动槽消耗, 行动槽重置 } from '../engine/actionEconomy';
 import type { 战斗状态, 结算步骤 } from '../types';
 
@@ -181,7 +183,7 @@ function 攻击() {
   }
 }
 
-function 移动(方向: '前进' | '后退') {
+function 移动(方向: '前进' | '后退', 移动量: number) {
   const 玩家 = 状态.value.单位.玩家;
   const 敌人 = 状态.value.单位.敌人;
 
@@ -194,24 +196,47 @@ function 移动(方向: '前进' | '后退') {
     return;
   }
 
+  // 检查移动额度
+  if (移动量 > 玩家.额度) {
+    步骤列表.value.push({
+      类: '移动',
+      内容: `❌ 移动额度不足：当前 ${玩家.额度} 米，需要 ${移动量} 米`,
+    });
+    return;
+  }
+
+  const 原距离 = 敌人.距离;
+  let 新距离 = 原距离;
+
+  if (方向 === '前进') {
+    新距离 = Math.max(原距离 - 移动量, 0);
+  } else {
+    新距离 = 原距离 + 移动量;
+  }
+
+  // 检查借机攻击
+  const 触发借机 = 借机攻击判定(原距离, 新距离, {});
+  if (触发借机 && 敌人.行动槽.反应 > 0) {
+    敌人.行动槽 = 行动槽消耗(敌人.行动槽, '反应动作');
+    步骤列表.value.push({
+      类: '借机攻击',
+      内容: `⚠ 触发借机攻击：敌人用反应动作反击`,
+    });
+  }
+
   // 扣行动槽
   玩家.行动槽 = 行动槽消耗(玩家.行动槽, '移动');
 
-  // 移动 5 米
-  const 移动量 = 5;
-  if (方向 === '前进') {
-    敌人.距离 = Math.max(敌人.距离 - 移动量, 0);
-    步骤列表.value.push({
-      类: '移动',
-      内容: `→ 玩家前进 ${移动量}米，敌人距离 ${敌人.距离}米`,
-    });
-  } else {
-    敌人.距离 += 移动量;
-    步骤列表.value.push({
-      类: '移动',
-      内容: `← 玩家后退 ${移动量}米，敌人距离 ${敌人.距离}米`,
-    });
-  }
+  // 扣移动额度
+  玩家.额度 = 移动额度消耗(玩家.额度, 移动量);
+
+  // 更新距离
+  敌人.距离 = 新距离;
+
+  步骤列表.value.push({
+    类: '移动',
+    内容: `${方向 === '前进' ? '→' : '←'} 玩家${方向} ${移动量}米（额度 ${玩家.额度 + 移动量}→${玩家.额度}），敌人距离 ${敌人.距离}米`,
+  });
 }
 </script>
 
