@@ -3,9 +3,10 @@
 // MVU 变量读写 / 脚本变量读写 / AI 调用
 // ================================================================
 
-import type { 战斗单位 } from './types';
+import type { 战斗单位, 战斗解释 } from './types';
 import { sanitizeJsonSchema } from '@/wxhl-003/schemaSanitize';
 import type { ApiConfig } from './settings';
+import { 构建翻译提示词, 解析翻译结果 } from './ai/skillInterpreter';
 
 /**
  * 从 MVU 变量读取战斗单位
@@ -259,4 +260,31 @@ export async function aiGenerate(
     }
   }
   throw new Error(lastErr || '生成失败');
+}
+
+/** 从设置读快路 API 配置（直接读脚本变量，避免 store 循环依赖） */
+function 读快路(): ApiConfig {
+  const v = getVariables({ type: 'script', script_id: getScriptId() }) as any;
+  const 快路 = v?.快路 || {};
+  return {
+    url: 快路.url || '',
+    apiKey: 快路.apiKey || '',
+    model: 快路.model || '',
+    timeout: 快路.timeout ?? 30000,
+  };
+}
+
+/** 一次性翻译：把每个技能翻成战斗解释。API 未配置时抛错。 */
+export async function 翻译战斗解释(技能列表: any[]): Promise<Record<string, 战斗解释>> {
+  const cfg = 读快路();
+  if (!cfg.url || !cfg.apiKey) {
+    throw new Error('API 未配置：请先在设置里配置 API');
+  }
+
+  const 结果: Record<string, 战斗解释> = {};
+  for (const 技能 of 技能列表) {
+    const raw = await aiGenerate(cfg, 构建翻译提示词(技能));
+    结果[技能.名称] = 解析翻译结果(raw);
+  }
+  return 结果;
 }
