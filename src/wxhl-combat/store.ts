@@ -407,9 +407,15 @@ export async function 翻译战斗解释(技能列表: any[]): Promise<Record<st
 
   const 结果: Record<string, 战斗解释> = {};
   for (const 技能 of 技能列表) {
-    // 必须传 schema —— 否则 aiGenerate 缺省直接返回首答，非法 JSON 不会重试
-    const raw = await aiGenerate(cfg, 构建翻译提示词(技能), 战斗解释_SCHEMA);
-    结果[技能.名称] = 解析翻译结果(raw);
+    // 逐技能隔离：单个技能三次重试都翻不出 JSON，不该拖垮整场开战（其余技能照常）。
+    // 失败只记警告并跳过 —— 该技能不进结果映射，调用方（CombatView）据此在 UI 里点明「本场不可用」。
+    try {
+      // 必须传 schema —— 否则 aiGenerate 缺省直接返回首答，非法 JSON 不会重试
+      const raw = await aiGenerate(cfg, 构建翻译提示词(技能), 战斗解释_SCHEMA);
+      结果[技能.名称] = 解析翻译结果(raw);
+    } catch (e: any) {
+      console.warn('[wxhl-combat] 技能翻译失败', 技能?.名称, e);
+    }
   }
   return 结果;
 }

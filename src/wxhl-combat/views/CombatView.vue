@@ -93,6 +93,7 @@ async function 开始战斗(选择: { id: string; 阵营: '我方' | '敌方' }[
     }
 
     // 一次性翻译（整场缓存）。API 未配置时抛「API 未配置：请先在设置里配置 API」
+    // 逐技能隔离（翻译器内部已 catch）：某个技能翻不出来 → 不进技能表，这里点名提示，绝不静默吞掉。
     for (const u of 单位列表) {
       const 源 = 效果源[u.id] ?? [];
       if (源.length === 0) {
@@ -100,6 +101,10 @@ async function 开始战斗(选择: { id: string; 阵营: '我方' | '敌方' }[
         continue;
       }
       u.技能 = await 翻译战斗解释(源);
+      const 缺失 = 源.map(s => s.名称).filter(名称 => !(名称 in u.技能));
+      if (缺失.length) {
+        日志.value.push(`技能翻译失败（本场不可用）：${缺失.join('、')}`);
+      }
     }
 
     const 选项 = 开场距离选项().find(o => o.名 === 开场模式) ?? 开场距离选项()[2];
