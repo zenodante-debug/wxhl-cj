@@ -20,14 +20,24 @@
             id === '玩家' ? 玩家属性.HP_最大 : 敌人属性.HP_最大
           }}
         </div>
-        <div class="unit-distance">距离: {{ 单位.距离 }}m</div>
+        <div class="unit-distance">距离: {{ 单位.距离 }}m ({{ id === '敌人' ? 敌人距离带 : '-' }})</div>
         <div class="unit-type">{{ 单位.类型 }}</div>
+        <div class="unit-actions">
+          行动槽: 主{{ 单位.行动槽.主要 }} 次{{ 单位.行动槽.次要 }} 移{{ 单位.行动槽.移动 }} 反{{ 单位.行动槽.反应 }}
+        </div>
       </div>
+    </div>
+
+    <div class="combat-info">
+      <div>玩家移动距离: {{ 玩家移动距离 }}米</div>
+      <div>近战可攻击: {{ 近战可攻击 ? '✔' : '✗' }}</div>
     </div>
 
     <div class="combat-actions">
       <button @click="开始回合">开始回合</button>
-      <button @click="攻击">攻击</button>
+      <button @click="攻击" :disabled="!近战可攻击">攻击</button>
+      <button @click="移动('前进')">前进 5米</button>
+      <button @click="移动('后退')">后退 5米</button>
     </div>
 
     <div class="combat-log">
@@ -39,9 +49,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue';
+import { ref, computed } from 'vue';
 import { 推进 } from '../engine/turn';
 import { 攻击结算 } from '../engine/damage';
+import { 射程校验, 移动距离计算, 距离带 } from '../engine/distance';
+import { 行动槽消耗, 行动槽重置 } from '../engine/actionEconomy';
 import type { 战斗状态, 结算步骤 } from '../types';
 
 const 状态 = ref<战斗状态>({
@@ -85,43 +97,119 @@ const 状态 = ref<战斗状态>({
 });
 
 // 临时属性数据（第一阶段硬编码）
-const 玩家属性 = {
+const 玩家属性 = ref({
   属性: { 实际: { STR: 25, AGI: 20, CON: 20, PER: 15 } },
   阶位: '二阶',
   HP_当前: 100,
   HP_最大: 100,
-};
+});
 
-const 敌人属性 = {
+const 敌人属性 = ref({
   属性: { 实际: { STR: 15, AGI: 10, CON: 12, PER: 8 } },
   阶位: '一阶',
   HP_当前: 80,
   HP_最大: 80,
   闪避值: 12,
   防御: 3,
-};
+});
 
 const 步骤列表 = ref<结算步骤[]>([]);
 
+// 计算移动距离
+const 玩家移动距离 = computed(() => {
+  return 移动距离计算(玩家属性.value.属性.实际.AGI, 玩家属性.value.阶位, 0);
+});
+
+// 计算距离带
+const 敌人距离带 = computed(() => {
+  return 距离带(状态.value.单位.敌人.距离);
+});
+
+// 检查近战是否可以攻击
+const 近战可攻击 = computed(() => {
+  return 射程校验('近战', 状态.value.单位.敌人.距离);
+});
+
 function 开始回合() {
+  // 重置行动槽
+  状态.value.单位.玩家.行动槽 = 行动槽重置(状态.value.单位.玩家.行动槽);
+  状态.value.单位.敌人.行动槽 = 行动槽重置(状态.value.单位.敌人.行动槽);
+
+  // 重置移动额度
+  状态.value.单位.玩家.额度 = 玩家移动距离.value;
+
   const { 状态: 新状态, 步骤 } = 推进(状态.value, { 类: '开始回合' });
   状态.value = 新状态;
   步骤列表.value.push(...步骤);
 }
 
 function 攻击() {
-  const 结果 = 攻击结算(玩家属性, 敌人属性);
-
-  if (结果.命中) {
-    敌人属性.HP_当前 = 结果.HP_新值;
+  // 检查射程
+  if (!近战可攻击.value) {
     步骤列表.value.push({
       类: '攻击',
-      内容: `玩家命中敌人，造成 ${结果.伤害} 点伤害 → 敌人 HP ${结果.HP_新值}/${敌人属性.HP_最大}`,
+      内容: `❌ 射程不足：敌人在 ${状态.value.单位.敌人.距离}米（${敌人距离带.value}），近战无法攻击`,
+    });
+    return;
+  }
+
+  // 检查行动槽
+  if (状态.value.单位.玩家.行动槽.主要 <= 0) {
+    步骤列表.value.push({
+      类: '攻击',
+      内容: '❌ 行动槽不足：主要行动已用完',
+    });
+    return;
+  }
+
+  // 扣行动槽
+  状态.value.单位.玩家.行动槽 = 行动槽消耗(状态.value.单位.玩家.行动槽, '主要行动');
+
+  const 结果 = 攻击结算(玩家属性.value, 敌人属性.value);
+
+  if (结果.命中) {
+    敌人属性.value.HP_当前 = 结果.HP_新值;
+    步骤列表.value.push({
+      类: '攻击',
+      内容: `✔ 玩家命中敌人，造成 ${结果.伤害} 点伤害 → 敌人 HP ${结果.HP_新值}/${敌人属性.value.HP_最大}`,
     });
   } else {
     步骤列表.value.push({
       类: '攻击',
-      内容: '玩家攻击未命中',
+      内容: '✗ 玩家攻击未命中',
+    });
+  }
+}
+
+function 移动(方向: '前进' | '后退') {
+  const 玩家 = 状态.value.单位.玩家;
+  const 敌人 = 状态.value.单位.敌人;
+
+  // 检查行动槽
+  if (玩家.行动槽.移动 <= 0) {
+    步骤列表.value.push({
+      类: '移动',
+      内容: '❌ 行动槽不足：移动已用完',
+    });
+    return;
+  }
+
+  // 扣行动槽
+  玩家.行动槽 = 行动槽消耗(玩家.行动槽, '移动');
+
+  // 移动 5 米
+  const 移动量 = 5;
+  if (方向 === '前进') {
+    敌人.距离 = Math.max(敌人.距离 - 移动量, 0);
+    步骤列表.value.push({
+      类: '移动',
+      内容: `→ 玩家前进 ${移动量}米，敌人距离 ${敌人.距离}米`,
+    });
+  } else {
+    敌人.距离 += 移动量;
+    步骤列表.value.push({
+      类: '移动',
+      内容: `← 玩家后退 ${移动量}米，敌人距离 ${敌人.距离}米`,
     });
   }
 }
@@ -161,7 +249,7 @@ function 攻击() {
   padding: 12px;
   border: 1px solid #333;
   border-radius: 4px;
-  min-width: 120px;
+  min-width: 140px;
 
   &.enemy {
     border-color: #a33;
@@ -181,10 +269,37 @@ function 攻击() {
     color: #aaa;
   }
 
+  .unit-distance {
+    font-size: 12px;
+    color: #888;
+    margin-top: 4px;
+  }
+
   .unit-type {
     font-size: 12px;
     color: #888;
     margin-top: 4px;
+  }
+
+  .unit-actions {
+    font-size: 11px;
+    color: #666;
+    margin-top: 6px;
+    padding-top: 6px;
+    border-top: 1px solid #333;
+  }
+}
+
+.combat-info {
+  margin-bottom: 16px;
+  padding: 8px;
+  background: #222;
+  border-radius: 4px;
+  font-size: 14px;
+  color: #aaa;
+
+  div {
+    padding: 2px 0;
   }
 }
 
