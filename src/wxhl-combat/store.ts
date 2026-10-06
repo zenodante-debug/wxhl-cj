@@ -334,7 +334,7 @@ function 战斗状态转纯对象(状态: 战斗状态): any {
   return {
     ...状态,
     单位: Object.fromEntries(
-      Object.entries(状态.单位).map(([k, u]) => [k, { ...u, 词条: [...u.词条] }]),
+      Object.entries(状态.单位).map(([k, u]) => [k, { ...u, 词条: [...(u.词条 ?? [])] }]),
     ),
   };
 }
