@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { 初始化战斗状态 } from '../engine/setup';
-import { 读取单位效果源 } from '../store';
+import { 读取单位效果源, 读取战斗单位 } from '../store';
 import type { 战斗单位 } from '../types';
 
 function 造单位(id: string, AGI: number, 阶位: string): 战斗单位 {
@@ -43,6 +43,41 @@ describe('setup · 初始化战斗状态', () => {
   it('行动槽重置为满（免费不重置）', () => {
     const 状态 = 初始化战斗状态([造单位('契约者', 10, '一阶')], 10);
     expect(状态.单位['契约者'].行动槽).toEqual({ 主要: 1, 次要: 1, 移动: 1, 反应: 1, 免费: 999 });
+  });
+});
+
+describe('store · 读取战斗单位 · 主武器', () => {
+  function 挂变量(主武器: any) {
+    (globalThis as any).waitGlobalInitialized = async () => {};
+    (globalThis as any).getVariables = () => ({
+      stat_data: {
+        契约者: {
+          头部: { 阶位: '一阶' },
+          属性: { 实际: { STR: 10, AGI: 10, CON: 10, PER: 10 } },
+          衍生属性: {},
+          装备: { 主武器 },
+        },
+      },
+    });
+  }
+
+  it('读实体.装备.主武器 的 伤害骰/倍率/强化等级', async () => {
+    挂变量({ 名称: '骨刃', 伤害骰: '2d8', 倍率: 1.5, 强化等级: 2 });
+
+    const u = await 读取战斗单位('契约者');
+
+    expect(u.主武器).toEqual({ 伤害骰: '2d8', 倍率: 1.5, 强化等级: 2 });
+  });
+
+  it('未装备（名称「无」）/ 伤害骰是「无」/ 非法骰式 → 主武器 undefined', async () => {
+    挂变量({ 名称: '无', 伤害骰: '2d8', 倍率: 1, 强化等级: 0 });
+    expect((await 读取战斗单位('契约者')).主武器).toBeUndefined();
+
+    挂变量({ 名称: '骨刃', 伤害骰: '无', 倍率: 1, 强化等级: 0 });
+    expect((await 读取战斗单位('契约者')).主武器).toBeUndefined();
+
+    挂变量({ 名称: '骨刃', 伤害骰: '2x8', 倍率: 1, 强化等级: 0 });
+    expect((await 读取战斗单位('契约者')).主武器).toBeUndefined();
   });
 });
 
@@ -89,6 +124,7 @@ describe('store · 读取单位效果源', () => {
     expect(出[0]).toHaveProperty('类型');
     expect(出[0]).toHaveProperty('行动类型');
     expect(出[0]).toHaveProperty('关联属性');
+    expect(出[0]).toHaveProperty('阶位');
     expect(出[0]).toHaveProperty('消耗');
     expect(出[0]).toHaveProperty('冷却');
     expect(出[0]).toHaveProperty('射程');

@@ -9,12 +9,36 @@ import type { ApiConfig } from './settings';
 import { 构建翻译提示词, 解析翻译结果, 战斗解释_SCHEMA } from './ai/skillInterpreter';
 import { 构建收尾提示词 } from './ai/aftermath';
 import { buff转字符串 } from './engine/buffMapper';
+import { 解析伤害骰 } from './engine/damage';
 import { 读设置 } from './settingsStore';
 
 /** 数值兜底：只接受有限数（合法的 0 与负数照收），其余（undefined/NaN/字符串）退回兜底值。 */
 function 读数值(o: any, k: string, 兜底: number): number {
   const v = Number(o?.[k]);
   return Number.isFinite(v) ? v : 兜底;
+}
+
+/**
+ * 读主武器（`实体.装备.主武器`）。
+ * 未装备 / 空槽（名称 '无'）/ 伤害骰缺失或非法 → 返回 undefined（退化为徒手），
+ * **绝不让非法骰式流进 `解析伤害骰` 在结算时抛错**。
+ */
+function 读主武器(槽: any): { 伤害骰: string; 倍率: number; 强化等级: number } | undefined {
+  if (!槽 || typeof 槽 !== 'object' || !槽.名称 || 槽.名称 === '无') return undefined;
+
+  const 伤害骰 = typeof 槽.伤害骰 === 'string' ? 槽.伤害骰.trim() : '';
+  if (!伤害骰 || 伤害骰 === '无') return undefined;
+  try {
+    解析伤害骰(伤害骰);
+  } catch {
+    return undefined;
+  }
+
+  return {
+    伤害骰,
+    倍率: 读数值(槽, '倍率', 0),
+    强化等级: 读数值(槽, '强化等级', 0),
+  };
 }
 
 /** 从 stat_data 定位一个实体。返回实体与容器路径（'契约者本体' 或容器名如 '副本角色'）。 */
@@ -89,6 +113,7 @@ function 实体转战斗单位(实体: any, id: string, 阵营: '我方' | '敌�
     资源: {},
     词条: new Set(),
     技能: {},
+    主武器: 读主武器(实体.装备?.主武器),
   };
 }
 
@@ -119,6 +144,8 @@ export interface 单位效果源 {
   类型: string;
   行动类型: string;
   关联属性: string;
+  /** 技能/装备的阶位（原文，如 '一阶'）—— 翻译器据此取同阶伤害倍率与技能阶位序数 */
+  阶位: string;
   消耗: string;
   冷却: string;
   射程: string;
@@ -133,6 +160,7 @@ function 技能条目转效果源(名称: string, s: any): 单位效果源 {
     类型: s?.类型 ?? '',
     行动类型: s?.行动类型 ?? '',
     关联属性: s?.关联属性 ?? '',
+    阶位: s?.阶位 ?? '',
     消耗: s?.消耗 ?? '',
     冷却: s?.冷却 ?? '',
     射程: s?.射程 ?? '',
@@ -169,6 +197,7 @@ export async function 读取单位效果源(路径: string): Promise<单位效�
       类型: '装备',
       行动类型: '无',
       关联属性: e.主属性 ?? '',
+      阶位: e.阶位 ?? '',
       消耗: '无',
       冷却: '无',
       射程: '自身',
@@ -189,6 +218,7 @@ export async function 读取单位效果源(路径: string): Promise<单位效�
         类型: 标签,
         行动类型: '无',
         关联属性: '',
+        阶位: '',
         消耗: '无',
         冷却: '无',
         射程: '自身',
