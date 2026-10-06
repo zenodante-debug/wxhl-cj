@@ -7,6 +7,7 @@ import type { 战斗单位, 战斗解释, 战斗状态, 结算步骤 } from './t
 import { sanitizeJsonSchema } from '@/wxhl-003/schemaSanitize';
 import type { ApiConfig } from './settings';
 import { 构建翻译提示词, 解析翻译结果, 战斗解释_SCHEMA } from './ai/skillInterpreter';
+import { 构建敌方意图提示词, 解析敌方意图, type 敌方意图 } from './ai/enemyTactics';
 import { 构建收尾提示词 } from './ai/aftermath';
 import { buff转字符串 } from './engine/buffMapper';
 import { 解析伤害骰 } from './engine/damage';
@@ -411,6 +412,19 @@ export async function 翻译战斗解释(技能列表: any[]): Promise<Record<st
     结果[技能.名称] = 解析翻译结果(raw);
   }
   return 结果;
+}
+
+/**
+ * 调快路 AI 为敌方单位生成行动意图（每回合一次）。
+ * API 未配置时抛错；AI 回复不是合法 JSON 数组时由 `解析敌方意图` 抛错。
+ * 注意：**不传 jsonSchema** —— 依赖 `aiGenerate` 的「无 schema 直返首答」路径，
+ * 形状校验交给 `解析敌方意图`（非数组 / 缺字段都会抛错，由调用方兜底记日志）。
+ */
+export async function 生成敌方意图(状态: 战斗状态): Promise<敌方意图[]> {
+  const cfg = 读设置().快路;
+  if (!cfg.url || !cfg.apiKey) throw new Error('API 未配置：请先在设置里配置 API');
+  const raw = await aiGenerate(cfg, 构建敌方意图提示词(状态));
+  return 解析敌方意图(raw);
 }
 
 /**

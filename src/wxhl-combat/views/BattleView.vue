@@ -85,7 +85,7 @@
             <option v-for="e in 敌方单位名" :key="e" :value="e">{{ e }}</option>
           </select>
         </label>
-        <button class="execute-btn" :disabled="!可提交(槽填写)" @click="执行本轮">执行本轮</button>
+        <button class="execute-btn" :disabled="!可提交(槽填写) || 禁用" @click="执行本轮">执行本轮</button>
       </div>
     </div>
 
@@ -108,6 +108,8 @@ const props = defineProps<{
   日志: string[];
   /** 敌方意图（阶段 ③ 预公开）；未开战时为空数组 */
   敌方意图?: 敌方意图[];
+  /** 上层忙碌（回合编排 / 本轮结算中）→ 禁用「执行本轮」，挡异步重入 */
+  禁用?: boolean;
 }>();
 
 const emit = defineEmits<{ (e: '执行本轮', 填写: 行动槽填写, 目标: string): void }>();
