@@ -38,6 +38,7 @@ export interface 战斗单位 {
   濒死: { 成功: number; 失败: number } | null;
   资源: Record<string, number>;         // 任意命名资源（保存/充能/加护/冻结标记…）
   词条: Set<string>; // 标签（不可被常规攻击命中/禁位移/禁回复…）
+  技能: Record<string, 战斗解释>; // 一次性翻译出的「技能名 → 战斗解释」；无技能时为空对象 {}
 }
 
 export interface 行动槽 {

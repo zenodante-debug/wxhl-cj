@@ -33,6 +33,7 @@ describe('enemyTactics · 敌方意图', () => {
           濒死: null,
           资源: {},
           词条: new Set(),
+          技能: {},
         },
         玩家: {
           id: '玩家',
@@ -58,6 +59,7 @@ describe('enemyTactics · 敌方意图', () => {
           濒死: null,
           资源: {},
           词条: new Set(),
+          技能: {},
         },
       },
       待决: null,

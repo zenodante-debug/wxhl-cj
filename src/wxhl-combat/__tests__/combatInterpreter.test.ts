@@ -36,6 +36,7 @@ describe('combatInterpreter · 规则解释器', () => {
       濒死: null,
       资源: {},
       词条: new Set(),
+      技能: {},
     };
 
     const 结果 = 执行规则(规则, 单位, 单位);
@@ -76,6 +77,7 @@ describe('combatInterpreter · 规则解释器', () => {
       濒死: null,
       资源: {},
       词条: new Set(),
+      技能: {},
     };
 
     const 结果 = 执行规则(规则, 单位, 单位);
@@ -117,6 +119,7 @@ describe('combatInterpreter · 规则解释器', () => {
       濒死: null,
       资源: { 保存: 15 },
       词条: new Set(),
+      技能: {},
     };
 
     const 目标: 战斗单位 = {
@@ -143,6 +146,7 @@ describe('combatInterpreter · 规则解释器', () => {
       濒死: null,
       资源: {},
       词条: new Set(),
+      技能: {},
     };
 
     const 结果 = 执行规则(规则, 单位, 目标);
@@ -186,6 +190,7 @@ describe('combatInterpreter · 规则解释器', () => {
       濒死: null,
       资源: { 保存: 5 },
       词条: new Set(),
+      技能: {},
     };
 
     const 目标: 战斗单位 = {
@@ -212,6 +217,7 @@ describe('combatInterpreter · 规则解释器', () => {
       濒死: null,
       资源: {},
       词条: new Set(),
+      技能: {},
     };
 
     const 结果 = 执行规则(规则, 单位, 目标);

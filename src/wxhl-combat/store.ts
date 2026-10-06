@@ -51,6 +51,7 @@ export async function 读取战斗单位(路径: string): Promise<战斗单位> 
       濒死: null,
       资源: {},
       词条: new Set(),
+      技能: {},
     };
   }
 
@@ -102,6 +103,7 @@ export async function 读取战斗单位(路径: string): Promise<战斗单位> 
     濒死: null,
     资源: {},
     词条: new Set(),
+    技能: {},
   };
 }
 
