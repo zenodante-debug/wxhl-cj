@@ -46,6 +46,7 @@
       <button @click="移动('前进', 10)">前进 10米</button>
       <button @click="移动('后退', 5)">后退 5米</button>
       <button @click="移动('后退', 10)">后退 10米</button>
+      <button @click="结束战斗">结束战斗</button>
     </div>
 
     <div class="combat-log">
@@ -62,6 +63,8 @@ import { 推进 } from '../engine/turn';
 import { 攻击结算 } from '../engine/damage';
 import { 射程校验, 移动距离计算, 距离带, 移动额度消耗, 借机攻击判定 } from '../engine/distance';
 import { 行动槽消耗, 行动槽重置 } from '../engine/actionEconomy';
+import { 构建敌方意图提示词, 解析敌方意图 } from '../ai/enemyTactics';
+import { 构建收尾提示词 } from '../ai/aftermath';
 import type { 战斗状态, 结算步骤 } from '../types';
 
 const 状态 = ref<战斗状态>({
@@ -149,6 +152,24 @@ function 开始回合() {
   const { 状态: 新状态, 步骤 } = 推进(状态.value, { 类: '开始回合' });
   状态.value = 新状态;
   步骤列表.value.push(...步骤);
+
+  // 模拟敌方意图（开发阶段）
+  const 敌方意图提示词 = 构建敌方意图提示词(状态.value);
+  console.log('敌方意图提示词:', 敌方意图提示词);
+  步骤列表.value.push({
+    类: '敌方意图',
+    内容: '敌方意图已生成（开发阶段：未实际调用 AI）',
+  });
+}
+
+function 结束战斗() {
+  // 生成收尾正文（开发阶段）
+  const 收尾提示词 = 构建收尾提示词(步骤列表.value);
+  console.log('收尾提示词:', 收尾提示词);
+  步骤列表.value.push({
+    类: '收尾',
+    内容: '收尾正文已生成（开发阶段：未实际调用 AI）',
+  });
 }
 
 function 攻击() {
