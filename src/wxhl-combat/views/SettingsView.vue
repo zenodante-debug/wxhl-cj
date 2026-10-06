@@ -17,7 +17,7 @@
         模型
         <input v-model="store.settings[路].model" placeholder="模型名" />
       </label>
-      <button class="copy-btn" @click="复制(路)">把快路复制过来</button>
+      <button v-if="路 === '强路'" class="copy-btn" @click="复制(路)">把快路复制过来</button>
     </section>
   </div>
 </template>
