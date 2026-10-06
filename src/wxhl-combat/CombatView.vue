@@ -59,13 +59,13 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { 推进 } from '../engine/turn';
-import { 攻击结算 } from '../engine/damage';
-import { 射程校验, 移动距离计算, 距离带, 移动额度消耗, 借机攻击判定 } from '../engine/distance';
-import { 行动槽消耗, 行动槽重置 } from '../engine/actionEconomy';
-import { 构建敌方意图提示词, 解析敌方意图 } from '../ai/enemyTactics';
-import { 构建收尾提示词 } from '../ai/aftermath';
-import type { 战斗状态, 结算步骤 } from '../types';
+import { 推进 } from './engine/turn';
+import { 攻击结算 } from './engine/damage';
+import { 射程校验, 移动距离计算, 距离带, 移动额度消耗, 借机攻击判定 } from './engine/distance';
+import { 行动槽消耗, 行动槽重置 } from './engine/actionEconomy';
+import { 构建敌方意图提示词, 解析敌方意图 } from './ai/enemyTactics';
+import { 构建收尾提示词 } from './ai/aftermath';
+import type { 战斗状态, 结算步骤 } from './types';
 
 const 状态 = ref<战斗状态>({
   进行中: true,
