@@ -25,6 +25,12 @@
         <div class="unit-actions">
           行动槽: 主{{ 单位.行动槽.主要 }} 次{{ 单位.行动槽.次要 }} 移{{ 单位.行动槽.移动 }} 反{{ 单位.行动槽.反应 }}
         </div>
+        <div v-if="单位.状态.length > 0" class="unit-status">
+          状态: {{ 单位.状态.map(s => s.名).join(', ') }}
+        </div>
+        <div v-if="Object.keys(单位.资源).length > 0" class="unit-resources">
+          资源: {{ Object.entries(单位.资源).map(([k, v]) => `${k}:${v}`).join(', ') }}
+        </div>
       </div>
     </div>
 
@@ -312,6 +318,18 @@ function 移动(方向: '前进' | '后退', 移动量: number) {
     margin-top: 6px;
     padding-top: 6px;
     border-top: 1px solid #333;
+  }
+
+  .unit-status {
+    font-size: 11px;
+    color: #fa0;
+    margin-top: 4px;
+  }
+
+  .unit-resources {
+    font-size: 11px;
+    color: #0af;
+    margin-top: 4px;
   }
 }
 
