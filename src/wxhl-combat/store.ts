@@ -8,6 +8,7 @@ import { sanitizeJsonSchema } from '@/wxhl-003/schemaSanitize';
 import type { ApiConfig } from './settings';
 import { 构建翻译提示词, 解析翻译结果, 战斗解释_SCHEMA } from './ai/skillInterpreter';
 import { 构建收尾提示词 } from './ai/aftermath';
+import { buff转字符串 } from './engine/buffMapper';
 import { 读设置 } from './settingsStore';
 
 /**
@@ -300,12 +301,16 @@ export async function 写回战斗结果(
     if (hp.耐力_当前 !== undefined) _.set(data, `stat_data.${路径前缀}.衍生属性.耐力_当前`, hp.耐力_当前);
   }
 
-  // 特殊状态：把战斗里的 状态 写回
+  // 特殊状态：把战斗里的 状态 写回。
+  // 必须用 engine/buffMapper 的 buff转字符串 —— 它是本模块的规范编码器（有单测），
+  // 会把「引擎段」的词条一并编码进去（如 元素崩坏 的 禁回复HP/禁回复MP）。
+  // 手搓 `${层数}层|持续${持续}回合` 会整个丢掉词条，读回时引擎段就没了。
+  // 语义：战斗引擎在战斗期间独占该字段，收尾时按存活状态重写（＝顺带清掉战斗期间已到期的）。
   for (const 单位 of Object.values(状态.单位)) {
     const 路径前缀 = 单位.id === '契约者' ? '契约者' : `契约者.${单位.id}`;
     const 特殊状态: Record<string, string> = {};
     for (const s of 单位.状态) {
-      特殊状态[s.名] = s.层数 !== undefined ? `${s.层数}层|持续${s.持续}回合` : `持续${s.持续}回合`;
+      特殊状态[s.名] = buff转字符串(s);
     }
     _.set(data, `stat_data.${路径前缀}.状态.特殊状态`, 特殊状态);
   }
