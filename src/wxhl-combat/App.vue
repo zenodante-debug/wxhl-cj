@@ -2,23 +2,16 @@
   <div class="wxhl-combat-root">
     <!-- 全屏覆盖层 -->
     <div v-if="visible" class="combat-overlay">
-      <div class="combat-panel">
-        <h1>无限回廊 · 战斗引擎</h1>
-        <p>战斗系统开发中</p>
-        <button @click="visible = false">关闭</button>
-      </div>
+      <CombatView />
     </div>
   </div>
 </template>
 
 <script setup lang="ts">
 import { ref } from 'vue';
+import CombatView from './CombatView.vue';
 
-const visible = ref(false);
-
-// TODO: 战斗状态管理
-// TODO: 开战检测
-// TODO: 战斗 UI
+const visible = ref(true); // 开发阶段默认显示
 </script>
 
 <style scoped lang="scss">
