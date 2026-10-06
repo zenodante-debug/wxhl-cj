@@ -34,4 +34,23 @@ describe('loop · 敌方意图执行', () => {
 
     expect(步骤.some(s => s.内容.includes('跳过'))).toBe(true);
   });
+
+  it('目标写作「玩家」→ 解析到契约者本体，不跳过而是执行行动（happy path）', () => {
+    const 状态 = 造状态();
+    const 意图 = [{ 单位: '骨卫兵', 行动: [{ 类型: '主要行动' as const, 技能: '骨爪撕裂', 目标: '玩家' }] }];
+
+    const { 步骤 } = 跑敌方意图(状态, 意图);
+
+    expect(步骤.some(s => s.内容.includes('跳过'))).toBe(false);
+    expect(步骤.some(s => s.类 === '敌方行动')).toBe(true);
+  });
+
+  it('单位引用一律精确匹配 → 用「卫兵」不能误配到「副本角色.骨卫兵」', () => {
+    const 状态 = 造状态();
+    const 意图 = [{ 单位: '卫兵', 行动: [{ 类型: '移动' as const, 目标: '契约者', 距离: 0 }] }];
+
+    const { 步骤 } = 跑敌方意图(状态, 意图);
+
+    expect(步骤.some(s => s.内容.includes('跳过'))).toBe(true);
+  });
 });
