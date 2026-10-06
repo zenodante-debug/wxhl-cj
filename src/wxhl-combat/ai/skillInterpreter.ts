@@ -91,7 +91,11 @@ export function 解析翻译结果(json: string): 战斗解释 {
 }
 
 /** 战斗解释的 JSON Schema —— 传给 aiGenerate 以启用「非法 JSON 重试」链路。
- *  只约束顶层字段，规则/动作的深层结构由 解析翻译结果 兜底校验。 */
+ *  只约束顶层字段，规则/动作的深层结构由 解析翻译结果 兜底校验。
+ *
+ *  **注意：不要往 properties 里加「部位」。** `sanitizeJsonSchema` 会把每个 object 的 `required`
+ *  覆写成全部 property 键（见 src/wxhl-003/schemaSanitize.ts），所以放进 properties 的键在 wire 上
+ *  就是**必填** —— AI 会为了满足 schema 去猜一个部位，静默吃 ×1.5 / ×2。部位可缺省，故只在提示词里提。 */
 export const 战斗解释_SCHEMA = {
   name: 'combat_interpretation',
   value: {
@@ -108,7 +112,6 @@ export const 战斗解释_SCHEMA = {
       关联属性: { type: 'string' },
       技能阶位: { type: 'number' },
       伤害倍率: { type: 'number' },
-      部位: { type: 'string' },
       规则: { type: 'array' },
       托管: { type: 'array' },
     },

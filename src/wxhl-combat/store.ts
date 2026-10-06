@@ -22,8 +22,11 @@ function 读数值(o: any, k: string, 兜底: number): number {
  * 读主武器（`实体.装备.主武器`）。
  * 未装备 / 空槽（名称 '无'）/ 伤害骰缺失或非法 → 返回 undefined（退化为徒手），
  * **绝不让非法骰式流进 `解析伤害骰` 在结算时抛错**。
+ *
+ * 倍率：卡里 `倍率` 的 zod prefault 是 0 —— 0 与「没写」在存档里分不开，
+ * 而一把伤害骰合法的真武器不该因此把自己归零，所以**非正数一律取中性默认 1.0**。
  */
-function 读主武器(槽: any): { 伤害骰: string; 倍率: number; 强化等级: number } | undefined {
+function 读主武器(槽: any): { 伤害骰: string; 倍率: number; 强化等级: number; 阶位: string } | undefined {
   if (!槽 || typeof 槽 !== 'object' || !槽.名称 || 槽.名称 === '无') return undefined;
 
   const 伤害骰 = typeof 槽.伤害骰 === 'string' ? 槽.伤害骰.trim() : '';
@@ -34,10 +37,13 @@ function 读主武器(槽: any): { 伤害骰: string; 倍率: number; 强化等�
     return undefined;
   }
 
+  const 倍率 = 读数值(槽, '倍率', 1);
+
   return {
     伤害骰,
-    倍率: 读数值(槽, '倍率', 0),
+    倍率: 倍率 > 0 ? 倍率 : 1,
     强化等级: 读数值(槽, '强化等级', 0),
+    阶位: typeof 槽.阶位 === 'string' ? 槽.阶位 : '',
   };
 }
 

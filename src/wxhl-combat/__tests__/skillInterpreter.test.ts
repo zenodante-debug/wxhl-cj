@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { 构建翻译提示词, 解析翻译结果 } from '../ai/skillInterpreter';
+import { 构建翻译提示词, 解析翻译结果, 战斗解释_SCHEMA } from '../ai/skillInterpreter';
 
 describe('skillInterpreter · 技能翻译', () => {
   it('构建翻译提示词：包含技能信息', () => {
@@ -18,6 +18,32 @@ describe('skillInterpreter · 技能翻译', () => {
     expect(提示词).toContain('裂骨重击');
     expect(提示词).toContain('主要行动');
     expect(提示词).toContain('碎骨挥击');
+  });
+
+  it('构建翻译提示词：带上阶位与伤害倍率口径（同阶区间表）', () => {
+    const 提示词 = 构建翻译提示词({ 名称: '裂骨重击', 阶位: '二阶' });
+
+    expect(提示词).toContain('阶位: 二阶');
+    expect(提示词).toContain('技能伤害 = 关联属性修正值 × 伤害倍率');
+    expect(提示词).toContain('二阶 0.9~1.8');
+    expect(提示词).toContain('"技能阶位"');
+    expect(提示词).toContain('"伤害倍率"');
+  });
+
+  it('schema：关联属性/技能阶位/伤害倍率在 properties 且必填；**部位不出现**', () => {
+    const 属性集 = Object.keys(战斗解释_SCHEMA.value.properties);
+
+    expect(属性集).toContain('关联属性');
+    expect(属性集).toContain('技能阶位');
+    expect(属性集).toContain('伤害倍率');
+    expect(战斗解释_SCHEMA.value.required).toContain('关联属性');
+    expect(战斗解释_SCHEMA.value.required).toContain('技能阶位');
+    expect(战斗解释_SCHEMA.value.required).toContain('伤害倍率');
+
+    // 部位只在提示词里提，不进 schema —— sanitizeJsonSchema 会把 properties 全量塞进 required，
+    // 一旦放进 schema，AI 就会为了满足 schema 去猜一个部位（静默吃 ×1.5 / ×2）
+    expect(属性集).not.toContain('部位');
+    expect(战斗解释_SCHEMA.value.required).not.toContain('部位');
   });
 
   it('解析翻译结果：合法的战斗解释', () => {

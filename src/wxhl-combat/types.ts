@@ -42,7 +42,7 @@ export interface 战斗单位 {
   词条: Set<string>; // 标签（不可被常规攻击命中/禁位移/禁回复…）
   技能: Record<string, 战斗解释>; // 一次性翻译出的「技能名 → 战斗解释」；无技能时为空对象 {}
   /** 主武器（开战时从 `实体.装备.主武器` 读入）；缺省 = 徒手（1d4、倍率 0.5、强化 0） */
-  主武器?: { 伤害骰: string; 倍率: number; 强化等级: number };
+  主武器?: { 伤害骰: string; 倍率: number; 强化等级: number; 阶位?: string };
 }
 
 export interface 行动槽 {
