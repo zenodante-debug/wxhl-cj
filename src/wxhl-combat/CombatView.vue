@@ -15,7 +15,12 @@
         :class="{ enemy: 单位.阵营 === '敌方', ally: 单位.阵营 === '我方' }"
       >
         <div class="unit-name">{{ id }}</div>
-        <div class="unit-hp">HP: {{ 单位.距离 }}m</div>
+        <div class="unit-hp">
+          HP: {{ id === '玩家' ? 玩家属性.HP_当前 : 敌人属性.HP_当前 }}/{{
+            id === '玩家' ? 玩家属性.HP_最大 : 敌人属性.HP_最大
+          }}
+        </div>
+        <div class="unit-distance">距离: {{ 单位.距离 }}m</div>
         <div class="unit-type">{{ 单位.类型 }}</div>
       </div>
     </div>
@@ -36,6 +41,7 @@
 <script setup lang="ts">
 import { ref } from 'vue';
 import { 推进 } from '../engine/turn';
+import { 攻击结算 } from '../engine/damage';
 import type { 战斗状态, 结算步骤 } from '../types';
 
 const 状态 = ref<战斗状态>({
@@ -78,6 +84,23 @@ const 状态 = ref<战斗状态>({
   领域: [],
 });
 
+// 临时属性数据（第一阶段硬编码）
+const 玩家属性 = {
+  属性: { 实际: { STR: 25, AGI: 20, CON: 20, PER: 15 } },
+  阶位: '二阶',
+  HP_当前: 100,
+  HP_最大: 100,
+};
+
+const 敌人属性 = {
+  属性: { 实际: { STR: 15, AGI: 10, CON: 12, PER: 8 } },
+  阶位: '一阶',
+  HP_当前: 80,
+  HP_最大: 80,
+  闪避值: 12,
+  防御: 3,
+};
+
 const 步骤列表 = ref<结算步骤[]>([]);
 
 function 开始回合() {
@@ -87,11 +110,20 @@ function 开始回合() {
 }
 
 function 攻击() {
-  // TODO: 实现攻击逻辑
-  步骤列表.value.push({
-    类: '攻击',
-    内容: '玩家攻击敌人',
-  });
+  const 结果 = 攻击结算(玩家属性, 敌人属性);
+
+  if (结果.命中) {
+    敌人属性.HP_当前 = 结果.HP_新值;
+    步骤列表.value.push({
+      类: '攻击',
+      内容: `玩家命中敌人，造成 ${结果.伤害} 点伤害 → 敌人 HP ${结果.HP_新值}/${敌人属性.HP_最大}`,
+    });
+  } else {
+    步骤列表.value.push({
+      类: '攻击',
+      内容: '玩家攻击未命中',
+    });
+  }
 }
 </script>
 
