@@ -3,10 +3,11 @@
 // MVU 变量读写 / 脚本变量读写 / AI 调用
 // ================================================================
 
-import type { 战斗单位, 战斗解释 } from './types';
+import type { 战斗单位, 战斗解释, 战斗状态, 结算步骤 } from './types';
 import { sanitizeJsonSchema } from '@/wxhl-003/schemaSanitize';
 import type { ApiConfig } from './settings';
 import { 构建翻译提示词, 解析翻译结果, 战斗解释_SCHEMA } from './ai/skillInterpreter';
+import { 构建收尾提示词 } from './ai/aftermath';
 import { 读设置 } from './settingsStore';
 
 /**
@@ -277,4 +278,48 @@ export async function 翻译战斗解释(技能列表: any[]): Promise<Record<st
     结果[技能.名称] = 解析翻译结果(raw);
   }
   return 结果;
+}
+
+/**
+ * 把战斗结果写回 MVU 变量。
+ * 铁律：只写 衍生属性.*_当前 与 状态.特殊状态；严禁写 *_最大/实际/属性修正值（前端代算）。
+ * @param 状态 战斗状态
+ * @param hp表 各单位的最终 HP_当前（单位 id → 数值）
+ */
+export async function 写回战斗结果(
+  状态: 战斗状态,
+  hp表: Record<string, { HP_当前?: number; MP_当前?: number; 耐力_当前?: number }>,
+): Promise<void> {
+  await waitGlobalInitialized('Mvu');
+  const data = Mvu.getMvuData({ type: 'message', message_id: -1 });
+
+  for (const [id, hp] of Object.entries(hp表)) {
+    const 路径前缀 = id === '契约者' ? '契约者' : `契约者.${id}`;
+    if (hp.HP_当前 !== undefined) _.set(data, `stat_data.${路径前缀}.衍生属性.HP_当前`, hp.HP_当前);
+    if (hp.MP_当前 !== undefined) _.set(data, `stat_data.${路径前缀}.衍生属性.MP_当前`, hp.MP_当前);
+    if (hp.耐力_当前 !== undefined) _.set(data, `stat_data.${路径前缀}.衍生属性.耐力_当前`, hp.耐力_当前);
+  }
+
+  // 特殊状态：把战斗里的 状态 写回
+  for (const 单位 of Object.values(状态.单位)) {
+    const 路径前缀 = 单位.id === '契约者' ? '契约者' : `契约者.${单位.id}`;
+    const 特殊状态: Record<string, string> = {};
+    for (const s of 单位.状态) {
+      特殊状态[s.名] = s.层数 !== undefined ? `${s.层数}层|持续${s.持续}回合` : `持续${s.持续}回合`;
+    }
+    _.set(data, `stat_data.${路径前缀}.状态.特殊状态`, 特殊状态);
+  }
+
+  await Mvu.replaceMvuData(data, { type: 'message', message_id: -1 });
+}
+
+/** 战斗结束：生成收尾正文 → 写入一条 assistant 楼层 */
+export async function 写收尾楼层(步骤: 结算步骤[]): Promise<void> {
+  const cfg = 读设置().强路;
+  if (!cfg.url || !cfg.apiKey) {
+    console.warn('[wxhl-combat] 强路 API 未配置，跳过收尾正文');
+    return;
+  }
+  const 正文 = await aiGenerate(cfg, 构建收尾提示词(步骤));
+  await createChatMessages([{ role: 'assistant', message: 正文 }]);
 }
