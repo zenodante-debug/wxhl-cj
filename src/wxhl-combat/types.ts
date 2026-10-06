@@ -18,6 +18,16 @@ export interface 战斗单位 {
   id: string;        // 变量路径键：'契约者' | '小队.成员.白露露' | '副本角色.骨卫兵'
   阵营: '我方' | '敌方';
   类型: string;      // 杂兵/精英/BOSS/… → 决定 HP 系数与致命效果分层
+  属性: { 实际: { STR: number; AGI: number; CON: number; PER: number } };
+  阶位: string;      // 一阶/二阶/… → 决定修正系数与基础DC
+  HP_当前: number;
+  HP_最大: number;
+  MP_当前: number;
+  MP_最大: number;
+  耐力_当前: number;
+  耐力_最大: number;
+  防御: number;
+  闪避值: number;
   距离: number;      // 距玩家米数；-1 = 已脱离
   行动槽: 行动槽;
   额度: number;      // 本回合剩余移动额度（米），每回合重置为【移动距离】

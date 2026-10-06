@@ -16,9 +16,7 @@
       >
         <div class="unit-name">{{ id }}</div>
         <div class="unit-hp">
-          HP: {{ id === '玩家' ? 玩家属性.HP_当前 : 敌人属性.HP_当前 }}/{{
-            id === '玩家' ? 玩家属性.HP_最大 : 敌人属性.HP_最大
-          }}
+          HP: {{ 单位.HP_当前 }}/{{ 单位.HP_最大 }}
         </div>
         <div class="unit-distance">距离: {{ 单位.距离 }}m ({{ id === '敌人' ? 敌人距离带 : '-' }})</div>
         <div class="unit-type">{{ 单位.类型 }}</div>
@@ -59,13 +57,13 @@
 
 <script setup lang="ts">
 import { ref, computed } from 'vue';
-import { 推进 } from './engine/turn';
-import { 攻击结算 } from './engine/damage';
-import { 射程校验, 移动距离计算, 距离带, 移动额度消耗, 借机攻击判定 } from './engine/distance';
-import { 行动槽消耗, 行动槽重置 } from './engine/actionEconomy';
-import { 构建敌方意图提示词, 解析敌方意图 } from './ai/enemyTactics';
-import { 构建收尾提示词 } from './ai/aftermath';
-import type { 战斗状态, 结算步骤 } from './types';
+import { 推进 } from '../engine/turn';
+import { 攻击结算 } from '../engine/damage';
+import { 射程校验, 移动距离计算, 距离带, 移动额度消耗, 借机攻击判定 } from '../engine/distance';
+import { 行动槽消耗, 行动槽重置 } from '../engine/actionEconomy';
+import { 构建敌方意图提示词, 解析敌方意图 } from '../ai/enemyTactics';
+import { 构建收尾提示词 } from '../ai/aftermath';
+import type { 战斗状态, 结算步骤 } from '../types';
 
 const 状态 = ref<战斗状态>({
   进行中: true,
@@ -76,6 +74,16 @@ const 状态 = ref<战斗状态>({
       id: '玩家',
       阵营: '我方',
       类型: '玩家',
+      属性: { 实际: { STR: 25, AGI: 20, CON: 20, PER: 15 } },
+      阶位: '二阶',
+      HP_当前: 100,
+      HP_最大: 100,
+      MP_当前: 50,
+      MP_最大: 50,
+      耐力_当前: 100,
+      耐力_最大: 100,
+      防御: 0,
+      闪避值: 10,
       距离: 0,
       行动槽: { 主要: 1, 次要: 1, 移动: 1, 反应: 1, 免费: 999 },
       额度: 0,
@@ -91,6 +99,16 @@ const 状态 = ref<战斗状态>({
       id: '敌人',
       阵营: '敌方',
       类型: '杂兵',
+      属性: { 实际: { STR: 15, AGI: 10, CON: 12, PER: 8 } },
+      阶位: '一阶',
+      HP_当前: 80,
+      HP_最大: 80,
+      MP_当前: 30,
+      MP_最大: 30,
+      耐力_当前: 60,
+      耐力_最大: 60,
+      防御: 3,
+      闪避值: 12,
       距离: 10,
       行动槽: { 主要: 1, 次要: 1, 移动: 1, 反应: 1, 免费: 999 },
       额度: 0,
@@ -107,28 +125,12 @@ const 状态 = ref<战斗状态>({
   领域: [],
 });
 
-// 临时属性数据（第一阶段硬编码）
-const 玩家属性 = ref({
-  属性: { 实际: { STR: 25, AGI: 20, CON: 20, PER: 15 } },
-  阶位: '二阶',
-  HP_当前: 100,
-  HP_最大: 100,
-});
-
-const 敌人属性 = ref({
-  属性: { 实际: { STR: 15, AGI: 10, CON: 12, PER: 8 } },
-  阶位: '一阶',
-  HP_当前: 80,
-  HP_最大: 80,
-  闪避值: 12,
-  防御: 3,
-});
-
+// 属性/HP 已并入战斗单位（types.ts 扩展字段），此处不再单独维护
 const 步骤列表 = ref<结算步骤[]>([]);
 
 // 计算移动距离
 const 玩家移动距离 = computed(() => {
-  return 移动距离计算(玩家属性.value.属性.实际.AGI, 玩家属性.value.阶位, 0);
+  return 移动距离计算(状态.value.单位.玩家.属性.实际.AGI, 状态.value.单位.玩家.阶位, 0);
 });
 
 // 计算距离带
@@ -194,13 +196,13 @@ function 攻击() {
   // 扣行动槽
   状态.value.单位.玩家.行动槽 = 行动槽消耗(状态.value.单位.玩家.行动槽, '主要行动');
 
-  const 结果 = 攻击结算(玩家属性.value, 敌人属性.value);
+  const 结果 = 攻击结算(状态.value.单位.玩家, 状态.value.单位.敌人);
 
   if (结果.命中) {
-    敌人属性.value.HP_当前 = 结果.HP_新值;
+    状态.value.单位.敌人.HP_当前 = 结果.HP_新值;
     步骤列表.value.push({
       类: '攻击',
-      内容: `✔ 玩家命中敌人，造成 ${结果.伤害} 点伤害 → 敌人 HP ${结果.HP_新值}/${敌人属性.value.HP_最大}`,
+      内容: `✔ 玩家命中敌人，造成 ${结果.伤害} 点伤害 → 敌人 HP ${结果.HP_新值}/${状态.value.单位.敌人.HP_最大}`,
     });
   } else {
     步骤列表.value.push({
