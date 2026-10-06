@@ -76,3 +76,25 @@ export function 解析翻译结果(json: string): 战斗解释 {
 
   return obj as 战斗解释;
 }
+
+/** 战斗解释的 JSON Schema —— 传给 aiGenerate 以启用「非法 JSON 重试」链路。
+ *  只约束顶层字段，规则/动作的深层结构由 解析翻译结果 兜底校验。 */
+export const 战斗解释_SCHEMA = {
+  name: 'combat_interpretation',
+  value: {
+    type: 'object',
+    properties: {
+      行动消耗: { type: 'string' },
+      射程: { type: 'string' },
+      目标: { type: 'string' },
+      消耗: { type: 'string' },
+      冷却: { type: 'number' },
+      分类: { type: 'string' },
+      类型: { type: 'string' },
+      可预判: { type: 'boolean' },
+      规则: { type: 'array' },
+      托管: { type: 'array' },
+    },
+    required: ['行动消耗', '射程', '目标', '消耗', '冷却', '分类', '类型', '可预判', '规则', '托管'],
+  },
+};
