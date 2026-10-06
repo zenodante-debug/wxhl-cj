@@ -4,6 +4,8 @@
 // ================================================================
 
 import type { 战斗单位 } from './types';
+import { sanitizeJsonSchema } from '@/wxhl-003/schemaSanitize';
+import type { ApiConfig } from './settings';
 
 /**
  * 从 MVU 变量读取战斗单位
@@ -166,4 +168,95 @@ export async function 读取可参战单位(): Promise<可参战单位[]> {
   展开('副本角色', '敌方');     // 固有角色可能中立 → 开战时可改
 
   return 结果;
+}
+
+/** 从 AI 回复文本中抠出 JSON（直接 parse → 代码围栏 → 首个平衡括号段）。 */
+function extractJSON(text: string): any {
+  try { return JSON.parse(text.trim()); } catch (_) {}
+  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
+  if (fence) { try { return JSON.parse(fence[1].trim()); } catch (_) {} }
+  const first = text.search(/[\{\[]/);
+  if (first >= 0) {
+    const chars = [...text.slice(first)];
+    let d = 0, inS = false, esc = false, end = -1;
+    for (let i = 0; i < chars.length; i++) {
+      const ch = chars[i];
+      if (esc) { esc = false; continue; }
+      if (ch === '\\') { esc = true; continue; }
+      if (ch === '"') { inS = !inS; continue; }
+      if (inS) continue;
+      if (ch === '{' || ch === '[') d++;
+      else if (ch === '}' || ch === ']') { d--; if (d === 0) { end = i; break; } }
+    }
+    if (end > 0) { try { return JSON.parse(text.slice(first, first + end + 1)); } catch (_) {} }
+  }
+  throw new Error('AI 回复中未找到有效 JSON，原始回复: ' + text.slice(0, 300));
+}
+
+/**
+ * 精简版 aiGenerate（独立脚本自己的 AI 通道）。
+ * - 请求侧 schema 先经 sanitizeJsonSchema 净化
+ * - API 以 400 拒收 schema 时自动降级为纯提示词重试
+ */
+export async function aiGenerate(
+  cfg: ApiConfig,
+  userInput: string,
+  jsonSchema?: { name: string; value: Record<string, any> },
+): Promise<string> {
+  if (!cfg.url || !cfg.apiKey) throw new Error('API 未配置');
+  if (typeof generateRaw !== 'function') throw new Error('generateRaw 不可用');
+
+  let prompt = userInput;
+  if (jsonSchema) {
+    prompt = `【死命令】你只能返回一个合法的 JSON，不能包含任何 markdown、标题、解释性文字。直接输出 JSON。\n\n${userInput}`;
+  }
+
+  let lastErr = '';
+  let schema已降级 = false;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const config: any = {
+        user_input: prompt,
+        custom_api: { apiurl: cfg.url, key: cfg.apiKey, model: cfg.model },
+        ordered_prompts: ['user_input'],
+        should_silence: true,
+        max_chat_history: 0,
+      };
+      if (jsonSchema && !schema已降级) {
+        config.json_schema = { name: jsonSchema.name, strict: true, value: sanitizeJsonSchema(jsonSchema.value) };
+      }
+
+      const result = await generateRaw(config);
+      const text = typeof result === 'string' ? result : (result as any).content || '';
+
+      if (!jsonSchema) return text;
+
+      try {
+        extractJSON(text);
+        return text;
+      } catch (_) {
+        if (attempt < 2) {
+          const warnings = [
+            '【第一次警告】上次返回不是合法JSON。这次必须只输出JSON，不要任何其他内容。',
+            '【最后一次警告】绝对只输出 {} 或 [] 包裹的 JSON。不要 markdown。不要解释。不要标题。只要 JSON。',
+          ];
+          prompt = warnings[attempt] + '\n\n' + userInput;
+          await new Promise(r => setTimeout(r, 1500));
+          continue;
+        }
+        throw new Error('AI 连续3次返回了非 JSON 格式。原始回复: ' + text.slice(0, 300));
+      }
+    } catch (e: any) {
+      lastErr = e.message || String(e);
+      if (jsonSchema && !schema已降级 && /\b400\b|bad\s*request|invalid/i.test(lastErr)) {
+        schema已降级 = true;
+        continue;
+      }
+      if (attempt < 2 && !jsonSchema) {
+        await new Promise(r => setTimeout(r, 2000));
+        continue;
+      }
+    }
+  }
+  throw new Error(lastErr || '生成失败');
 }
