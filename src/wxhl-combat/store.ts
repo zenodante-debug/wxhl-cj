@@ -328,3 +328,39 @@ export async function 写收尾楼层(步骤: 结算步骤[]): Promise<void> {
   const 正文 = await aiGenerate(cfg, 构建收尾提示词(步骤));
   await createChatMessages([{ role: 'assistant', message: 正文 }]);
 }
+
+/** 战斗状态 → 可 JSON 序列化的纯对象（词条 Set → 数组） */
+function 战斗状态转纯对象(状态: 战斗状态): any {
+  return {
+    ...状态,
+    单位: Object.fromEntries(
+      Object.entries(状态.单位).map(([k, u]) => [k, { ...u, 词条: [...u.词条] }]),
+    ),
+  };
+}
+
+/** 纯对象 → 战斗状态（词条数组 → Set） */
+function 纯对象转战斗状态(obj: any): 战斗状态 {
+  return {
+    ...obj,
+    单位: Object.fromEntries(
+      Object.entries(obj.单位 || {}).map(([k, u]: [string, any]) => [k, { ...u, 词条: new Set(u.词条 || []) }]),
+    ),
+  };
+}
+
+/** 读战斗状态（脚本变量）。没有则返回 null。 */
+export async function 读战斗状态(): Promise<战斗状态 | null> {
+  const v = getVariables({ type: 'script', script_id: getScriptId() }) as any;
+  if (!v?.战斗 || !v.战斗.进行中) return null;
+  return 纯对象转战斗状态(v.战斗);
+}
+
+/** 写战斗状态（脚本变量）。null = 清除。 */
+export async function 写战斗状态(状态: 战斗状态 | null): Promise<void> {
+  const scriptId = getScriptId();
+  const v = getVariables({ type: 'script', script_id: scriptId }) as any;
+  const 新变量 = { ...v, 战斗: 状态 ? 战斗状态转纯对象(状态) : undefined };
+  if (!状态) delete 新变量.战斗;
+  replaceVariables(新变量, { type: 'script', script_id: scriptId });
+}
