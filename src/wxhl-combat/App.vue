@@ -22,7 +22,9 @@ const visible = ref(true); // 开发阶段默认显示
   width: 100%;
   height: 100%;
   pointer-events: none;
-  z-index: 9999;
+  // 必须高于 wxhl-003 的 #wxhl003-root（z-index: 2147483640），
+  // 否则小手机桌面会盖住战场面板 —— 见 spec §12.1「覆盖层冲突」
+  z-index: 2147483645;
 }
 
 .combat-overlay {
