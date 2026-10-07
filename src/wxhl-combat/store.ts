@@ -347,16 +347,35 @@ function 带超时<T>(promise: Promise<T>, ms: number): Promise<T> {
   });
 }
 
+// ==================== AI 调用计数（观测点） ====================
+//
+// 玩家反馈「翻译还是分效果并发，触发 too many request」。源码层是整场一次调用，
+// 但与其争辩，不如让现场自己说话：**每发一次真实 HTTP 请求就打印一条带计数和用途的日志**。
+// 一场战斗里「技能翻译」应该只出现一次；玩家打开控制台 / 面板就能看到真相。
+let AI调用计数 = 0;
+
+/** 取本战斗累计的 AI 调用次数（面板展示用） */
+export function 取AI调用计数(): number {
+  return AI调用计数;
+}
+
+/** 开战时归零（面板展示用） */
+export function 重置AI调用计数(): void {
+  AI调用计数 = 0;
+}
+
 /**
  * 精简版 aiGenerate（独立脚本自己的 AI 通道）。
  * - 请求侧 schema 先经 sanitizeJsonSchema 净化
  * - API 以 400 拒收 schema 时自动降级为纯提示词重试
  * - 单次请求受 `cfg.timeout` 约束（generateRaw 自己不提供超时）
+ * - **每发一次真实请求就 console.log 一条带计数与用途的日志**（排查"翻译是不是还在并发"的观测点）
  */
 export async function aiGenerate(
   cfg: ApiConfig,
   userInput: string,
   jsonSchema?: { name: string; value: Record<string, any> },
+  用途: string = 'AI',
 ): Promise<string> {
   if (!cfg.url || !cfg.apiKey) throw new Error('API 未配置');
   if (typeof generateRaw !== 'function') throw new Error('generateRaw 不可用');
@@ -380,6 +399,12 @@ export async function aiGenerate(
       if (jsonSchema && !schema已降级) {
         config.json_schema = { name: jsonSchema.name, strict: true, value: sanitizeJsonSchema(jsonSchema.value) };
       }
+
+      // 每发一次真实请求就打印：第几次、干什么、多大。控制台一眼能看出"是不是还在分效果并发"
+      AI调用计数++;
+      console.log(
+        `[wxhl-combat] AI 请求 #${AI调用计数}（${用途}）· 输入 ${Math.round(prompt.length / 1024)}KB · 尝试 ${attempt + 1}/3`,
+      );
 
       const result = await 带超时(generateRaw(config) as Promise<any>, cfg.timeout);
       const text = typeof result === 'string' ? result : (result as any).content || '';
@@ -553,33 +578,61 @@ export async function 翻译战斗解释(
     throw new Error('API 未配置：请先在设置里配置 API');
   }
 
-  let 逐条: 条目解析结果[];
-  try {
-    const raw = await aiGenerate(cfg, 构建批量翻译提示词(待翻), 批量战斗解释_SCHEMA);
-    逐条 = 解析批量翻译结果(raw, 待翻.length);
-  } catch (e: any) {
-    // 整批失败：不抛出去，改成「每条都失败」并带上原因 ——
-    // 抛出去玩家只会得到一个没有细节的错误，也没法勾选重试。
-    const 原因 = `整批请求失败：${e?.message ?? e}`;
-    逐条 = 待翻.map(() => ({ 成功: false as const, 原因 }));
-  }
-
   // 新翻出来的并回缓存（成功的才写）；缓存里已有的条目原样保留，
   // **不在这里裁剪** —— 裁剪是 `整理翻译缓存` 的职责（复核界面重试时只带失败项，
   // 若在这里按「本次条目」裁剪，会把整场其余缓存全删掉）。
   const 新缓存 = { ...缓存 };
   let 有新增 = false;
 
-  逐条.forEach((r, i) => {
-    const 归属 = 待翻[i];
-    if (r.成功) {
-      表[归属.单位][归属.名称] = r.解释;
-      新缓存[归属.指纹] = r.解释;
-      有新增 = true;
-    } else {
-      失败.push({ 单位: 归属.单位, 名称: 归属.名称, 原因: r.原因, 来源: 归属.原始 });
+  /** 一批条目的结果按输入同序落表 / 入缓存 / 记失败 */
+  const 落一批 = (批次: typeof 待翻, 逐条: 条目解析结果[]) => {
+    逐条.forEach((r, i) => {
+      const 归属 = 批次[i];
+      if (r.成功) {
+        表[归属.单位][归属.名称] = r.解释;
+        新缓存[归属.指纹] = r.解释;
+        有新增 = true;
+      } else {
+        失败.push({ 单位: 归属.单位, 名称: 归属.名称, 原因: r.原因, 来源: 归属.原始 });
+      }
+    });
+  };
+
+  /** 一次 AI 调用翻译一批（调用方保证批内与输入同序） */
+  const 翻一批 = async (批次: typeof 待翻): Promise<条目解析结果[]> => {
+    const raw = await aiGenerate(cfg, 构建批量翻译提示词(批次), 批量战斗解释_SCHEMA, `技能翻译（共 ${批次.length} 项）`);
+    return 解析批量翻译结果(raw, 批次.length);
+  };
+
+  try {
+    // 默认：**整场一次调用**，把全部待翻一次性发给 AI（玩家明确要求：绝不分效果并发）。
+    落一批(待翻, await 翻一批(待翻));
+  } catch (e: any) {
+    // 整批失败（超时 / 429 / 内容太长被拒）—— 玩家允许的底线是「**分角色**」，绝不分效果。
+    // 按单位分组、**顺序**重试（带间隔，不并发）。一个角色的批量仍是一次调用。
+    const 分组 = new Map<string, typeof 待翻>();
+    for (const e of 待翻) {
+      const 组 = 分组.get(e.单位) ?? [];
+      组.push(e);
+      分组.set(e.单位, 组);
     }
-  });
+    if (分组.size <= 1) {
+      // 只有一个单位，没法再按角色拆 —— 标成失败并带上原因，交给复核界面重试
+      const 原因 = `整批请求失败：${e?.message ?? e}`;
+      待翻.forEach(b => 失败.push({ 单位: b.单位, 名称: b.名称, 原因, 来源: b.原始 }));
+    } else {
+      for (const 批次 of 分组.values()) {
+        try {
+          落一批(批次, await 翻一批(批次));
+        } catch (e2: any) {
+          const 原因 = `整批失败、按角色重试也失败：${e2?.message ?? e2}`;
+          批次.forEach(b => 失败.push({ 单位: b.单位, 名称: b.名称, 原因, 来源: b.原始 }));
+        }
+        // 顺序发送，别并发 —— 「并发上限 / too many request」就是被并发打出来的
+        await new Promise(r => setTimeout(r, 600));
+      }
+    }
+  }
 
   if (有新增) 写翻译缓存(新缓存);
 
@@ -597,7 +650,7 @@ export async function 翻译战斗解释(
 export async function 生成敌方意图(状态: 战斗状态): Promise<敌方意图[]> {
   const cfg = 读设置().快路;
   if (!cfg.url || !cfg.apiKey) throw new Error('API 未配置：请先在设置里配置 API');
-  const raw = await aiGenerate(cfg, 构建敌方意图提示词(状态), 敌方意图_SCHEMA);
+  const raw = await aiGenerate(cfg, 构建敌方意图提示词(状态), 敌方意图_SCHEMA, `敌方意图（第 ${状态.回合} 回合）`);
   return 解析敌方意图(raw);
 }
 
@@ -648,7 +701,7 @@ export async function 写收尾楼层(步骤: 结算步骤[], 状态: 战斗状�
     console.warn('[wxhl-combat] 强路 API 未配置，跳过收尾正文');
     return;
   }
-  const 正文 = await aiGenerate(cfg, 构建收尾提示词(步骤, 状态));
+  const 正文 = await aiGenerate(cfg, 构建收尾提示词(步骤, 状态), undefined, '收尾正文');
   await createChatMessages([{ role: 'assistant', message: 正文 }]);
 }
 
@@ -727,6 +780,6 @@ export async function 拉取模型(cfg: ApiConfig): Promise<string[]> {
  * @returns AI 的回复片段（供界面展示，证明真的收到了内容）
  */
 export async function 测试连接(cfg: ApiConfig): Promise<string> {
-  const 回复 = await aiGenerate(cfg, '请回复"连接成功"这四个字，不要任何其他内容。');
+  const 回复 = await aiGenerate(cfg, '请回复"连接成功"这四个字，不要任何其他内容。', undefined, '测试连接');
   return String(回复 ?? '').trim().slice(0, 80);
 }

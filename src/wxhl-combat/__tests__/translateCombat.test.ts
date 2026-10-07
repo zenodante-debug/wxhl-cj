@@ -117,3 +117,63 @@ describe('翻译战斗解释 · 整场只调 1 次 AI（实战反馈：逐个技
     }
   }, 20000);
 });
+
+describe('翻译战斗解释 · 分角色兜底（玩家要求：一次调用；最多分角色，绝不分效果）', () => {
+  /** 成功才计数的 mock：整批（两个单位都在提示词里）→ 失败；只含一个单位 → 成功 */
+  function 装双单位环境(引用: { 次数: number }, 成功: { 次数: number }) {
+    let 变量: any = { 快路: 配置 };
+    (globalThis as any).getScriptId = () => 'wxhl-combat';
+    (globalThis as any).getVariables = () => 变量;
+    (globalThis as any).replaceVariables = (v: any) => {
+      变量 = v;
+    };
+    (globalThis as any).generateRaw = async (cfg: any) => {
+      引用.次数++;
+      const 全文 = String(cfg.user_input);
+      if (全文.includes('契约者') && 全文.includes('骨卫兵')) throw new Error('内容太长被拒');
+      成功.次数++;
+      const 编号们 = [...全文.matchAll(/【编号 (\d+)】/g)].map(m => Number(m[1]));
+      const 解释字段 = { 行动消耗: '主要行动', 射程: '近战', 目标: '单体', 消耗: '无', 冷却: 1, 分类: '基础', 类型: '主动', 可预判: true, 规则: [], 托管: [] };
+      return JSON.stringify({ 解释: 编号们.map(编号 => ({ 编号, ...解释字段 })) });
+    };
+  }
+
+  it('整批失败 → 按角色分组、顺序重试；骨卫兵带 2 个效果也只发**一次**（不是按效果拆）', async () => {
+    const 引用 = { 次数: 0 };
+    const 成功 = { 次数: 0 };
+    装双单位环境(引用, 成功);
+
+    const r = await 翻译战斗解释([
+      { id: '契约者', 效果源: [{ 名称: '甲' }] as any },
+      { id: '副本角色.骨卫兵', 效果源: [{ 名称: '乙' }, { 名称: '丙' }] as any },
+    ]);
+
+    // 全部翻出来了（整批失败 → 按角色各发一次）
+    expect(r.表.契约者['甲']).toBeDefined();
+    expect(r.表['副本角色.骨卫兵']['乙']).toBeDefined();
+    expect(r.表['副本角色.骨卫兵']['丙']).toBeDefined();
+    expect(r.失败).toEqual([]);
+    // 关键：成功的调用恰好 2 次 = **两个角色各一次**。若按效果拆会是 3 次。
+    expect(成功.次数).toBe(2);
+  }, 30000);
+
+  it('只有一个单位 → 整批失败就标失败，不再重试（没法再按角色拆）', async () => {
+    const 引用 = { 次数: 0 };
+    (globalThis as any).getScriptId = () => 'wxhl-combat';
+    let 变量: any = { 快路: 配置 };
+    (globalThis as any).getVariables = () => 变量;
+    (globalThis as any).replaceVariables = (v: any) => {
+      变量 = v;
+    };
+    (globalThis as any).generateRaw = async () => {
+      引用.次数++;
+      throw new Error('总是失败');
+    };
+
+    const r = await 翻译战斗解释([{ id: '契约者', 效果源: [{ 名称: '甲' }, { 名称: '乙' }] as any }]);
+
+    expect(r.失败).toHaveLength(2);
+    expect(r.失败.every(f => f.原因.includes('整批请求失败'))).toBe(true);
+    expect(r.表.契约者).toEqual({});
+  }, 30000);
+});

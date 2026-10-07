@@ -1,7 +1,13 @@
 import { createScriptIdDiv, teleportStyle } from '@util/script';
 import App from './App.vue';
 
+declare const __WXHL_BUILD__: string; // webpack DefinePlugin 烙进产物的构建时间戳
+
 $(() => {
+  // 版本横幅：加载即打印。排查"装的是不是最新包 / 是不是装了双份脚本"全靠它 —
+  // 若是旧脚本（或装了两份），这里会看到旧时间戳 / 打两次。
+  console.log(`[wxhl-combat] 战斗引擎已加载 · 构建 ${typeof __WXHL_BUILD__ !== 'undefined' ? __WXHL_BUILD__ : '(dev)'}`);
+
   const app = createApp(App).use(createPinia());
 
   const $app = createScriptIdDiv()

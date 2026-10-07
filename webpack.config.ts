@@ -523,6 +523,8 @@ function parse_configuration(entry: Entry): (_env: any, argv: any) => webpack.Co
           __VUE_OPTIONS_API__: false,
           __VUE_PROD_DEVTOOLS__: process.env.CI !== 'true',
           __VUE_PROD_HYDRATION_MISMATCH_DETAILS__: false,
+          // 构建时间戳烙进产物：脚本加载时打印，一眼看出玩家装的是不是最新包
+          __WXHL_BUILD__: JSON.stringify(new Date().toISOString()),
         }),
       )
       .concat(
