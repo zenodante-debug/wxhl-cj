@@ -64,7 +64,7 @@
       </div>
 
       <!-- 我方每个单位一块（实战反馈：以前只能操作契约者，队友完全没法指挥） -->
-      <div v-for="u in 我方单位" :key="u.id" class="unit-action">
+      <div v-for="u in 我方单位" :key="u.键" class="unit-action">
         <div class="ua-head">
           <span class="ua-name">{{ u.名称 }}</span>
           <span class="ua-meta">
@@ -153,8 +153,9 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { 距离带 } from '../engine/distance';
 import { 可提交, type 行动槽填写 } from '../engine/actionInput';
+import { 造我方条目, 造技能展示, 显示名, type 我方条目 } from '../engine/viewModel';
 import type { 敌方意图 } from '../ai/enemyTactics';
-import type { 战斗状态, 战斗单位, 战斗解释 } from '../types';
+import type { 战斗状态 } from '../types';
 
 const props = defineProps<{
   状态: 战斗状态;
@@ -190,7 +191,7 @@ function 逃离点击() {
 // 距玩家排序（0 在前）—— 用变量里的姓名（头部.姓名）；老存档没有名称字段时退回 id 末段
 const 排序单位 = computed(() =>
   Object.values(props.状态.单位)
-    .map(u => ({ ...u, 名称: 名称(u) }))
+    .map(u => ({ ...u, 名称: 显示名(u) }))
     .sort((a, b) => a.距离 - b.距离),
 );
 
@@ -199,26 +200,12 @@ function 距离百分比(d: number): number {
   return Math.min(100, (d / 最大距离.value) * 100);
 }
 
-function 名称(u: 战斗单位): string {
-  return u.名称 || u.id.split('.').pop() || u.id;
-}
-
 // ==================== 我方行动区 ====================
 
-/** 键 = 状态.单位 的键（短名）—— 引擎的 找单位 两种键都认，这里统一用键 */
-interface 我方条目 {
-  键: string;
-  名称: string;
-  单位: 战斗单位;
-  技能: Record<string, 战斗解释>;
-}
-
-/** 所有我方单位（契约者本体 + 小队成员 + 其余被划为我方的单位） */
-const 我方单位 = computed<我方条目[]>(() =>
-  Object.entries(props.状态.单位)
-    .filter(([, u]) => u.阵营 === '我方')
-    .map(([键, u]) => ({ 键, 名称: 名称(u), 单位: u, 技能: u.技能 ?? {} })),
-);
+// 条目的形状在 engine/viewModel（有测试钉死）—— **条目继承 战斗单位**，
+// 所以模板里直接写 u.HP_当前 / u.行动槽.主要 就行，不要写 u.单位.xxx
+// （写错这一层会在运行时抛错、把整个组件渲染成一片空白，实战踩过）。
+const 我方单位 = computed<我方条目[]>(() => 造我方条目(props.状态.单位));
 
 /** 每个我方单位各自的槽位填写；键 = 状态.单位 的键 */
 const 填写表 = reactive<Record<string, 行动槽填写>>({});
@@ -243,16 +230,16 @@ watch(
 const 敌方单位 = computed(() =>
   Object.entries(props.状态.单位)
     .filter(([, u]) => u.阵营 === '敌方' && u.HP_当前 > 0)
-    .map(([键, u]) => ({ 键, 显示: `${名称(u)}（HP ${u.HP_当前}/${u.HP_最大} · 距 ${u.距离}米 · 防 ${u.防御} 闪 ${u.闪避值}）` })),
+    .map(([键, u]) => ({ 键, 显示: `${显示名(u)}（HP ${u.HP_当前}/${u.HP_最大} · 距 ${u.距离}米 · 防 ${u.防御} 闪 ${u.闪避值}）` })),
 );
 
 /** 支援目标（我方，含自己 —— 上 buff / 治疗都走支援行动） */
 function 支援目标(自己: 我方条目) {
   return 我方单位.value
-    .filter(x => x.单位.HP_当前 > 0)
+    .filter(x => x.HP_当前 > 0)
     .map(x => ({
       键: x.键,
-      显示: `${x.单位.id === 自己.单位.id ? '自己：' : ''}${x.名称}（HP ${x.单位.HP_当前}/${x.单位.HP_最大}）`,
+      显示: `${x.id === 自己.id ? '自己：' : ''}${x.名称}（HP ${x.HP_当前}/${x.HP_最大}）`,
     }));
 }
 
@@ -281,23 +268,9 @@ function 切换详情(键: string) {
     : [...详情展开.value, 键];
 }
 
-/** 一个技能的展示信息（下拉摘要 + 详情表共用） */
+/** 技能/装备的展示条目（形状在 engine/viewModel，有测试钉死） */
 function 技能条目(条目: 我方条目) {
-  return Object.entries(条目.技能).map(([名, 解释]) => {
-    const 倍率 = typeof 解释.伤害倍率 === 'number' && 解释.伤害倍率 > 0 ? `×${解释.伤害倍率}` : '无伤害';
-    const 段 = [解释.行动消耗, 解释.射程, 倍率].filter(Boolean).join(' · ');
-    return {
-      名,
-      摘要: `${名}（${段}）`,
-      行动消耗: 解释.行动消耗 ?? '',
-      射程: 解释.射程 ?? '',
-      目标: 解释.目标 ?? '',
-      消耗: 解释.消耗 ?? '',
-      冷却: 解释.冷却,
-      倍率,
-      规则数: (解释.规则 ?? []).filter(Boolean).length,
-    };
-  });
+  return 造技能展示(条目.技能);
 }
 
 /** 能不能点「执行本轮」：至少一个单位真的出手（只预置反应不算） */

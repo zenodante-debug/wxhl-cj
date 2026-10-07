@@ -16,3 +16,6 @@ components.d.ts
 cloudflare/wxhl-market/.welfare-key.txt
 # 玩家排行榜管理密钥（本地存放，勿提交）
 cloudflare/wxhl-market/.rank-admin-key.txt
+
+# 渲染防具（renderViews.test.ts）编译产物：测试会写/删，硬中断时别混进提交
+src/**/views/__render_*.ts

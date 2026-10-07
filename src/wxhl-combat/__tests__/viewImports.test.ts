@@ -34,6 +34,7 @@ import { 阶段A资源恢复, 阶段F结算 } from '../engine/turn';
 import { 行动槽重置 } from '../engine/actionEconomy';
 import { 距离带, 移动距离计算, 移动额度重置 } from '../engine/distance';
 import { 构造行动声明, 可提交 } from '../engine/actionInput';
+import { 造我方条目, 造技能展示, 显示名 } from '../engine/viewModel';
 import { 保底意图 } from '../ai/enemyTactics';
 
 describe('views 的 import 契约', () => {
@@ -65,6 +66,9 @@ describe('views 的 import 契约', () => {
       // views/BattleView.vue
       距离带,
       可提交,
+      造我方条目,
+      造技能展示,
+      显示名,
       // views/SettingsView.vue
       useSettingsStore,
       拉取模型,
