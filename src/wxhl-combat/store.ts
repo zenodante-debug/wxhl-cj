@@ -14,6 +14,7 @@ import { 构建收尾提示词 } from './ai/aftermath';
 import { buff转字符串 } from './engine/buffMapper';
 import { 解析伤害骰 } from './engine/damage';
 import { 移动距离计算 } from './engine/distance';
+import { 重算全部实体 } from './engine/derived';
 import { 读设置 } from './settingsStore';
 
 /** 数值兜底：只接受有限数（合法的 0 与负数照收），其余（undefined/NaN/字符串）退回兜底值。 */
@@ -138,6 +139,24 @@ function 实体转战斗单位(实体: any, id: string, 阵营: '我方' | '敌�
     技能: {},
     主武器: 读主武器(实体.装备?.主武器),
   };
+}
+
+/**
+ * 开战前重算**全部实体**的衍生属性并写回 MVU。
+ *
+ * 为什么必须有这一步：`HP_最大 / 防御 / 闪避值 / 移动距离 / 属性.实际` 是"小手机"状态栏
+ * 在变量更新时算出来落盘的 —— **玩家不开一次小手机，代算就不发生**，战斗里读到的是过期甚至
+ * 为 0 的防御/闪避，而 AI 刚把 属性.基础 写得更高，两下就对不上（实战反馈：命中 DC 473、
+ * 混合伤害 93133、HP 却只有 6690）。战斗脚本不能指望另一个脚本先跑，得自己算。
+ *
+ * 算完**写回 MVU**，顺带让状态栏/面板也能看到最新的面板值。
+ */
+export async function 重算参战衍生属性(): Promise<void> {
+  await waitGlobalInitialized('Mvu');
+  const data = Mvu.getMvuData({ type: 'message', message_id: -1 });
+  if (!data?.stat_data) return;
+  重算全部实体(data.stat_data);
+  await Mvu.replaceMvuData(data, { type: 'message', message_id: -1 });
 }
 
 /**
@@ -330,8 +349,18 @@ export async function 读取可参战单位(): Promise<可参战单位[]> {
  * 没有这道兜底就没法给玩家任何交代。
  * @param ms 非正数/非有限数视为「不超时」
  */
+/** setTimeout 的 delay 上限（2^31−1）。超过它的值会让定时器**立刻触发**，而不是等到那时候。 */
+const 定时器上限 = 2147483647;
+
 function 带超时<T>(promise: Promise<T>, ms: number): Promise<T> {
   if (!Number.isFinite(ms) || ms <= 0) return promise;
+
+  // ⚠️ 溢出守卫：`setTimeout(fn, 999999999999)` 不会等 31 年 —— 它**立即触发**。
+  // 玩家把超时填成一个巨大的数（想表达"别超时"），结果每个请求都被瞬间判定为超时
+  // （实战反馈：「请求超时（999999999999ms 未返回）」，敌人意图因此全部走保底）。
+  // 超过上限的一律按「不超时」处理。
+  if (ms > 定时器上限) return promise;
+
   return new Promise<T>((resolve, reject) => {
     const 计时器 = setTimeout(() => reject(new Error(`请求超时（${ms}ms 未返回）`)), ms);
     promise.then(

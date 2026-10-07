@@ -45,7 +45,7 @@
       </div>
     </div>
 
-    <!-- 行动区：玩家填槽 → 「执行本轮」 -->
+    <!-- 行动区：每个我方单位各自填槽 → 「执行本轮」 -->
     <div class="action-zone">
       <!-- 进度：生成敌方意图是一次几十秒的 AI 调用。没有这个，玩家看到的是一个灰按钮 +
            空白意图区，会以为界面坏了（和之前「点开战没反应」同一类） -->
@@ -59,49 +59,86 @@
         <div class="intent-title">敌方意图</div>
         <div v-for="(yi, i) in 敌方意图" :key="i" class="intent-row">
           <span class="intent-unit">{{ yi.单位 }}</span>
-          <span class="intent-acts">{{ yi.行动.map(a => a.类型 + (a.技能 ? `（${a.技能}）` : '')).join(' → ') }}</span>
+          <span class="intent-acts">{{ yi.行动.map(a => a.类型 + (a.技能 ? `（${a.技能}）` : '（基础攻击）')).join(' → ') }}</span>
         </div>
       </div>
 
-      <!-- 行动槽：四个控件 -->
-      <div class="slot-row">
-        <label class="slot">
-          <span class="slot-label">主要</span>
-          <select v-model="槽填写.主要">
-            <option value="">（不出手）</option>
-            <option v-for="s in 我方技能名" :key="s" :value="s">{{ s }}</option>
-          </select>
-        </label>
-        <label class="slot">
-          <span class="slot-label">次要</span>
-          <select v-model="槽填写.次要">
-            <option value="">（不出手）</option>
-            <option v-for="s in 我方技能名" :key="s" :value="s">{{ s }}</option>
-          </select>
-        </label>
-        <label class="slot">
-          <span class="slot-label">移动（目标距离·米）</span>
-          <input type="number" min="0" v-model.number="槽填写.移动" />
-        </label>
-        <label class="slot">
-          <span class="slot-label">反应</span>
-          <select v-model="槽填写.反应">
-            <option value="">不预置</option>
-            <option v-for="r in 反应选项" :key="r" :value="r">{{ r }}</option>
-          </select>
-        </label>
+      <!-- 我方每个单位一块（实战反馈：以前只能操作契约者，队友完全没法指挥） -->
+      <div v-for="u in 我方单位" :key="u.id" class="unit-action">
+        <div class="ua-head">
+          <span class="ua-name">{{ u.名称 }}</span>
+          <span class="ua-meta">
+            HP {{ u.HP_当前 }}/{{ u.HP_最大 }} · 距 {{ u.距离 }}米 · 额度 {{ u.额度 }} · 槽 主{{ u.行动槽.主要 }} 次{{ u.行动槽.次要 }} 移{{ u.行动槽.移动 }}
+          </span>
+          <button class="ua-detail-btn" @click="切换详情(u.id)">
+            {{ 详情展开.includes(u.id) ? '收起效果' : `效果详情（${技能条目(u).length}）` }}
+          </button>
+        </div>
+
+        <!-- 效果详情表：光看名字选不了行动（实战反馈：技能/装备看不出详细效果） -->
+        <div v-if="详情展开.includes(u.id)" class="detail-table">
+          <div class="dt-row dt-head">
+            <span>名称</span><span>行动</span><span>射程</span><span>目标</span><span>消耗</span><span>冷却</span><span>倍率</span><span>规则</span>
+          </div>
+          <div v-for="d in 技能条目(u)" :key="d.名" class="dt-row">
+            <span class="dt-name" :title="d.名">{{ d.名 }}</span>
+            <span>{{ d.行动消耗 || '—' }}</span>
+            <span>{{ d.射程 || '—' }}</span>
+            <span>{{ d.目标 || '—' }}</span>
+            <span>{{ d.消耗 || '—' }}</span>
+            <span>{{ d.冷却 ?? '—' }}</span>
+            <span>{{ d.倍率 }}</span>
+            <span>{{ d.规则数 ? `${d.规则数} 条` : '—' }}</span>
+          </div>
+          <div v-if="!技能条目(u).length" class="dt-empty">
+            （这个单位没有任何已翻译的技能/装备效果 —— 只能用基础攻击）
+          </div>
+        </div>
+
+        <div class="slot-row">
+          <label class="slot">
+            <span class="slot-label">主要</span>
+            <select v-model="填写表[u.键].主要">
+              <option value="">（不出手）</option>
+              <option v-for="s in 技能条目(u)" :key="s.名" :value="s.名">{{ s.摘要 }}</option>
+            </select>
+          </label>
+          <label class="slot">
+            <span class="slot-label">次要</span>
+            <select v-model="填写表[u.键].次要">
+              <option value="">（不出手）</option>
+              <option v-for="s in 技能条目(u)" :key="s.名" :value="s.名">{{ s.摘要 }}</option>
+            </select>
+          </label>
+          <label class="slot">
+            <span class="slot-label">移动（目标距离·米）</span>
+            <input type="number" min="0" v-model.number="填写表[u.键].移动" />
+          </label>
+          <label class="slot">
+            <span class="slot-label">反应（预置）</span>
+            <select v-model="填写表[u.键].反应">
+              <option value="">不预置</option>
+              <option v-for="r in 反应选项" :key="r" :value="r">{{ r }}</option>
+            </select>
+          </label>
+          <label class="slot">
+            <span class="slot-label">目标</span>
+            <select v-model="目标表[u.键]">
+              <option value="">（选择目标）</option>
+              <optgroup label="敌方（攻击）">
+                <option v-for="e in 敌方单位" :key="e.键" :value="e.键">{{ e.显示 }}</option>
+              </optgroup>
+              <optgroup label="我方（支援：上 buff / 治疗 / 护盾）">
+                <option v-for="a in 支援目标(u)" :key="a.键" :value="a.键">{{ a.显示 }}</option>
+              </optgroup>
+            </select>
+          </label>
+        </div>
       </div>
 
-      <!-- 目标 + 执行 -->
       <div class="action-submit">
-        <label class="slot">
-          <span class="slot-label">目标</span>
-          <select v-model="目标">
-            <option value="">（选择目标）</option>
-            <option v-for="e in 敌方单位名" :key="e" :value="e">{{ e }}</option>
-          </select>
-        </label>
-        <button class="execute-btn" :disabled="!可提交(槽填写) || 禁用" @click="执行本轮">执行本轮</button>
+        <button class="execute-btn" :disabled="!可提交本轮 || 禁用" @click="执行本轮">执行本轮</button>
+        <span class="dim">至少给一个单位下达行动（没下命令的单位本回合不出手）</span>
       </div>
     </div>
 
@@ -113,11 +150,11 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, reactive, ref, watch } from 'vue';
 import { 距离带 } from '../engine/distance';
 import { 可提交, type 行动槽填写 } from '../engine/actionInput';
 import type { 敌方意图 } from '../ai/enemyTactics';
-import type { 战斗状态, 战斗单位 } from '../types';
+import type { 战斗状态, 战斗单位, 战斗解释 } from '../types';
 
 const props = defineProps<{
   状态: 战斗状态;
@@ -131,7 +168,8 @@ const props = defineProps<{
 }>();
 
 const emit = defineEmits<{
-  (e: '执行本轮', 填写: 行动槽填写, 目标: string): void;
+  /** 每个我方单位各自的填写 + 目标；键 = 状态.单位 的键（短名） */
+  (e: '执行本轮', 各单位: Record<string, { 填写: 行动槽填写; 目标: string }>): void;
   (e: '逃离战斗'): void;
 }>();
 
@@ -152,7 +190,7 @@ function 逃离点击() {
 // 距玩家排序（0 在前）—— 用变量里的姓名（头部.姓名）；老存档没有名称字段时退回 id 末段
 const 排序单位 = computed(() =>
   Object.values(props.状态.单位)
-    .map(u => ({ ...u, 名称: u.名称 || u.id.split('.').pop() || u.id }))
+    .map(u => ({ ...u, 名称: 名称(u) }))
     .sort((a, b) => a.距离 - b.距离),
 );
 
@@ -161,39 +199,132 @@ function 距离百分比(d: number): number {
   return Math.min(100, (d / 最大距离.value) * 100);
 }
 
-// ==================== 玩家行动区 ====================
+function 名称(u: 战斗单位): string {
+  return u.名称 || u.id.split('.').pop() || u.id;
+}
 
-/** 玩家单位「契约者」的技能名列表（= 状态.单位['契约者'].技能 的键） */
-const 我方技能名 = computed(() => Object.keys(props.状态.单位['契约者']?.技能 ?? {}));
+// ==================== 我方行动区 ====================
 
-/** 所有敌方单位的短名（状态.单位 里 阵营 === '敌方' 的键） */
-const 敌方单位名 = computed(() =>
+/** 键 = 状态.单位 的键（短名）—— 引擎的 找单位 两种键都认，这里统一用键 */
+interface 我方条目 {
+  键: string;
+  名称: string;
+  单位: 战斗单位;
+  技能: Record<string, 战斗解释>;
+}
+
+/** 所有我方单位（契约者本体 + 小队成员 + 其余被划为我方的单位） */
+const 我方单位 = computed<我方条目[]>(() =>
   Object.entries(props.状态.单位)
-    .filter(([, u]) => u.阵营 === '敌方')
-    .map(([名]) => 名),
+    .filter(([, u]) => u.阵营 === '我方')
+    .map(([键, u]) => ({ 键, 名称: 名称(u), 单位: u, 技能: u.技能 ?? {} })),
+);
+
+/** 每个我方单位各自的槽位填写；键 = 状态.单位 的键 */
+const 填写表 = reactive<Record<string, 行动槽填写>>({});
+const 目标表 = reactive<Record<string, string>>({});
+
+// 单位增删时补齐/清理填写表（Vue 3 的 reactive 对象新增键也是响应式的）
+watch(
+  我方单位,
+  列表 => {
+    const 在场上 = new Set(列表.map(x => x.键));
+    for (const x of 列表) {
+      if (!填写表[x.键]) 填写表[x.键] = {};
+      if (目标表[x.键] === undefined) 目标表[x.键] = '';
+    }
+    for (const 键 of Object.keys(填写表)) if (!在场上.has(键)) delete 填写表[键];
+    for (const 键 of Object.keys(目标表)) if (!在场上.has(键)) delete 目标表[键];
+  },
+  { immediate: true, deep: false },
+);
+
+/** 敌方单位（可攻击目标） */
+const 敌方单位 = computed(() =>
+  Object.entries(props.状态.单位)
+    .filter(([, u]) => u.阵营 === '敌方' && u.HP_当前 > 0)
+    .map(([键, u]) => ({ 键, 显示: `${名称(u)}（HP ${u.HP_当前}/${u.HP_最大} · 距 ${u.距离}米 · 防 ${u.防御} 闪 ${u.闪避值}）` })),
+);
+
+/** 支援目标（我方，含自己 —— 上 buff / 治疗都走支援行动） */
+function 支援目标(自己: 我方条目) {
+  return 我方单位.value
+    .filter(x => x.单位.HP_当前 > 0)
+    .map(x => ({
+      键: x.键,
+      显示: `${x.单位.id === 自己.单位.id ? '自己：' : ''}${x.名称}（HP ${x.单位.HP_当前}/${x.单位.HP_最大}）`,
+    }));
+}
+
+// 只有一个敌人时自动选中它（省一步）；目标失效则重置
+watch(
+  敌方单位,
+  列表 => {
+    const 唯一 = 列表.length === 1 ? 列表[0].键 : '';
+    for (const x of 我方单位.value) {
+      const 现有 = 目标表[x.键];
+      const 有效 = 现有 && (列表.some(e => e.键 === 现有) || 我方单位.value.some(a => a.键 === 现有));
+      if (!有效) 目标表[x.键] = 唯一;
+    }
+  },
+  { immediate: true },
 );
 
 /** 反应槽可选项（空 = 不预置） */
 const 反应选项 = ['击溃', '识破', '招架', '闪避', '格挡', '闪烁'];
 
-const 槽填写 = ref<行动槽填写>({});
-const 目标 = ref('');
+/** 效果详情展开中的单位键 */
+const 详情展开 = ref<string[]>([]);
+function 切换详情(键: string) {
+  详情展开.value = 详情展开.value.includes(键)
+    ? 详情展开.value.filter(k => k !== 键)
+    : [...详情展开.value, 键];
+}
 
-// 目标默认值：只有一个敌人时自动选中它；所选目标失效时重置
-watch(
-  敌方单位名,
-  列表 => {
-    if (!列表.includes(目标.value)) 目标.value = 列表.length === 1 ? 列表[0] : '';
-  },
-  { immediate: true },
+/** 一个技能的展示信息（下拉摘要 + 详情表共用） */
+function 技能条目(条目: 我方条目) {
+  return Object.entries(条目.技能).map(([名, 解释]) => {
+    const 倍率 = typeof 解释.伤害倍率 === 'number' && 解释.伤害倍率 > 0 ? `×${解释.伤害倍率}` : '无伤害';
+    const 段 = [解释.行动消耗, 解释.射程, 倍率].filter(Boolean).join(' · ');
+    return {
+      名,
+      摘要: `${名}（${段}）`,
+      行动消耗: 解释.行动消耗 ?? '',
+      射程: 解释.射程 ?? '',
+      目标: 解释.目标 ?? '',
+      消耗: 解释.消耗 ?? '',
+      冷却: 解释.冷却,
+      倍率,
+      规则数: (解释.规则 ?? []).filter(Boolean).length,
+    };
+  });
+}
+
+/** 能不能点「执行本轮」：至少一个单位真的出手（只预置反应不算） */
+const 可提交本轮 = computed(() =>
+  我方单位.value.some(x => 可提交(填写表[x.键] ?? {})),
 );
 
-/** 「执行本轮」：交出行槽 + 目标，随后清空四个槽（避免下一回合误带上一轮的选择） */
+/**
+ * 「执行本轮」：交出**每个单位各自的**填写与目标。
+ * 不在这里清空槽位：清空要等上层真的收下了（否则结算失败时玩家的填写会凭空消失）。
+ */
 function 执行本轮(): void {
-  if (!可提交(槽填写.value)) return;
-  emit('执行本轮', 槽填写.value, 目标.value);
-  槽填写.value = {};
+  if (!可提交本轮.value) return;
+  const 各单位: Record<string, { 填写: 行动槽填写; 目标: string }> = {};
+  for (const x of 我方单位.value) {
+    const 填写 = 填写表[x.键];
+    if (!填写) continue;
+    各单位[x.键] = { 填写: { ...填写 }, 目标: 目标表[x.键] ?? '' };
+  }
+  emit('执行本轮', 各单位);
 }
+
+/** 上层结算完通知清空（避免下一回合误带上一轮的选择） */
+function 清空填写() {
+  for (const 键 of Object.keys(填写表)) 填写表[键] = {};
+}
+defineExpose({ 清空填写 });
 </script>
 
 <style scoped lang="scss">
@@ -288,12 +419,66 @@ function 执行本轮(): void {
 @keyframes progress-spin {
   to { transform: rotate(360deg); }
 }
+
 .intent-block { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px dashed #333; }
 .intent-title { color: #d99; font-size: 13px; font-weight: 700; margin-bottom: 4px; }
 .intent-row { font-size: 12px; color: #bbb; }
 .intent-unit { color: #d99; margin-right: 8px; }
 
-.slot-row { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 10px; }
+/* 一个我方单位一块行动区 */
+.unit-action {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  border: 1px solid #2f3a2f;
+  border-radius: 8px;
+  background: #171c17;
+}
+
+.ua-head {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 8px;
+}
+.ua-name { color: #9d9; font-weight: 700; font-size: 13px; }
+.ua-meta { color: #8a9a8a; font-size: 12px; }
+.ua-detail-btn {
+  margin-left: auto;
+  padding: 3px 10px;
+  background: #22303c;
+  border: 1px solid #3a5a74;
+  border-radius: 6px;
+  color: #90c0e0;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover { background: #2b3d4c; }
+}
+
+/* 效果详情表 */
+.detail-table {
+  margin: 0 0 10px;
+  border: 1px solid #2a2a2a;
+  border-radius: 6px;
+  overflow-x: auto;
+  background: #131313;
+}
+.dt-row {
+  display: grid;
+  grid-template-columns: minmax(140px, 2fr) repeat(4, minmax(60px, 1fr)) minmax(50px, 0.7fr) minmax(60px, 0.8fr) minmax(60px, 0.7fr);
+  gap: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  color: #bbb;
+  border-top: 1px solid #232323;
+
+  &.dt-head { color: #888; border-top: none; background: #191919; }
+}
+.dt-name { color: #ddd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.dt-empty { padding: 8px; font-size: 12px; color: #777; }
+
+.slot-row { display: flex; gap: 10px; flex-wrap: wrap; }
 .slot { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #999; }
 .slot-label { color: #999; }
 .slot select, .slot input {
@@ -303,10 +488,20 @@ function 执行本轮(): void {
   border-radius: 4px;
   padding: 4px 6px;
   font-size: 13px;
+  max-width: 260px;
 }
 .slot input[type='number'] { width: 90px; }
 
-.action-submit { display: flex; gap: 10px; align-items: flex-end; }
+.action-submit {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  margin-top: 10px;
+  padding-top: 10px;
+  border-top: 1px dashed #333;
+}
+.dim { color: #777; font-size: 12px; }
+
 .execute-btn {
   background: #1d3a1d;
   color: #9d9;

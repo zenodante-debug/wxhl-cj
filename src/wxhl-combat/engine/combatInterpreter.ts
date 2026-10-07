@@ -49,7 +49,10 @@ export function 执行规则(
 
   const 结果: 执行结果 = {};
 
-  for (const 动作 of 规则.动作) {
+  // 动作列表也要防脏数据：模型可能返回 null 条目或根本不是数组（`规则.动作` 缺失）
+  const 动作列表 = Array.isArray(规则.动作) ? 规则.动作 : [];
+  for (const 动作 of 动作列表) {
+    if (!动作 || typeof 动作 !== 'object') continue;
     执行动作(动作, 来源, 目标, 结果, 上下文);
   }
 
