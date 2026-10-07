@@ -28,11 +28,22 @@ import {
   清空翻译缓存,
 } from '../store';
 import { 读设置, useSettingsStore } from '../settingsStore';
-import { 找单位, 跑敌方意图, 跑一个回合, 结算行动 } from '../engine/loop';
+import {
+  找单位,
+  跑敌方意图,
+  跑一个回合,
+  结算行动,
+  开战常驻结算,
+  阶段A规则结算,
+  阶段F规则结算,
+  回合开始行动槽,
+  回合开始额度,
+  词条_不可被常规攻击命中,
+  词条_禁位移,
+} from '../engine/loop';
 import { 初始化战斗状态, 开场距离选项, 开场距离随机 } from '../engine/setup';
 import { 阶段A资源恢复, 阶段F结算, 濒死检定一轮, 判定战局, 能行动 } from '../engine/turn';
-import { 行动槽重置 } from '../engine/actionEconomy';
-import { 距离带, 移动距离计算, 移动额度重置 } from '../engine/distance';
+import { 距离带 } from '../engine/distance';
 import { 构造行动声明, 可提交 } from '../engine/actionInput';
 import { 造我方条目, 造技能展示, 显示名 } from '../engine/viewModel';
 import { 随机意图, 随机意图说明 } from '../ai/enemyRoll';
@@ -47,15 +58,17 @@ describe('views 的 import 契约', () => {
       初始化战斗状态,
       开场距离随机,
       跑一个回合,
+      回合开始行动槽,
+      回合开始额度,
       阶段A资源恢复,
       阶段F结算,
       濒死检定一轮,
       判定战局,
       能行动,
-      行动槽重置,
-      移动距离计算,
-      移动额度重置,
       构造行动声明,
+      开战常驻结算,
+      阶段A规则结算,
+      阶段F规则结算,
       生成敌方意图,
       读战斗状态,
       写战斗状态,
@@ -84,6 +97,8 @@ describe('views 的 import 契约', () => {
       跑敌方意图,
       结算行动,
       找单位,
+      词条_不可被常规攻击命中,
+      词条_禁位移,
     ];
 
     for (const f of 符号) expect(f).toBeDefined();

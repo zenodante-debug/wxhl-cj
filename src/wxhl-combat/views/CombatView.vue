@@ -63,10 +63,15 @@ import SetupView from './SetupView.vue';
 import BattleView from './BattleView.vue';
 import PendingModal from './PendingModal.vue';
 import { 初始化战斗状态, 开场距离随机, 开场距离选项 } from '../engine/setup';
-import { 跑一个回合, 开战常驻结算, 阶段A规则结算, 阶段F规则结算 } from '../engine/loop';
+import {
+  跑一个回合,
+  开战常驻结算,
+  阶段A规则结算,
+  阶段F规则结算,
+  回合开始行动槽,
+  回合开始额度,
+} from '../engine/loop';
 import { 阶段A资源恢复, 阶段F结算, 冷却递减, 濒死检定一轮, 濒死结算到底, 判定战局, 能行动 } from '../engine/turn';
-import { 行动槽重置 } from '../engine/actionEconomy';
-import { 移动距离计算, 移动额度重置 } from '../engine/distance';
 import { 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
 import type { 敌方意图, 意图行动 } from '../ai/enemyTactics';
 import { 随机意图, 随机意图说明 } from '../ai/enemyRoll';
@@ -367,11 +372,12 @@ async function 推进回合() {
   const 新单位: Record<string, 战斗单位> = {};
   const 濒死日志: string[] = [];
   for (const [键, u] of Object.entries(战斗.value.单位)) {
+    // 行动槽与移动额度都用引擎的纯函数：除了基础重置，还会叠加状态携带的
+    // 「反应动作」「次要行动」「移动距离」修正（血统给额外反应动作这类效果）
     let 单位: 战斗单位 = {
       ...阶段A资源恢复(冷却递减(u)), // 冷却每回合 -1（与行动槽同为「回合开始重置」）
-      行动槽: 行动槽重置(u.行动槽),
-      // 移动额度 = 本回合【移动距离】（含「移动距离额外加成」）；老存档没有这个字段就按公式现算
-      额度: 移动额度重置((u.移动距离 ?? 0) > 0 ? u.移动距离! : 移动距离计算(u.属性.实际.AGI, u.阶位, 0)),
+      行动槽: 回合开始行动槽(u),
+      额度: 回合开始额度(u),
     };
     // 阶段A「生命状态检查」：倒下的单位**每回合**做一次濒死 CON 检定（DC12，2 成功稳定 / 3 失败死亡）。
     // 世界书：HP 归零即进入濒死判定，失败达三次才宣告抹杀 —— 不死在别处，就在这一行。

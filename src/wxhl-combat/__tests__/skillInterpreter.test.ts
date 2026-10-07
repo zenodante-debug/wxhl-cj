@@ -156,12 +156,15 @@ describe('skillInterpreter · 提示词必须教模型用上引擎真正执行�
 
   it('「防御」与四维属性点能改（重骑士那种换属性效果）', () => {
     expect(提示词).toContain('防御');
-    expect(提示词).toMatch(/STR \/ AGI \/ CON \/ PER/);
+    expect(提示词).toMatch(/STR\/AGI\/CON\/PER/);
     expect(提示词).toContain('属性点');
   });
 
-  it('诚实标出还没读的五个修正目标（写了不生效）', () => {
-    expect(提示词).toContain('还没读');
+  it('12 个数值修正目标全部说明「改的是哪个数」（现在全都真的读了）', () => {
+    for (const 目标 of ['伤害','最终乘区','减伤','命中','闪避','防御','反应动作','次要行动','移动距离','攻击倍率','基础伤害骰']) {
+      expect(提示词).toContain(目标);
+    }
+    expect(提示词).not.toContain('还没读');
   });
 
   it('「该次攻击最终伤害×N」→ 用「最终乘区」（不是「伤害」那种递减乘区）', () => {
