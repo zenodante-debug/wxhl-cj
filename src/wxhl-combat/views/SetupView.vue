@@ -31,7 +31,7 @@
         <span class="dim">实际距离开战时掷骰</span>
       </div>
 
-      <button class="start-btn" :disabled="开战单位数 === 0 || 忙碌" @click="开战">
+      <button class="start-btn" :disabled="开战单位数 === 0 || 忙碌 || 禁用" @click="开战">
         {{ 忙碌 ? '开战中…' : `开战（${开战单位数} 个单位）` }}
       </button>
 
@@ -53,8 +53,10 @@ import { 开场距离选项 } from '../engine/setup';
 defineProps<{
   /** 开战进行中：禁用按钮、显示进度 */
   忙碌?: boolean;
-  /** 进度文案（如「翻译技能 3/8：裂骨重击」） */
+  /** 进度文案 */
   进度?: string;
+  /** 另外的禁用理由（如：翻译复核未处理完，此时点开战会重跑整轮翻译） */
+  禁用?: boolean;
 }>();
 
 const emit = defineEmits<{ (e: '开战', 选择: { id: string; 阵营: '我方' | '敌方' }[], 开场模式: string): void }>();

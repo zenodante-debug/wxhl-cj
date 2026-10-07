@@ -45,14 +45,15 @@ describe('翻译战斗解释 · 整场只调 1 次 AI（实战反馈：逐个技
     expect(引用.次数).toBe(1);
   });
 
-  it('效果源全为空 → 根本不调 AI，返回空表', async () => {
+  it('效果源全为空 → 根本不调 AI，返回空表与空失败清单', async () => {
     const 引用 = { 次数: 0 };
     装好环境(引用);
 
-    const 表 = await 翻译战斗解释([{ id: '契约者', 效果源: [] }]);
+    const 结果 = await 翻译战斗解释([{ id: '契约者', 效果源: [] }]);
 
     expect(引用.次数).toBe(0);
-    expect(表).toEqual({ 契约者: {} });
+    expect(结果.表).toEqual({ 契约者: {} });
+    expect(结果.失败).toEqual([]);
   });
 
   it('未配置 API → 抛错（且不调用 generateRaw）', async () => {
@@ -77,11 +78,33 @@ describe('翻译战斗解释 · 整场只调 1 次 AI（实战反馈：逐个技
     (globalThis as any).generateRaw = async () =>
       JSON.stringify({ 解释: [{ 编号: 0 }, { 编号: 1, 行动消耗: '次要行动', 射程: '自身', 目标: '自身', 消耗: '无', 冷却: 0, 分类: '基础', 类型: '被动', 可预判: false, 规则: [], 托管: [] }] });
 
-    const 表 = await 翻译战斗解释([
+    const 结果 = await 翻译战斗解释([
       { id: '契约者', 效果源: [{ 名称: '坏' }, { 名称: '好' }] as any },
     ]);
 
-    expect(表.契约者['好']).toBeDefined();
-    expect(表.契约者['坏']).toBeUndefined();
+    expect(结果.表.契约者['好']).toBeDefined();
+    expect(结果.表.契约者['坏']).toBeUndefined();
+    // 失败项要带**原因**（给玩家看）与**来源**（勾选后重试时直接重发，无需回查）
+    expect(结果.失败).toHaveLength(1);
+    expect(结果.失败[0].名称).toBe('坏');
+    expect(结果.失败[0].原因).toContain('字段不合法');
+    expect(结果.失败[0].来源).toBeDefined();
   });
+
+  it('整批请求失败（三次都吐不出 JSON）→ 不抛错，改成每条都失败并带原因', async () => {
+    (globalThis as any).getScriptId = () => 'wxhl-combat';
+    (globalThis as any).getVariables = () => ({ 快路: 配置 });
+    (globalThis as any).generateRaw = async () => '这不是 JSON';
+
+    const 结果 = await 翻译战斗解释([
+      { id: '契约者', 效果源: [{ 名称: '甲' }, { 名称: '乙' }] as any },
+    ]);
+
+    expect(结果.表.契约者).toEqual({});
+    expect(结果.失败).toHaveLength(2);
+    for (const f of 结果.失败) {
+      expect(f.原因).toContain('整批请求失败');
+      expect(f.来源).toBeDefined();
+    }
+  }, 20000);
 });

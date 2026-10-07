@@ -130,24 +130,30 @@ export function 解析翻译结果(json: string): 战斗解释 {
   return 校验战斗解释(JSON.parse(json));
 }
 
+/** 单条解析结果 —— 失败时必须带**原因**，否则玩家只能看到「不可用」却不知道该怎么办 */
+export type 条目解析结果 = { 成功: true; 解释: 战斗解释 } | { 成功: false; 原因: string };
+
 /**
  * 解析批量翻译结果 —— 返回**与入参等长**的数组，按 `编号` 对号入座。
- * 单条不合法 / 编号越界 / 整条缺失 → 该位为 `null`（由调用方点名「本场不可用」），
+ * 单条不合法 / 编号越界 / 整条缺失 → 该项 `成功: false` 并带明确原因，
  * **不因为一条坏而丢掉整批**。
  */
-export function 解析批量翻译结果(json: string, 条目数: number): Array<战斗解释 | null> {
+export function 解析批量翻译结果(json: string, 条目数: number): 条目解析结果[] {
   const 解析出的 = JSON.parse(json);
   const 数组 = Array.isArray(解析出的) ? 解析出的 : 解析出的?.解释;
   if (!Array.isArray(数组)) throw new Error('批量翻译结果里没有 "解释" 数组');
 
-  const 结果: Array<战斗解释 | null> = new Array(条目数).fill(null);
+  const 结果: 条目解析结果[] = new Array(条目数)
+    .fill(null)
+    .map(() => ({ 成功: false as const, 原因: '模型未返回该条（漏条目）' }));
+
   for (const 项 of 数组) {
     const 编号 = Number(项?.编号);
     if (!Number.isInteger(编号) || 编号 < 0 || 编号 >= 条目数) continue;
     try {
-      结果[编号] = 校验战斗解释(项);
-    } catch {
-      /* 单条字段不全 → 留 null，由调用方点名 */
+      结果[编号] = { 成功: true, 解释: 校验战斗解释(项) };
+    } catch (e: any) {
+      结果[编号] = { 成功: false, 原因: `字段不合法：${e?.message ?? e}` };
     }
   }
   return 结果;

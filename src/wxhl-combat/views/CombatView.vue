@@ -1,7 +1,32 @@
 <template>
   <div class="combat-view-root">
     <template v-if="阶段 === '准备'">
-      <SetupView :忙碌="开战中" :进度="开战进度" @开战="开始战斗" />
+      <SetupView
+        :忙碌="开战中"
+        :禁用="翻译失败清单.length > 0"
+        :进度="开战进度"
+        @开战="开始战斗"
+      />
+
+      <!-- 翻译复核：失败项列出**原因**，勾选后可只重发这些（spec §5.4） -->
+      <div v-if="翻译失败清单.length > 0" class="review-panel">
+        <h4>翻译复核 · {{ 翻译失败清单.length }} 项未成功</h4>
+        <p class="review-hint">
+          勾选要重试的项后点「重新解析选中项」（仍是一次批量调用，只发选中的）；也可以直接带着缺失开战 —— 缺失项会写进战斗日志，不会静默。
+        </p>
+        <label v-for="(f, i) in 翻译失败清单" :key="i" class="review-row">
+          <input type="checkbox" v-model="f.选中" />
+          <span class="review-who">{{ f.单位 }} · {{ f.名称 }}</span>
+          <span class="review-why">{{ f.原因 }}</span>
+        </label>
+        <div class="review-actions">
+          <button :disabled="复核忙碌 || 选中项数 === 0" @click="重新解析">
+            {{ 复核忙碌 ? '重新解析中…' : `重新解析选中项（${选中项数}）` }}
+          </button>
+          <button class="ghost" :disabled="复核忙碌" @click="带着缺失开战">带着缺失开战</button>
+        </div>
+      </div>
+
       <!-- 开战失败（如 API 未配置）会留在此态：错误只在 日志 里，必须在这里也渲染出来 -->
       <div v-if="日志.length" class="prep-log">
         <div v-for="(s, i) in 日志" :key="i" class="prep-log-entry">{{ s }}</div>
@@ -30,7 +55,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import SetupView from './SetupView.vue';
 import BattleView from './BattleView.vue';
 import PendingModal from './PendingModal.vue';
@@ -51,8 +76,8 @@ import {
   读取单位效果源,
   翻译战斗解释,
 } from '../store';
-import type { 单位效果源 } from '../store';
-import type { 战斗状态, 战斗单位 } from '../types';
+import type { 单位效果源, 翻译失败项 } from '../store';
+import type { 战斗状态, 战斗单位, 战斗解释 } from '../types';
 
 const 阶段 = ref<'准备' | '战斗' | '收尾'>('准备');
 const 战斗 = ref<战斗状态>({
@@ -71,6 +96,14 @@ const 战斗结束 = ref(false);
  */
 const 开战中 = ref(false);
 const 开战进度 = ref('');
+/** 翻译失败清单（复核界面用）：带原因与来源，勾选后只重发选中的 */
+const 翻译失败清单 = ref<Array<翻译失败项 & { 选中: boolean }>>([]);
+/** 停在复核界面时暂存的待开战上下文（重试成功后才真正开战） */
+const 待开战 = ref<{ 单位列表: 战斗单位[]; 开场模式: string } | null>(null);
+/** 复核界面自己在忙（重试期间挡重入） */
+const 复核忙碌 = ref(false);
+/** 已勾选的失败项数 */
+const 选中项数 = computed(() => 翻译失败清单.value.filter(f => f.选中).length);
 
 function 空战斗(): 战斗状态 {
   return { 进行中: false, 回合: 0, 先攻: [], 单位: {}, 待决: null, 领域: [] };
@@ -91,6 +124,8 @@ async function 开始战斗(选择: { id: string; 阵营: '我方' | '敌方' }[
   日志.value = [];
   敌方意图列表.value = [];
   战斗结束.value = false;
+  翻译失败清单.value = [];
+  待开战.value = null;
   阶段.value = '准备'; // 失败时留在准备态（Review Focus 5）
   开战中.value = true;
   try {
@@ -103,31 +138,98 @@ async function 开始战斗(选择: { id: string; 阵营: '我方' | '敌方' }[
     }
 
     // 一次性翻译（**整场 1 次 AI 调用**，spec §10.1）。
-    // 翻不出来的效果不进技能表，这里点名提示，绝不静默吞掉。
     const 总条数 = 单位列表.reduce((n, u) => n + (效果源[u.id]?.length ?? 0), 0);
     开战进度.value = `翻译全部效果（${总条数} 项，1 次 AI 调用）…`;
-    const 翻译表 = await 翻译战斗解释(
+    const { 表, 失败 } = await 翻译战斗解释(
       单位列表.map(u => ({ id: u.id, 效果源: 效果源[u.id] ?? [] })),
     );
-    for (const u of 单位列表) {
-      u.技能 = 翻译表[u.id] ?? {};
-      const 缺失 = (效果源[u.id] ?? []).map(s => s.名称).filter(名称 => !(名称 in u.技能));
-      if (缺失.length) {
-        日志.value.push(`技能翻译失败（本场不可用）：${缺失.join('、')}`);
-      }
+    应用翻译(单位列表, 表);
+
+    // 有失败 → 停在复核界面：显示**原因**、可勾选重试，而不是直接带着缺失开战
+    if (失败.length > 0) {
+      翻译失败清单.value = 失败.map(f => ({ ...f, 选中: true }));
+      待开战.value = { 单位列表, 开场模式 };
+      开战进度.value = `${失败.length} 项翻译失败，勾选后可重试，或直接带着缺失开战`;
+      return;
     }
 
-    开战进度.value = '掷先攻、初始化战场…';
-    const 选项 = 开场距离选项().find(o => o.名 === 开场模式) ?? 开场距离选项()[2];
-    const 战斗0 = 初始化战斗状态(单位列表, 开场距离随机(选项.范围));
-    战斗.value = 战斗0;
-    await 写战斗状态(战斗0);
-    日志.value.push(`开战：${开场模式}，共 ${单位列表.length} 个单位`);
-    阶段.value = '战斗';
+    await 落定开战(单位列表, 开场模式);
+  } catch (e: any) {
+    日志.value.push(`开战失败：${e?.message ?? e}`);
+  } finally {
+    开战中.value = false;
+  }
+}
 
-    // 进入第 1 回合：重置行动槽/额度 → 阶段A → 生成敌方意图
-    开战进度.value = '生成敌方意图…';
-    await 开始回合();
+/** 把翻译结果合并进各单位（重试时也走这里，所以是合并不是替换） */
+function 应用翻译(单位列表: 战斗单位[], 表: Record<string, Record<string, 战斗解释>>) {
+  for (const u of 单位列表) u.技能 = { ...(u.技能 ?? {}), ...(表[u.id] ?? {}) };
+}
+
+/** 翻译过关（或玩家选择带着缺失走）之后，真正开战 */
+async function 落定开战(单位列表: 战斗单位[], 开场模式: string) {
+  开战进度.value = '掷先攻、初始化战场…';
+  const 选项 = 开场距离选项().find(o => o.名 === 开场模式) ?? 开场距离选项()[2];
+  const 战斗0 = 初始化战斗状态(单位列表, 开场距离随机(选项.范围));
+  战斗.value = 战斗0;
+  await 写战斗状态(战斗0);
+  日志.value.push(`开战：${开场模式}，共 ${单位列表.length} 个单位`);
+  阶段.value = '战斗';
+
+  // 进入第 1 回合：重置行动槽/额度 → 阶段A → 生成敌方意图
+  开战进度.value = '生成敌方意图…';
+  await 开始回合();
+}
+
+/** 复核界面：重新解析**勾选的那些**（仍是一次批量调用，只发选中的） */
+async function 重新解析() {
+  const 选中 = 翻译失败清单.value.filter(f => f.选中);
+  if (选中.length === 0 || 复核忙碌.value || !待开战.value) return;
+  复核忙碌.value = true;
+  try {
+    // 按单位分组后一次发出
+    const 分组 = new Map<string, 单位效果源[]>();
+    for (const f of 选中) {
+      const 组 = 分组.get(f.单位) ?? [];
+      组.push(f.来源);
+      分组.set(f.单位, 组);
+    }
+    const { 表, 失败 } = await 翻译战斗解释(
+      [...分组.entries()].map(([id, 效果源]) => ({ id, 效果源 })),
+    );
+    应用翻译(待开战.value.单位列表, 表);
+    // 清单只保留这一轮**仍失败**的（成功的已经进技能表了）
+    翻译失败清单.value = 失败.map(f => ({ ...f, 选中: true }));
+    const 成功数 = 选中.length - 失败.length;
+    日志.value.push(
+      失败.length === 0
+        ? `重新解析成功：${成功数} 项已补上`
+        : `重新解析：${成功数} 项成功、${失败.length} 项仍失败（原因已更新）`,
+    );
+    if (翻译失败清单.value.length === 0) {
+      开战进度.value = '全部翻译成功，可以开战了';
+    }
+  } catch (e: any) {
+    日志.value.push(`重新解析失败：${e?.message ?? e}`);
+  } finally {
+    复核忙碌.value = false;
+  }
+}
+
+/** 放弃重试，带着缺失开战（把缺失项与原因记进日志，绝不静默） */
+async function 带着缺失开战() {
+  const ctx = 待开战.value;
+  if (!ctx || 开战中.value || 复核忙碌.value) return;
+  开战中.value = true;
+  try {
+    if (翻译失败清单.value.length > 0) {
+      日志.value.push(
+        `带着 ${翻译失败清单.value.length} 项未翻译开战：` +
+          翻译失败清单.value.map(f => `${f.名称}（${f.原因}）`).join('；'),
+      );
+    }
+    翻译失败清单.value = [];
+    await 落定开战(ctx.单位列表, ctx.开场模式);
   } catch (e: any) {
     日志.value.push(`开战失败：${e?.message ?? e}`);
   } finally {
@@ -308,6 +410,76 @@ async function 回准备() {
 </script>
 
 <style scoped lang="scss">
+.review-panel {
+  margin-top: 16px;
+  padding: 14px;
+  border: 1px solid #5a3a3a;
+  border-radius: 8px;
+  background: #1e1616;
+
+  h4 {
+    margin: 0 0 8px;
+    color: #e0a0a0;
+    font-size: 14px;
+  }
+}
+
+.review-hint {
+  margin: 0 0 12px;
+  font-size: 12px;
+  line-height: 1.6;
+  color: #999;
+}
+
+.review-row {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+  padding: 5px 0;
+  font-size: 13px;
+  border-top: 1px solid #2a2020;
+  cursor: pointer;
+
+  input { accent-color: #a66; }
+}
+
+.review-who {
+  color: #ddd;
+  flex-shrink: 0;
+}
+
+.review-why {
+  color: #d08a8a;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.review-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 12px;
+
+  button {
+    padding: 7px 14px;
+    background: #3a2424;
+    border: 1px solid #6a4040;
+    border-radius: 6px;
+    color: #edd;
+    font-size: 13px;
+    cursor: pointer;
+
+    &:hover { background: #4a2e2e; }
+    &:disabled { opacity: 0.45; cursor: default; }
+  }
+
+  .ghost {
+    background: transparent;
+    border-color: #444;
+    color: #bbb;
+    &:hover { background: #2a2a2a; }
+  }
+}
+
 .prep-log {
   margin-top: 14px;
   padding-top: 10px;

@@ -6,7 +6,7 @@
 import type { 战斗单位, 战斗解释, 战斗状态, 结算步骤 } from './types';
 import { sanitizeJsonSchema } from '@/wxhl-003/schemaSanitize';
 import type { ApiConfig } from './settings';
-import { 构建批量翻译提示词, 解析批量翻译结果, 批量战斗解释_SCHEMA } from './ai/skillInterpreter';
+import { 构建批量翻译提示词, 解析批量翻译结果, 批量战斗解释_SCHEMA, type 条目解析结果 } from './ai/skillInterpreter';
 import { 构建敌方意图提示词, 解析敌方意图, type 敌方意图 } from './ai/enemyTactics';
 import { 构建收尾提示词 } from './ai/aftermath';
 import { buff转字符串 } from './engine/buffMapper';
@@ -423,43 +423,73 @@ export async function aiGenerate(
   throw new Error(lastErr || '生成失败');
 }
 
+/** 翻译失败的条目 —— 带**原因**（给玩家看）与**来源**（勾选后重试时无需回查） */
+export interface 翻译失败项 {
+  单位: string;
+  名称: string;
+  原因: string;
+  来源: 单位效果源;
+}
+
+export interface 翻译批量结果 {
+  /** 单位 id → (效果名 → 战斗解释) */
+  表: Record<string, Record<string, 战斗解释>>;
+  /** 没翻出来的条目，供复核界面勾选重试 */
+  失败: 翻译失败项[];
+}
+
 /**
  * 一次性翻译**全部参战单位的效果** —— 整场战斗**只调 1 次 AI**（spec §10.1）。
  *
  * 为什么必须批量：早先是「每个技能各调一次、再按单位调 N 次」，一场战斗几十次请求，
  * 又慢又费额度（实战反馈的 bug）。现在拍平成一张带编号的清单，一次发出去、一次收回来。
  *
- * @param 单位列表 参战单位与其效果源
- * @returns 单位 id → (效果名 → 战斗解释)。翻不出来的条目**不在表里**，由调用方点名提示。
+ * 失败**不抛错也不静默**：整批失败（三次都吐不出合法 JSON）会把每条都标成失败并带上原因，
+ * 逐条失败带各自的字段错误 —— 一律交给调用方在复核界面显示并支持勾选重试。
+ *
+ * @returns `表`：单位 id → (效果名 → 战斗解释)；`失败`：带原因与来源的失败清单
  */
 export async function 翻译战斗解释(
   单位列表: Array<{ id: string; 效果源: 单位效果源[] }>,
-): Promise<Record<string, Record<string, 战斗解释>>> {
-  const 结果: Record<string, Record<string, 战斗解释>> = {};
-  for (const u of 单位列表) 结果[u.id] = {};
+): Promise<翻译批量结果> {
+  const 表: Record<string, Record<string, 战斗解释>> = {};
+  for (const u of 单位列表) if (!表[u.id]) 表[u.id] = {};
+  const 失败: 翻译失败项[] = [];
 
-  // 拍平成带编号的一维清单；回填表与之一一对应（按编号，不按名字 —— 名字会跨单位重名）
+  // 拍平成带编号的一维清单；来源单独存一份，失败时直接挂上去供重试
   const 条目: Array<{ 单位: string; 名称: string; 来源: Record<string, any> }> = [];
+  const 原始来源: 单位效果源[] = [];
   for (const u of 单位列表) {
-    for (const s of u.效果源 ?? []) 条目.push({ 单位: u.id, 名称: s.名称, 来源: s as any });
+    for (const s of u.效果源 ?? []) {
+      条目.push({ 单位: u.id, 名称: s.名称, 来源: s as any });
+      原始来源.push(s);
+    }
   }
-  if (条目.length === 0) return 结果;
+  if (条目.length === 0) return { 表, 失败 };
 
   const cfg = 读设置().快路;
   if (!cfg.url || !cfg.apiKey) {
     throw new Error('API 未配置：请先在设置里配置 API');
   }
 
-  const raw = await aiGenerate(cfg, 构建批量翻译提示词(条目), 批量战斗解释_SCHEMA);
-  const 逐条 = 解析批量翻译结果(raw, 条目.length);
+  let 逐条: 条目解析结果[];
+  try {
+    const raw = await aiGenerate(cfg, 构建批量翻译提示词(条目), 批量战斗解释_SCHEMA);
+    逐条 = 解析批量翻译结果(raw, 条目.length);
+  } catch (e: any) {
+    // 整批失败：不抛出去，改成「每条都失败」并带上原因 ——
+    // 抛出去玩家只会得到一个没有细节的错误，也没法勾选重试。
+    const 原因 = `整批请求失败：${e?.message ?? e}`;
+    逐条 = 条目.map(() => ({ 成功: false as const, 原因 }));
+  }
 
-  逐条.forEach((解释, i) => {
+  逐条.forEach((r, i) => {
     const 归属 = 条目[i];
-    if (解释) 结果[归属.单位][归属.名称] = 解释;
-    else console.warn('[wxhl-combat] 效果翻译失败（本场不可用）', 归属.名称);
+    if (r.成功) 表[归属.单位][归属.名称] = r.解释;
+    else 失败.push({ 单位: 归属.单位, 名称: 归属.名称, 原因: r.原因, 来源: 原始来源[i] });
   });
 
-  return 结果;
+  return { 表, 失败 };
 }
 
 /**

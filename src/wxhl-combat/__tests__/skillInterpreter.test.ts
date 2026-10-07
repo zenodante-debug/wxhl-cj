@@ -61,8 +61,8 @@ describe('skillInterpreter · 批量解析', () => {
     const 逐条 = 解析批量翻译结果(json, 2);
 
     expect(逐条).toHaveLength(2);
-    expect(逐条[0]).toBeDefined();
-    expect(逐条[1]).toBeDefined();
+    expect(逐条[0].成功).toBe(true);
+    expect(逐条[1].成功).toBe(true);
   });
 
   it('编号越界 / 非整数 → 跳过该条，不越界写入', () => {
@@ -70,24 +70,26 @@ describe('skillInterpreter · 批量解析', () => {
     const 逐条 = 解析批量翻译结果(json, 1);
 
     expect(逐条).toHaveLength(1);
-    expect(逐条[0]).toBeDefined();
+    expect(逐条[0].成功).toBe(true);
   });
 
-  it('某条字段不全 → 该位为 null，不因一条坏丢掉整批', () => {
+  it('某条字段不全 → 该条失败并带**原因**，不因一条坏丢掉整批', () => {
     const json = JSON.stringify({ 解释: [{ 编号: 0 }, 一条解释(1)] });
     const 逐条 = 解析批量翻译结果(json, 2);
 
-    expect(逐条[0]).toBe(null);
-    expect(逐条[1]).not.toBe(null);
+    expect(逐条[0].成功).toBe(false);
+    expect(逐条[0].成功 === false && 逐条[0].原因).toContain('字段不合法');
+    expect(逐条[1].成功).toBe(true);
   });
 
-  it('AI 漏回条目 → 缺的位置为 null', () => {
+  it('AI 漏回条目 → 缺的位置标失败并说明是漏条目', () => {
     const json = JSON.stringify({ 解释: [一条解释(0)] });
     const 逐条 = 解析批量翻译结果(json, 3);
 
-    expect(逐条[0]).not.toBe(null);
-    expect(逐条[1]).toBe(null);
-    expect(逐条[2]).toBe(null);
+    expect(逐条[0].成功).toBe(true);
+    expect(逐条[1].成功).toBe(false);
+    expect(逐条[1].成功 === false && 逐条[1].原因).toContain('漏条目');
+    expect(逐条[2].成功).toBe(false);
   });
 
   it('没有「解释」数组 → 抛错（交给 aiGenerate 的重试链路）', () => {
@@ -96,7 +98,7 @@ describe('skillInterpreter · 批量解析', () => {
 
   it('顶层直接是数组也认（有的模型会省掉外层）', () => {
     const 逐条 = 解析批量翻译结果(JSON.stringify([一条解释(0)]), 1);
-    expect(逐条[0]).not.toBe(null);
+    expect(逐条[0].成功).toBe(true);
   });
 });
 
