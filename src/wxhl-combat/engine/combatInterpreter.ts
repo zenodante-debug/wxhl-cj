@@ -60,9 +60,9 @@ export function 执行规则(
 }
 
 /**
- * 判定条件
+ * 判定条件（导出给 应用规则 用：条件不满足时要留下日志，不能静默什么都不发生）
  */
-function 判定条件(条件: 条件, 来源: 战斗单位, 目标: 战斗单位, 上下文?: 求值上下文): boolean {
+export function 判定条件(条件: 条件, 来源: 战斗单位, 目标: 战斗单位, 上下文?: 求值上下文): boolean {
   const 左值 = 求值(条件.左, 来源, 目标, 上下文);
   const 右值 = 求值(条件.右, 来源, 目标, 上下文);
 
@@ -214,6 +214,24 @@ function 标识符值(名: string, 取值: 取值, 来源: 战斗单位): number
       return 来源.MP_最大;
     case '最大耐力':
       return 来源.耐力_最大;
+    // 「血量低于 50%」「当前HP 不够放这个技能」这类条件全靠这几个标识符 ——
+    // 早先只有「最大」系列，卡面想按当前值判断就完全没法写（玩家报的重骑士例子）。
+    case '当前HP':
+    case 'HP_当前':
+      return 来源.HP_当前;
+    case '当前MP':
+    case 'MP_当前':
+      return 来源.MP_当前;
+    case '当前耐力':
+    case '耐力_当前':
+      return 来源.耐力_当前;
+    case 'HP比例':
+      return 来源.HP_最大 > 0 ? 来源.HP_当前 / 来源.HP_最大 : 0;
+    case '防御':
+      return 来源.防御;
+    case '闪避':
+    case '闪避值':
+      return 来源.闪避值;
     case 'STR修正':
       return 属性修正值(来源.属性.实际.STR, 来源.阶位);
     case 'AGI修正':

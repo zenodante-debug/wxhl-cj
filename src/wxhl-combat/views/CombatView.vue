@@ -63,7 +63,7 @@ import SetupView from './SetupView.vue';
 import BattleView from './BattleView.vue';
 import PendingModal from './PendingModal.vue';
 import { 初始化战斗状态, 开场距离随机, 开场距离选项 } from '../engine/setup';
-import { 跑一个回合, 开战常驻结算, 阶段A规则结算 } from '../engine/loop';
+import { 跑一个回合, 开战常驻结算, 阶段A规则结算, 阶段F规则结算 } from '../engine/loop';
 import { 阶段A资源恢复, 阶段F结算, 冷却递减, 濒死检定一轮, 濒死结算到底, 判定战局, 能行动 } from '../engine/turn';
 import { 行动槽重置 } from '../engine/actionEconomy';
 import { 移动距离计算, 移动额度重置 } from '../engine/distance';
@@ -473,13 +473,16 @@ async function 执行本轮(各单位: Record<string, { 填写: 行动槽填写;
     状态 = 本轮.状态;
     追加日志.push(...本轮.步骤.map(s => s.内容));
 
-    // 阶段F：持续伤害与状态递减
+    // 阶段F：持续伤害与状态递减 → 再来一遍「回合结束」规则（世界书的尾结算）
     const 新单位 = { ...状态.单位 };
     for (const [键, u] of Object.entries(新单位)) {
       const r = 阶段F结算(u, u.HP_最大);
       if (r.HP扣减 > 0) 追加日志.push(`${键} 持续伤害 -${r.HP扣减} → HP ${r.新状态.HP_当前}`);
       新单位[键] = r.新状态;
     }
+    const 回合结束步骤: 结算步骤[] = [];
+    状态 = 阶段F规则结算({ ...状态, 单位: 新单位 }, 回合结束步骤);
+    追加日志.push(...回合结束步骤.map(x => x.内容));
 
     战斗.value = { ...状态, 回合: 状态.回合 + 1, 单位: 新单位 };
     日志.value.push(...追加日志);

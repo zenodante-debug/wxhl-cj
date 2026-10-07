@@ -139,11 +139,29 @@ describe('skillInterpreter · 可空列表字段兜底（实战：模型省略�
   });
 });
 
-describe('skillInterpreter · 提示词必须教模型用上引擎真正执行的那四个触发点', () => {
+describe('skillInterpreter · 提示词必须教模型用上引擎真正执行的那十一个触发点', () => {
   const 提示词 = 构建批量翻译提示词([条目('终焉信标')]);
 
-  it('四个可执行触发点都写清楚（选了别的就等于这条效果不生效）', () => {
-    for (const 点 of ['常驻', '使用时', '命中时', '回合开始', '受击时']) expect(提示词).toContain(点);
+  it('11 个触发点全部写清楚（现在引擎全都执行了）', () => {
+    for (const 点 of ['常驻','进入战斗','回合开始','回合结束','使用时','攻击时','命中时','受击时','被命中后','击杀时','资源变化时']) {
+      expect(提示词).toContain(点);
+    }
+  });
+
+  it('「条件」怎么写（HP比例 / 当前HP / 自身资源）', () => {
+    expect(提示词).toContain('条件怎么写');
+    expect(提示词).toContain('HP比例');
+    expect(提示词).toContain('当前HP');
+  });
+
+  it('「防御」与四维属性点能改（重骑士那种换属性效果）', () => {
+    expect(提示词).toContain('防御');
+    expect(提示词).toMatch(/STR \/ AGI \/ CON \/ PER/);
+    expect(提示词).toContain('属性点');
+  });
+
+  it('诚实标出还没读的五个修正目标（写了不生效）', () => {
+    expect(提示词).toContain('还没读');
   });
 
   it('「该次攻击最终伤害×N」→ 用「最终乘区」（不是「伤害」那种递减乘区）', () => {
