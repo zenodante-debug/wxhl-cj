@@ -5,6 +5,7 @@ declare module 'node:fs' {
   const fs: {
     readFileSync(路径: string, 编码: string): string;
     readdirSync(目录: string): string[];
+    existsSync(路径: string): boolean;
     writeFileSync(路径: string, 内容: string): void;
     rmSync(路径: string, 选项?: { force?: boolean }): void;
   };
@@ -15,6 +16,7 @@ declare module 'node:path' {
   const path: {
     resolve(...段: string[]): string;
     join(...段: string[]): string;
+    basename(路径: string): string;
   };
   export default path;
 }

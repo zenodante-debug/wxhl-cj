@@ -14,10 +14,14 @@ $(() => {
     .attr('id', 'wxhl-combat-root')
     .appendTo('body');
 
-  // 修复脚本iframe隐藏时尺寸为0 → 覆盖层始终使用酒馆主页面尺寸
+  // 修复脚本iframe隐藏时尺寸为0 → 覆盖层始终使用酒馆主页面尺寸。
+  // **优先用 visualViewport**：手机浏览器的 innerHeight 包含地址栏，
+  // 用它定尺寸会让面板比可视区更高、把顶栏的关闭按钮顶出屏幕
+  // （手机端补丁 mobile-compat.js 还会再兜一层，这里是第一道）。
   const updateSize = () => {
-    const w = window.parent.innerWidth || document.documentElement.clientWidth;
-    const h = window.parent.innerHeight || document.documentElement.clientHeight;
+    const vv = (window.parent as any).visualViewport;
+    const w = Math.round(vv?.width || window.parent.innerWidth || document.documentElement.clientWidth);
+    const h = Math.round(vv?.height || window.parent.innerHeight || document.documentElement.clientHeight);
     $app.css({ width: w, height: h });
   };
   updateSize();
