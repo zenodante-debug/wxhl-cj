@@ -74,35 +74,41 @@
     }
   };
 
-  /** 悬浮球：夹进可视视口（App.vue 自己管拖动，这里只做"跑到屏幕外就拉回来"的兜底） */
+  /**
+   * 悬浮球：**每次 update 都摆一遍**（照抄 wxhl-003 的 placeButton 语义）。
+   *
+   * 为什么不能"只在出界时摆"（我上一版的写法，错在这里）：
+   * 出界判定依赖 getBoundingClientRect，而它一旦不可信（元素还没布局出来 → 0×0、
+   * 或被宿主带 transform 的祖先裁掉 → rect 恒为 0），判定就会认为"在界内"从而什么都不做，
+   * 球永远回不到屏幕上（玩家反馈：手机端找不到悬浮球图标）。
+   * 无条件摆放则每次都把 left/top/z-index/可见性重新钉一遍，跟着视口走，不依赖任何判定。
+   *
+   * 拖动中让位：App.vue 拖动时会打 `data-wxhl-touch-dragging="1"`，这期间不插手，
+   * 免得补丁和界面的拖动互相打架（与小手机同一套约定）。
+   */
   const placeLauncher = () => {
     const root = hostDocument.querySelector(ROOT_SELECTOR);
     const button = root?.querySelector('.combat-launcher');
     if (!button) return;
-    const rect = button.getBoundingClientRect();
+    if (button.dataset.wxhlTouchDragging === '1') return;
+
     const viewport = getViewport();
-    const 出界 =
-      rect.right < viewport.left + 4 ||
-      rect.left > viewport.left + viewport.width - 4 ||
-      rect.bottom < viewport.top + 4 ||
-      rect.top > viewport.top + viewport.height - 4;
-    if (!出界) {
-      // 在视野内 → 只保证可见性与触摸滚动别抢走拖动
-      setImportant(button, { visibility: 'visible', opacity: '1', 'touch-action': 'none' });
-      return;
-    }
-    const 尺寸 = { w: rect.width || 52, h: rect.height || 52 };
-    let 目标 = null;
+    const rect = button.getBoundingClientRect();
+    const 尺寸 = { w: Math.round(rect.width) || 52, h: Math.round(rect.height) || 52 };
+
+    // 落点：内存里的存档 → localStorage → 默认（右缘、略偏下；与小手机的 42% 错开）
+    let 存档 = null;
     try {
-      目标 = JSON.parse(hostWindow.localStorage.getItem(positionKey));
+      存档 = JSON.parse(hostWindow.localStorage.getItem(positionKey));
     } catch (_) {
       /* 忽略 */
     }
     const 起点 =
-      Number.isFinite(目标?.left) && Number.isFinite(目标?.top)
-        ? { left: 目标.left, top: 目标.top }
-        : { left: viewport.left + viewport.width - 尺寸.w - 14, top: viewport.top + viewport.height * 0.42 };
+      Number.isFinite(存档?.left) && Number.isFinite(存档?.top)
+        ? { left: 存档.left, top: 存档.top }
+        : { left: viewport.left + viewport.width - 尺寸.w - 14, top: viewport.top + viewport.height * 0.66 - 尺寸.h / 2 };
     const 位置 = clampPosition(起点.left, 起点.top, 尺寸.w, 尺寸.h);
+
     setImportant(button, {
       position: 'fixed',
       width: `${尺寸.w}px`,
@@ -115,6 +121,17 @@
       'z-index': '2147483647',
     });
     placeAtViewport(button, 位置.left, 位置.top);
+
+    // 诊断：手机上把「视口 / 落点 / 实际 rect」打一次（值变了才打，不刷屏）。
+    // 万一还有"找不到悬浮球"的情况，这一行就能直接说明它到底跑去了哪里。
+    const 指纹 = `${viewport.left},${viewport.top},${viewport.width},${viewport.height}|${位置.left},${位置.top}|${Math.round(rect.left)},${Math.round(rect.top)}`;
+    if (指纹 !== 上次诊断) {
+      上次诊断 = 指纹;
+      const 之后 = button.getBoundingClientRect();
+      console.log(
+        `[wxhl-combat] 悬浮球：视口 ${viewport.left},${viewport.top} ${viewport.width}×${viewport.height} → 目标 ${Math.round(位置.left)},${Math.round(位置.top)}；实际 ${Math.round(之后.left)},${Math.round(之后.top)} ${Math.round(之后.width)}×${Math.round(之后.height)}`,
+      );
+    }
   };
 
   /**
@@ -187,6 +204,8 @@
       });
     }
   };
+
+  let 上次诊断 = '';
 
   const update = () => {
     if (!isPhone()) return;

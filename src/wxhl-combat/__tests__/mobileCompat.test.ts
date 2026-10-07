@@ -63,3 +63,34 @@ describe('手机端补丁 mobile-compat.js', () => {
     expect(入口源码).toContain('visualViewport');
   });
 });
+
+describe('手机端补丁 · 悬浮球必须能找得到', () => {
+  it('**无条件摆放**：不能把"摆位置"放进"出界才做"的分支里', () => {
+    // 上一版就是栽在这里：出界判定依赖 getBoundingClientRect，
+    // 而它一旦不可信（元素未布局 → 0×0，或被带 transform 的祖先裁掉 → rect 恒 0），
+    // 判定就认为"在界内"→ 什么都不做 → 球永远回不到屏幕上（玩家报的"找不到图标"）。
+    const 段 = 补丁.slice(补丁.indexOf('const placeLauncher'), 补丁.indexOf('const fitShell'));
+    expect(段.length).toBeGreaterThan(0);
+    expect(补丁).toContain('const placeLauncher = () => {');
+    // 不能有"只在出界时才摆"的判定（注释里提到"出界"不算，这里查的是代码）
+    expect(段).not.toMatch(/const 出界/);
+    expect(段).not.toMatch(/if \(!?出界\)/);
+    expect(段).toMatch(/placeAtViewport\(button,/);
+  });
+
+  it('每次摆放都重新钉 position / 尺寸 / 可见性 / 层级（不依赖任何判定）', () => {
+    const 段 = 补丁.slice(补丁.indexOf('const placeLauncher'), 补丁.indexOf('const fitShell'));
+    for (const 键 of ["position: 'fixed'", "visibility: 'visible'", "opacity: '1'", "'z-index': '2147483647'"]) {
+      expect(段).toContain(键);
+    }
+  });
+
+  it('拖动期间让位：补丁与 App.vue 共用 data-wxhl-touch-dragging 约定', () => {
+    expect(补丁).toContain('wxhlTouchDragging');
+    expect(外壳源码).toContain('wxhlTouchDragging');
+  });
+
+  it('手机上有诊断日志（万一还找不到，那一行会直接说明它跑去哪了）', () => {
+    expect(补丁).toContain('悬浮球：视口');
+  });
+});

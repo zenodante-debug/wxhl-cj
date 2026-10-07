@@ -159,6 +159,9 @@ function onPointerDown(e: PointerEvent): void {
     moved: false,
   };
   拖动中.value = true;
+  // 打标记让手机补丁（mobile-compat.js）在拖动期间不要插手 —— 与小手机同一套约定，
+  // 否则补丁的定时归位会跟拖动抢位置（抖成一片）。
+  el.dataset.wxhlTouchDragging = '1';
   摆放(rect.left, rect.top); // 先钉在当前视口位置，避免起点跳变
   try {
     el.setPointerCapture(e.pointerId);
@@ -184,6 +187,7 @@ function onPointerUp(e: PointerEvent): void {
   const moved = 拖动.moved;
   拖动 = null;
   拖动中.value = false;
+  if (悬浮球.value) delete 悬浮球.value.dataset.wxhlTouchDragging;
   try {
     悬浮球.value?.releasePointerCapture(e.pointerId);
   } catch {
