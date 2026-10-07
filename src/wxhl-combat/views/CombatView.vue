@@ -12,7 +12,7 @@
       <div v-if="翻译失败清单.length > 0" class="review-panel">
         <h4>翻译复核 · {{ 翻译失败清单.length }} 项未成功</h4>
         <p class="review-hint">
-          勾选要重试的项后点「重新解析选中项」（仍是一次批量调用，只发选中的）；也可以直接带着缺失开战 —— 缺失项会写进战斗日志，不会静默。
+          勾选要重试的项后点「重新解析选中项」（只发选中的；条目多了会切成几批、顺序发送，不并发）；也可以直接带着缺失开战 —— 缺失项会写进战斗日志，不会静默。
         </p>
         <label v-for="(f, i) in 翻译失败清单" :key="i" class="review-row">
           <input type="checkbox" v-model="f.选中" />
@@ -214,7 +214,7 @@ async function 落定开战(单位列表: 战斗单位[], 开场模式: string) 
   await 开始回合();
 }
 
-/** 复核界面：重新解析**勾选的那些**（仍是一次批量调用，只发选中的） */
+/** 复核界面：重新解析**勾选的那些**（切块顺序发送，不并发） */
 async function 重新解析() {
   const 选中 = 翻译失败清单.value.filter(f => f.选中);
   if (选中.length === 0 || 复核忙碌.value || !待开战.value) return;

@@ -376,9 +376,14 @@ export async function aiGenerate(
   userInput: string,
   jsonSchema?: { name: string; value: Record<string, any> },
   用途: string = 'AI',
+  选项?: { 超时?: number },
 ): Promise<string> {
   if (!cfg.url || !cfg.apiKey) throw new Error('API 未配置');
   if (typeof generateRaw !== 'function') throw new Error('generateRaw 不可用');
+
+  // 超时允许被调用方放大：翻译这种大批量输出，30s 根本生成不完（实战反馈）——
+  // 调用方按条目数估一个更长的超时，用 cfg.timeout 兜底。
+  const 超时 = 选项?.超时 ?? cfg.timeout;
 
   let prompt = userInput;
   if (jsonSchema) {
@@ -406,7 +411,7 @@ export async function aiGenerate(
         `[wxhl-combat] AI 请求 #${AI调用计数}（${用途}）· 输入 ${Math.round(prompt.length / 1024)}KB · 尝试 ${attempt + 1}/3`,
       );
 
-      const result = await 带超时(generateRaw(config) as Promise<any>, cfg.timeout);
+      const result = await 带超时(generateRaw(config) as Promise<any>, 超时);
       const text = typeof result === 'string' ? result : (result as any).content || '';
 
       if (!jsonSchema) return text;
@@ -432,8 +437,11 @@ export async function aiGenerate(
         schema已降级 = true;
         continue;
       }
-      if (attempt < 2 && !jsonSchema) {
-        await new Promise(r => setTimeout(r, 2000));
+      // 限流（429 / Too Many Requests）要**长间隔退避**，不能像普通失败那样 1.5s 就重发 ——
+      // 越退越短的猛发正是把一次失败放大成一串请求、撞死限流的原因。
+      const 限流 = /429|too\s*many|rate.?limit/i.test(lastErr);
+      if (attempt < 2) {
+        await new Promise(r => setTimeout(r, 限流 ? 8000 + attempt * 7000 : jsonSchema ? 1500 : 2000));
         continue;
       }
     }
@@ -524,13 +532,72 @@ export async function 整理翻译缓存(
 }
 
 /**
+ * 每批最多翻译的条目数。
+ *
+ * 为什么不能一次全发：一条回复要装下每条一个完整的 `战斗解释` 对象。卡上**一个 boss 就有
+ * 15 个效果**，一次回复根本装不下 —— 装不下的三种死法（实战反馈）：超时（生成不完）、
+ * 截断（输出 token 上限，漏条目）、漏字段。所以必须切块，每批小到一个模型真的能一次回完。
+ *
+ * 这不是"分效果"：每批最多 N 项，**尽量整个角色一批**，只有单个角色自己超过上限才拆。
+ */
+const 翻译每批上限 = 10;
+
+/**
+ * 把待翻条目打包成若干批（保持输入顺序）。尽量整个单位装进一批；一个单位自己超过上限
+ * 才拆成上限大小的小批。批间不重叠、不丢项、不漏项。
+ */
+function 打包翻译批次(待翻: 翻译条目[]): 翻译条目[][] {
+  // 先按单位切成连续段（保持出现顺序，不切散同一个单位）
+  const 段列表: 翻译条目[][] = [];
+  for (let i = 0; i < 待翻.length; ) {
+    let j = i;
+    while (j < 待翻.length && 待翻[j].单位 === 待翻[i].单位) j++;
+    段列表.push(待翻.slice(i, j));
+    i = j;
+  }
+
+  const 批: 翻译条目[][] = [];
+  let 当前: 翻译条目[] = [];
+  for (const 段 of 段列表) {
+    if (段.length <= 翻译每批上限 && 当前.length + 段.length <= 翻译每批上限) {
+      当前.push(...段); // 整个单位装进当前批
+    } else if (段.length <= 翻译每批上限) {
+      if (当前.length) 批.push(当前);
+      当前 = [...段]; // 这个单位开新批
+    } else {
+      // 这个单位自己超过上限 → 先把当前批收尾，再把它拆成上限大小的小批
+      if (当前.length) 批.push(当前);
+      当前 = [];
+      for (let k = 0; k < 段.length; k += 翻译每批上限) 批.push(段.slice(k, k + 翻译每批上限));
+    }
+  }
+  if (当前.length) 批.push(当前);
+  return 批;
+}
+
+/** 翻译超时按条目数自适应：大批量输出 30s 根本生成不完。基础 60s + 每项 3s，封顶 150s。 */
+function 翻译超时(条目数: number, 基础: number): number {
+  return Math.min(Math.max(基础 || 0, 60000 + 条目数 * 3000), 150000);
+}
+
+/** 待翻译条目（内部形状：带归属单位与内容指纹） */
+type 翻译条目 = {
+  单位: string;
+  名称: string;
+  来源: Record<string, any>;
+  原始: 单位效果源;
+  指纹: string;
+};
+
+/**
  * 一次性翻译**全部参战单位的效果**。
  *
- * 两条省法：
  * 1. **跨战斗缓存**（spec §10.2）：已经翻过的条目按内容指纹直接命中，不进请求；
  *    全命中时**一次 AI 都不调**。技能升级 / 换装备会改指纹，自动重翻。
- * 2. **整场只 1 次调用**（spec §10.1）:未命中的条目拍平成一张带编号的清单，
- *    一次发出去、一次收回来（早先是每个技能各调一次，几十次请求，实战反馈的 bug）。
+ * 2. **按批量大小切块、顺序发送（不并发）**：小场面（≤ `翻译每批上限` 项）是一次调用；
+ *    一个 boss 就有十几个效果时，一条回复装不下（超时 / 截断 / 漏字段），所以按批切块。
+ *    切块不是"分效果"：每批最多 N 项、尽量整个角色一批。绝不并发 —— 「并发上限 /
+ *    too many request」就是被并发打出来的（实战反馈）。
  *
  * 失败**不抛错也不静默**：整批失败（三次都吐不出合法 JSON）会把每条都标成失败并带上原因，
  * 逐条失败带各自的字段错误 —— 一律交给调用方在复核界面显示并支持勾选重试。
@@ -546,13 +613,7 @@ export async function 翻译战斗解释(
   const 失败: 翻译失败项[] = [];
 
   // 拍平成带编号的一维清单；来源原样留一份，失败时直接挂上去供复核界面重试
-  const 条目: Array<{
-    单位: string;
-    名称: string;
-    来源: Record<string, any>;
-    原始: 单位效果源;
-    指纹: string;
-  }> = [];
+  const 条目: 翻译条目[] = [];
   for (const u of 单位列表) {
     for (const s of u.效果源 ?? []) {
       条目.push({ 单位: u.id, 名称: s.名称, 来源: s as any, 原始: s, 指纹: 效果指纹(s) });
@@ -562,7 +623,7 @@ export async function 翻译战斗解释(
 
   // 命中缓存的先落表；只把没命中的送去翻译
   const 缓存 = 读翻译缓存();
-  const 待翻: typeof 条目 = [];
+  const 待翻: 翻译条目[] = [];
   for (const e of 条目) {
     const 已有 = 缓存[e.指纹];
     if (已有) 表[e.单位][e.名称] = 已有;
@@ -598,40 +659,32 @@ export async function 翻译战斗解释(
     });
   };
 
-  /** 一次 AI 调用翻译一批（调用方保证批内与输入同序） */
-  const 翻一批 = async (批次: typeof 待翻): Promise<条目解析结果[]> => {
-    const raw = await aiGenerate(cfg, 构建批量翻译提示词(批次), 批量战斗解释_SCHEMA, `技能翻译（共 ${批次.length} 项）`);
+  /** 一次 AI 调用翻译一批（调用方保证批内与输入同序）；超时按条目数自适应放大 */
+  const 翻一批 = async (批次: 翻译条目[]): Promise<条目解析结果[]> => {
+    const raw = await aiGenerate(
+      cfg,
+      构建批量翻译提示词(批次),
+      批量战斗解释_SCHEMA,
+      `技能翻译（共 ${批次.length} 项）`,
+      { 超时: 翻译超时(批次.length, cfg.timeout) },
+    );
     return 解析批量翻译结果(raw, 批次.length);
   };
 
-  try {
-    // 默认：**整场一次调用**，把全部待翻一次性发给 AI（玩家明确要求：绝不分效果并发）。
-    落一批(待翻, await 翻一批(待翻));
-  } catch (e: any) {
-    // 整批失败（超时 / 429 / 内容太长被拒）—— 玩家允许的底线是「**分角色**」，绝不分效果。
-    // 按单位分组、**顺序**重试（带间隔，不并发）。一个角色的批量仍是一次调用。
-    const 分组 = new Map<string, typeof 待翻>();
-    for (const e of 待翻) {
-      const 组 = 分组.get(e.单位) ?? [];
-      组.push(e);
-      分组.set(e.单位, 组);
-    }
-    if (分组.size <= 1) {
-      // 只有一个单位，没法再按角色拆 —— 标成失败并带上原因，交给复核界面重试
+  // 按批量大小切块、**顺序**发送（不并发）。
+  // 一次要翻的效果太多时，模型一条回复装不下 —— 装不下的三种死法（实战反馈）：
+  // 超时（生成不完）/ 截断（输出 token 上限，漏条目）/ 漏字段。所以每批压到能一次回完的大小。
+  // 切块不是"分效果"：每批最多 N 项、尽量整个角色一批。批间留间隔，别把限流打出来。
+  const 批列表 = 打包翻译批次(待翻);
+  for (let i = 0; i < 批列表.length; i++) {
+    const 一批 = 批列表[i];
+    try {
+      落一批(一批, await 翻一批(一批));
+    } catch (e: any) {
       const 原因 = `整批请求失败：${e?.message ?? e}`;
-      待翻.forEach(b => 失败.push({ 单位: b.单位, 名称: b.名称, 原因, 来源: b.原始 }));
-    } else {
-      for (const 批次 of 分组.values()) {
-        try {
-          落一批(批次, await 翻一批(批次));
-        } catch (e2: any) {
-          const 原因 = `整批失败、按角色重试也失败：${e2?.message ?? e2}`;
-          批次.forEach(b => 失败.push({ 单位: b.单位, 名称: b.名称, 原因, 来源: b.原始 }));
-        }
-        // 顺序发送，别并发 —— 「并发上限 / too many request」就是被并发打出来的
-        await new Promise(r => setTimeout(r, 600));
-      }
+      一批.forEach(b => 失败.push({ 单位: b.单位, 名称: b.名称, 原因, 来源: b.原始 }));
     }
+    if (i < 批列表.length - 1) await new Promise(r => setTimeout(r, 800)); // 顺序，不并发
   }
 
   if (有新增) 写翻译缓存(新缓存);

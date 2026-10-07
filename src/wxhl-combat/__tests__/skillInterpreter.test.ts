@@ -115,3 +115,26 @@ describe('skillInterpreter · 单条校验', () => {
     expect(() => 解析翻译结果('not json')).toThrow();
   });
 });
+
+describe('skillInterpreter · 可空列表字段兜底（实战：模型省略了「托管」）', () => {
+  it('缺「托管」→ 兜底 []，不判失败（乌尔奇奥拉 15 项全因这个被丢）', () => {
+    const 没有托管 = 一条解释(0);
+    delete (没有托管 as any).托管;
+
+    expect(校验战斗解释(没有托管).托管).toEqual([]);
+  });
+
+  it('缺「规则」→ 兜底 []，不判失败', () => {
+    const 没有规则 = 一条解释(0);
+    delete (没有规则 as any).规则;
+
+    expect(校验战斗解释(没有规则).规则).toEqual([]);
+  });
+
+  it('真正必填的字段（如 行动消耗）缺了 → 仍然抛错', () => {
+    const 缺行动消耗 = 一条解释(0);
+    delete (缺行动消耗 as any).行动消耗;
+
+    expect(() => 校验战斗解释(缺行动消耗)).toThrow('行动消耗');
+  });
+});

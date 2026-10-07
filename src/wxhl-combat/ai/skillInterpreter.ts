@@ -81,7 +81,7 @@ export function 构建批量翻译提示词(条目: 待翻译条目[]): string {
         `冷却: ${条.来源?.冷却 ?? ''}`,
         `射程: ${条.来源?.射程 ?? ''}`,
         `目标: ${条.来源?.目标 ?? ''}`,
-        `效果: ${JSON.stringify(条.来源?.效果 ?? {}, null, 2)}`,
+        `效果: ${JSON.stringify(条.来源?.效果 ?? {})}`, // 紧凑序列化（不用 null,2 缩进）—— 提示词越小越快、越不容易撞限
       ].join('\n'),
     )
     .join('\n\n');
@@ -120,8 +120,10 @@ export function 校验战斗解释(对象: any): 战斗解释 {
   if (!对象.分类) throw new Error('缺少必填字段: 分类');
   if (!对象.类型) throw new Error('缺少必填字段: 类型');
   if (对象.可预判 === undefined) throw new Error('缺少必填字段: 可预判');
-  if (!Array.isArray(对象.规则)) throw new Error('缺少必填字段: 规则');
-  if (!Array.isArray(对象.托管)) throw new Error('缺少必填字段: 托管');
+  // 规则 / 托管是**可空的列表**：模型对「没有要托管的」常会直接省略这个键。
+  // 把它当必填，会让一整批明明翻对了的条目被判失败（实战：乌尔奇奥拉 15 项全因缺托管被丢）。
+  if (!Array.isArray(对象.规则)) 对象.规则 = [];
+  if (!Array.isArray(对象.托管)) 对象.托管 = [];
   return 对象 as 战斗解释;
 }
 
