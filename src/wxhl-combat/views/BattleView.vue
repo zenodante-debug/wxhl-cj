@@ -38,6 +38,13 @@
 
     <!-- 行动区：玩家填槽 → 「执行本轮」 -->
     <div class="action-zone">
+      <!-- 进度：生成敌方意图是一次几十秒的 AI 调用。没有这个，玩家看到的是一个灰按钮 +
+           空白意图区，会以为界面坏了（和之前「点开战没反应」同一类） -->
+      <div v-if="进度" class="progress" role="status" aria-live="polite">
+        <span class="spinner" aria-hidden="true"></span>
+        <span>{{ 进度 }}</span>
+      </div>
+
       <!-- 敌方意图（阶段 ③ 预公开）；未开战/无意图时不渲染 -->
       <div v-if="敌方意图?.length" class="intent-block">
         <div class="intent-title">敌方意图</div>
@@ -110,6 +117,8 @@ const props = defineProps<{
   敌方意图?: 敌方意图[];
   /** 上层忙碌（回合编排 / 本轮结算中）→ 禁用「执行本轮」，挡异步重入 */
   禁用?: boolean;
+  /** 正在忙什么（如「正在生成敌方意图（第 3 回合）…」）—— 非空时显示转圈圈 */
+  进度?: string;
 }>();
 
 const emit = defineEmits<{ (e: '执行本轮', 填写: 行动槽填写, 目标: string): void }>();
@@ -207,6 +216,32 @@ function 执行本轮(): void {
   border: 1px solid #333;
   border-radius: 8px;
   background: #1a1a1a;
+}
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 10px;
+  padding-bottom: 8px;
+  border-bottom: 1px dashed #333;
+  font-size: 13px;
+  color: #9cc;
+  line-height: 1.5;
+}
+
+.spinner {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #3a5a5a;
+  border-top-color: #9cc;
+  border-radius: 50%;
+  animation: progress-spin 0.8s linear infinite;
+}
+
+@keyframes progress-spin {
+  to { transform: rotate(360deg); }
 }
 .intent-block { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px dashed #333; }
 .intent-title { color: #d99; font-size: 13px; font-weight: 700; margin-bottom: 4px; }

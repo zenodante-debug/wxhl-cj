@@ -9,7 +9,7 @@ import type { 状态条目 } from '../types';
 /**
  * buff → 字符串（写入 MVU 变量的 状态.特殊状态）
  * 格式：人类段|引擎段
- * 例子："2层|持续3回合"
+ * 例子："2层|持续3回合"、"持续2回合|@修正=伤害:0.3"
  */
 export function buff转字符串(buff: 状态条目): string {
   const 段: string[] = [];
@@ -21,6 +21,12 @@ export function buff转字符串(buff: 状态条目): string {
 
   // 持续回合（人类段）
   段.push(`持续${buff.持续}回合`);
+
+  // 数值修正（引擎段）。前缀 `@修正=` 是刻意的：不加前缀的话，
+  // 「伤害:0.3」会被 `字符串转buff` 当成一个词条名吞掉。
+  if (buff.数值修正 && Object.keys(buff.数值修正).length > 0) {
+    段.push(`@修正=${Object.entries(buff.数值修正).map(([k, v]) => `${k}:${v}`).join(',')}`);
+  }
 
   // 词条（引擎段）
   if (buff.词条 && buff.词条.length > 0) {
@@ -39,6 +45,7 @@ export function 字符串转buff(名: string, 字符串: string): 状态条目 {
   let 持续 = 1;
   let 层数: number | undefined;
   let 词条: string[] | undefined;
+  let 数值修正: Record<string, number> | undefined;
 
   for (const s of 段) {
     // 解析层数
@@ -55,6 +62,18 @@ export function 字符串转buff(名: string, 字符串: string): 状态条目 {
       continue;
     }
 
+    // 解析数值修正（引擎段）
+    const 修正匹配 = s.match(/^@修正=(.+)$/);
+    if (修正匹配) {
+      数值修正 = {};
+      for (const 项 of 修正匹配[1].split(',')) {
+        const [键, 值] = 项.split(':');
+        const 数 = Number(值);
+        if (键 && Number.isFinite(数)) 数值修正[键] = 数;
+      }
+      continue;
+    }
+
     // 其他都当词条
     if (s.trim()) {
       if (!词条) 词条 = [];
@@ -67,5 +86,6 @@ export function 字符串转buff(名: string, 字符串: string): 状态条目 {
     持续,
     层数,
     词条,
+    ...(数值修正 && Object.keys(数值修正).length ? { 数值修正 } : {}),
   };
 }

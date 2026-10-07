@@ -38,6 +38,7 @@
         :日志="日志"
         :敌方意图="敌方意图列表"
         :禁用="忙碌"
+        :进度="战场进度"
         @执行本轮="执行本轮"
       />
       <PendingModal :待决="战斗.待决" @决策="处理决策" />
@@ -105,6 +106,12 @@ const 待开战 = ref<{ 单位列表: 战斗单位[]; 开场模式: string } | n
 const 复核忙碌 = ref(false);
 /** 已勾选的失败项数 */
 const 选中项数 = computed(() => 翻译失败清单.value.filter(f => f.选中).length);
+/**
+ * 战场内的进度文案（「结算本轮…」/「正在生成敌方意图（第 N 回合）…」）。
+ * 生成敌方意图是一次几十秒的 AI 调用，这期间界面只有一个灰按钮和空白意图区 ——
+ * 没有这行字，玩家会以为坏了（和之前「点开战没反应」同一类反馈）。
+ */
+const 战场进度 = ref('');
 
 function 空战斗(): 战斗状态 {
   return { 进行中: false, 回合: 0, 先攻: [], 单位: {}, 待决: null, 领域: [] };
@@ -125,6 +132,7 @@ async function 开始战斗(选择: { id: string; 阵营: '我方' | '敌方' }[
   日志.value = [];
   敌方意图列表.value = [];
   战斗结束.value = false;
+  战场进度.value = '';
   翻译失败清单.value = [];
   待开战.value = null;
   阶段.value = '准备'; // 失败时留在准备态（Review Focus 5）
@@ -289,8 +297,15 @@ async function 推进回合() {
   战斗.value = { ...战斗.value, 单位: 新单位 };
   日志.value.push(`—— 第 ${战斗.value.回合} 回合 ——`);
 
-  // 敌方意图：一次 AI 调用，为全体敌方决定本回合行动
-  敌方意图列表.value = await 生成敌方意图(战斗.value);
+  // 敌方意图：**每回合一次**，必须在阶段A（行动槽/额度重置、资源恢复）之后生成 ——
+  // 否则提示词里给出的是上一轮的残槽，模型会按「槽已用完」决策，直接导致敌人不出招。
+  // 也用回合开始时的 HP/距离/状态：这正是「意图预公开」的前提（spec §9.2 ③）。
+  战场进度.value = `正在生成敌方意图（第 ${战斗.value.回合} 回合，1 次 AI 调用）…`;
+  try {
+    敌方意图列表.value = await 生成敌方意图(战斗.value);
+  } finally {
+    战场进度.value = '';
+  }
   if (敌方意图列表.value.length === 0) {
     日志.value.push('【意图】模型没有给出任何敌方意图 —— 本回合敌人会全部空过');
   }
@@ -305,6 +320,7 @@ async function 推进回合() {
 async function 执行本轮(填写: 行动槽填写, 目标: string) {
   if (忙碌.value || 战斗结束.value) return;
   忙碌.value = true;
+  战场进度.value = '结算本轮…';
   let 进下一回合 = false;
   try {
     const { 行动: 玩家行动, 预置反应 } = 构造行动声明(填写, 目标);
@@ -355,6 +371,7 @@ async function 执行本轮(填写: 行动槽填写, 目标: string) {
   } catch (e: any) {
     日志.value.push(`本轮结算失败：${e?.message ?? e}`);
   } finally {
+    战场进度.value = '';
     忙碌.value = false;
   }
 
@@ -402,6 +419,7 @@ async function 回准备() {
   战斗.value = 空战斗();
   日志.value = [];
   敌方意图列表.value = [];
+  战场进度.value = '';
   战斗结束.value = false;
   阶段.value = '准备';
 }
