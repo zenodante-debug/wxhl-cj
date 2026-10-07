@@ -4,6 +4,7 @@
 declare module 'node:fs' {
   const fs: {
     readFileSync(路径: string, 编码: string): string;
+    readdirSync(目录: string): string[];
     writeFileSync(路径: string, 内容: string): void;
     rmSync(路径: string, 选项?: { force?: boolean }): void;
   };

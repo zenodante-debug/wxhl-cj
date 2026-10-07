@@ -30,7 +30,7 @@ import {
 import { 读设置, useSettingsStore } from '../settingsStore';
 import { 找单位, 跑敌方意图, 跑一个回合, 结算行动 } from '../engine/loop';
 import { 初始化战斗状态, 开场距离选项, 开场距离随机 } from '../engine/setup';
-import { 阶段A资源恢复, 阶段F结算 } from '../engine/turn';
+import { 阶段A资源恢复, 阶段F结算, 濒死检定一轮, 判定战局, 能行动 } from '../engine/turn';
 import { 行动槽重置 } from '../engine/actionEconomy';
 import { 距离带, 移动距离计算, 移动额度重置 } from '../engine/distance';
 import { 构造行动声明, 可提交 } from '../engine/actionInput';
@@ -49,6 +49,9 @@ describe('views 的 import 契约', () => {
       跑一个回合,
       阶段A资源恢复,
       阶段F结算,
+      濒死检定一轮,
+      判定战局,
+      能行动,
       行动槽重置,
       移动距离计算,
       移动额度重置,

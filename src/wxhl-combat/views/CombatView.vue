@@ -64,7 +64,7 @@ import BattleView from './BattleView.vue';
 import PendingModal from './PendingModal.vue';
 import { 初始化战斗状态, 开场距离随机, 开场距离选项 } from '../engine/setup';
 import { 跑一个回合 } from '../engine/loop';
-import { 阶段A资源恢复, 阶段F结算 } from '../engine/turn';
+import { 阶段A资源恢复, 阶段F结算, 濒死检定一轮, 判定战局, 能行动 } from '../engine/turn';
 import { 行动槽重置 } from '../engine/actionEconomy';
 import { 移动距离计算, 移动额度重置 } from '../engine/distance';
 import { 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
@@ -287,18 +287,34 @@ async function 带着缺失开战() {
 async function 开始回合() {
   if (忙碌.value) return;
   忙碌.value = true;
+  let 已收尾 = false;
   try {
     try {
       await 推进回合();
+      // 阶段A 的濒死检定就可能定生死（契约者连续三次失败 = 抹杀；或全员昏迷）→ 当场收尾
+      已收尾 = await 检查结局();
     } catch (e: any) {
       日志.value.push(`回合开始失败：${e?.message ?? e}`);
     }
-    await 写战斗状态(战斗.value);
+    // 收尾 已经把持久化清掉了，别再把战斗状态写回去
+    if (!已收尾) await 写战斗状态(战斗.value);
   } catch (e: any) {
     日志.value.push(`保存战斗状态失败：${e?.message ?? e}`);
   } finally {
     忙碌.value = false;
   }
+}
+
+/**
+ * 已分出胜负就收尾；返回是否已结束。
+ * 两处要用（阶段A 之后 / 一轮结算之后），判定本身在 engine/turn.判定战局（纯函数、有单测）。
+ */
+async function 检查结局(): Promise<boolean> {
+  const 结局 = 判定战局(战斗.value);
+  if (!结局) return false;
+  日志.value.push(结局 === '胜利' ? '—— 胜利 ——' : '—— 败北 ——');
+  await 收尾(结局);
+  return true;
 }
 
 /**
@@ -311,16 +327,25 @@ async function 开始回合() {
  */
 async function 推进回合() {
   const 新单位: Record<string, 战斗单位> = {};
+  const 濒死日志: string[] = [];
   for (const [键, u] of Object.entries(战斗.value.单位)) {
-    新单位[键] = {
+    let 单位: 战斗单位 = {
       ...阶段A资源恢复(u),
       行动槽: 行动槽重置(u.行动槽),
       // 移动额度 = 本回合【移动距离】（含「移动距离额外加成」）；老存档没有这个字段就按公式现算
       额度: 移动额度重置((u.移动距离 ?? 0) > 0 ? u.移动距离! : 移动距离计算(u.属性.实际.AGI, u.阶位, 0)),
     };
+    // 阶段A「生命状态检查」：倒下的单位**每回合**做一次濒死 CON 检定（DC12，2 成功稳定 / 3 失败死亡）。
+    // 世界书：HP 归零即进入濒死判定，失败达三次才宣告抹杀 —— 不死在别处，就在这一行。
+    const 检定 = 濒死检定一轮(单位);
+    if (检定) {
+      单位 = 检定.单位;
+      濒死日志.push(检定.文本);
+    }
+    新单位[键] = 单位;
   }
   战斗.value = { ...战斗.value, 单位: 新单位 };
-  日志.value.push(`—— 第 ${战斗.value.回合} 回合 ——`);
+  日志.value.push(`—— 第 ${战斗.value.回合} 回合 ——`, ...濒死日志);
 
   // 敌方意图：**每回合一次**，必须在阶段A（行动槽/额度重置、资源恢复）之后生成 ——
   // 否则提示词里给出的是上一轮的残槽，模型会按「槽已用完」决策，直接导致敌人不出招。
@@ -354,6 +379,9 @@ async function 执行本轮(各单位: Record<string, { 填写: 行动槽填写;
   忙碌.value = true;
   战场进度.value = '结算本轮…';
   let 进下一回合 = false;
+  // ⚠️ 必须声明在 try **外面**：finally 里要用它。写在 try 里（块级作用域）会让 finally 抛
+  // ReferenceError，紧跟着的 忙碌.value = false 就永远执行不到 —— 界面卡在「结算本轮」转不动。
+  let 本轮已结算 = false;
   try {
     // 把每个我方单位各自的填写翻成行动声明 —— 队友也要能被指挥（实战反馈：以前只能操作契约者）
     const 我方行动: Record<string, 意图行动[]> = {};
@@ -364,7 +392,9 @@ async function 执行本轮(各单位: Record<string, { 填写: 行动槽填写;
       if (反应) 预置反应.push(`${键}：${反应}`);
     }
 
-    if (Object.keys(我方行动).length === 0) {
+    // 全员倒地时允许空提交：濒死检定是「每回合」做的，回合推不动就永远等不到检定结果（死锁）。
+    const 无人能动 = !Object.values(战斗.value.单位).some(u => u.阵营 === '我方' && 能行动(u));
+    if (Object.keys(我方行动).length === 0 && !无人能动) {
       日志.value.push('请至少给一个单位下达行动，再执行本轮');
       return;
     }
@@ -381,8 +411,6 @@ async function 执行本轮(各单位: Record<string, { 填写: 行动槽填写;
 
     let 状态 = 战斗.value;
     const 追加日志: string[] = [];
-    // 这一轮真的跑起来了 → 才允许清空玩家填的槽（失败/校验不通过时不能丢玩家的输入）
-    let 本轮已结算 = false;
 
     // 按先攻顺序逐单位行动（玩家与敌方交错）—— 整段逻辑是 engine/loop.跑一个回合（纯函数、有单测）。
     // 为什么不写在 view 里：本仓库无 vue-tsc，`.vue` 只做语法编译、跑不到运行时，
@@ -404,16 +432,9 @@ async function 执行本轮(各单位: Record<string, { 填写: 行动槽填写;
     敌方意图列表.value = [];
     本轮已结算 = true;
 
-    // 结算胜负：任一方全部「战斗不能」（HP ≤ 0）→ 收尾
-    // 最小终止条件 —— 玩家侧也必须有一条，否则契约者 HP 归零后敌方每轮打一个 0 血目标、循环永不终止。
-    // （濒死 CON 检定 / 转阶段仍留 13f 的待决点交互）
-    const 敌方存活 = Object.values(战斗.value.单位).some(u => u.阵营 === '敌方' && u.HP_当前 > 0);
-    const 我方存活 = Object.values(战斗.value.单位).some(u => u.阵营 === '我方' && u.HP_当前 > 0);
-    if (!敌方存活 || !我方存活) {
-      日志.value.push(!我方存活 ? '—— 败北 ——' : '—— 胜利 ——');
-      await 收尾(!我方存活 ? '败北' : '胜利');
-      return; // 收尾 走完 finally 释放忙碌锁，不再进下一回合
-    }
+    // 战局判定（世界书：HP 归零是**濒死**，不是死亡；死亡要濒死检定连续三次失败）。
+    // 判定在 engine/turn.判定战局（纯函数、有单测）—— 别在 view 里手搓胜负条件。
+    if (await 检查结局()) return; // 收尾 走完 finally 释放忙碌锁，不再进下一回合
 
     await 写战斗状态(战斗.value);
     进下一回合 = true;

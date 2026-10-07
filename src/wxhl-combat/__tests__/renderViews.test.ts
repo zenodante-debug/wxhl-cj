@@ -176,3 +176,24 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
     expect(html).toContain('翻译缓存');
   });
 });
+
+describe('BattleView · 全员倒地时不能变成死锁', () => {
+  it('我方全在 0 血 → 按钮变成「推进回合」（否则回合推不动、濒死检定永远跑不了）', async () => {
+    const 状态 = 造战斗状态();
+    状态.单位['契约者'].HP_当前 = 0;
+    状态.单位['契约者'].濒死 = { 成功: 0, 失败: 1 } as any;
+    状态.单位['江薇芷'].HP_当前 = 0;
+
+    const html = await 渲染('BattleView.vue', { 状态, 日志: [], 敌方意图: [], 禁用: false, 进度: '' });
+
+    expect(html).toContain('推进回合');
+    expect(html).toContain('濒死 CON 检定');
+  });
+
+  it('还有人能动 → 正常显示「执行本轮」', async () => {
+    const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [], 禁用: false, 进度: '' });
+
+    expect(html).toContain('执行本轮');
+    expect(html).not.toContain('推进回合');
+  });
+});

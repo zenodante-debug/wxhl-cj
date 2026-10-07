@@ -18,6 +18,7 @@ import { 属性修正值 } from './rules';
 import { rollDie } from './dice';
 import { 执行规则 } from './combatInterpreter';
 import { 施加状态 } from './status';
+import { 标记濒死 } from './turn';
 import {
   混合伤害,
   武器伤害,
@@ -627,11 +628,13 @@ function 结算技能(
     });
 
     const HP变化前 = 守方.HP_当前;
-    const 新守方: 战斗单位 = {
+    // HP 归零 → 打上濒死标记（世界书：HP 归零即进入濒死判定，不是死亡；
+    // 死亡要濒死检定连续三次失败。见 turn.ts 的生死判定）
+    const 新守方: 战斗单位 = 标记濒死({
       ...守方,
       HP_当前: Math.max(守方.HP_当前 - 伤害, 0),
       护盾: 守方.护盾 - 护盾消耗,
-    };
+    });
     新状态.单位[守方键] = 新守方;
 
     步骤.push({

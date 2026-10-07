@@ -137,8 +137,12 @@
       </div>
 
       <div class="action-submit">
-        <button class="execute-btn" :disabled="!可提交本轮 || 禁用" @click="执行本轮">执行本轮</button>
-        <span class="dim">至少给一个单位下达行动（没下命令的单位本回合不出手）</span>
+        <button class="execute-btn" :disabled="!可提交本轮 || 禁用" @click="执行本轮">
+          {{ 有无可行动的我方 ? '执行本轮' : '推进回合（全员倒地，等濒死检定）' }}
+        </button>
+        <span class="dim">
+          {{ 有无可行动的我方 ? '至少给一个单位下达行动（没下命令的单位本回合不出手）' : '我方全员倒地 —— 每回合会做一次濒死 CON 检定（2 成功稳定 / 3 失败死亡）' }}
+        </span>
       </div>
     </div>
 
@@ -154,6 +158,7 @@ import { computed, reactive, ref, watch } from 'vue';
 import { 距离带 } from '../engine/distance';
 import { 可提交, type 行动槽填写 } from '../engine/actionInput';
 import { 造我方条目, 造技能展示, 显示名, type 我方条目 } from '../engine/viewModel';
+import { 能行动 } from '../engine/turn';
 import type { 敌方意图 } from '../ai/enemyTactics';
 import type { 战斗状态 } from '../types';
 
@@ -273,9 +278,17 @@ function 技能条目(条目: 我方条目) {
   return 造技能展示(条目.技能);
 }
 
-/** 能不能点「执行本轮」：至少一个单位真的出手（只预置反应不算） */
+/** 还有没有能行动的我方单位（HP > 0） */
+const 有无可行动的我方 = computed(() => 我方单位.value.some(x => 能行动(x)));
+
+/**
+ * 能不能点「执行本轮」。
+ * - 有人能动：至少要有一个单位真的出手（只预置反应不算）
+ * - **全员倒地**：允许空提交 —— 否则按钮永远是灰的、回合推不动，
+ *   而濒死检定是"每回合"做的，回合不推进 = 永远等不到检定结果 → 死锁
+ */
 const 可提交本轮 = computed(() =>
-  我方单位.value.some(x => 可提交(填写表[x.键] ?? {})),
+  有无可行动的我方.value ? 我方单位.value.some(x => 可提交(填写表[x.键] ?? {})) : true,
 );
 
 /**
