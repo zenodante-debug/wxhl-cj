@@ -21,6 +21,8 @@ import {
   写战斗状态,
   写回战斗结果,
   写收尾楼层,
+  拉取模型,
+  测试连接,
 } from '../store';
 import { 读设置, useSettingsStore } from '../settingsStore';
 import { 找单位, 跑敌方意图, 结算行动 } from '../engine/loop';
@@ -60,6 +62,8 @@ describe('views 的 import 契约', () => {
       可提交,
       // views/SettingsView.vue
       useSettingsStore,
+      拉取模型,
+      测试连接,
       // 非 view 直接引用，但同属 store 的公开入口（防回归）
       读设置,
       跑敌方意图,

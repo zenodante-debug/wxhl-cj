@@ -516,3 +516,27 @@ export async function 写战斗状态(状态: 战斗状态 | null): Promise<void
   if (!状态) delete 新变量.战斗;
   replaceVariables(新变量, { type: 'script', script_id: scriptId });
 }
+
+// ================================================================
+// 设置页的「拉取模型 / 测试连接」
+// 与 wxhl-003 小手机同一套做法：拉模型走酒馆助手的 getModelList，
+// 测试连接走与正式调用**完全相同**的 aiGenerate 通道（这样测通了才代表真能用）。
+// ================================================================
+
+/** 从该 API 拉取可用模型列表（酒馆助手的 getModelList）。失败抛错，由调用方展示。 */
+export async function 拉取模型(cfg: ApiConfig): Promise<string[]> {
+  if (!cfg.url) throw new Error('请先填写 API URL');
+  if (typeof getModelList !== 'function') throw new Error('getModelList 不可用（酒馆助手版本过旧？）');
+  const list = await getModelList({ apiurl: cfg.url, key: cfg.apiKey });
+  return Array.isArray(list) ? list : [];
+}
+
+/**
+ * 发一条最小请求验证连接 —— 走 `aiGenerate`（与正式调用同一条通道），
+ * 所以「测通」等价于「技能翻译/敌方意图/收尾正文都能发出去」。
+ * @returns AI 的回复片段（供界面展示，证明真的收到了内容）
+ */
+export async function 测试连接(cfg: ApiConfig): Promise<string> {
+  const 回复 = await aiGenerate(cfg, '请回复"连接成功"这四个字，不要任何其他内容。');
+  return String(回复 ?? '').trim().slice(0, 80);
+}
