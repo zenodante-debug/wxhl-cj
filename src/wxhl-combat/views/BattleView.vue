@@ -93,7 +93,7 @@
               </div>
               <div v-for="d in 技能条目(u)" :key="d.名" class="dt-row">
                 <span class="dt-name" :title="d.名">{{ d.名 }}</span>
-                <span>{{ d.行动消耗 || '—' }}</span>
+                <span>{{ d.行动类型 }}</span>
                 <span>{{ d.射程 || '—' }}</span>
                 <span>{{ d.目标 || '—' }}</span>
                 <span>{{ d.消耗 || '—' }}</span>
@@ -103,6 +103,19 @@
               </div>
               <div v-if="!技能条目(u).length" class="dt-empty">（没有已翻译的效果 —— 只能用基础武器攻击）</div>
             </div>
+          </div>
+
+          <!-- 效果详情：把每条规则翻成人话。玩家反馈「点技能完全不知道有什么用，
+               比如一个二阶段变身技能，完全不知道能干什么」——这里就是答案。 -->
+          <div class="ud-block">
+            <div class="ud-title">效果详情</div>
+            <div v-for="d in 技能条目(u)" :key="'eff-' + d.名" class="ud-eff">
+              <div class="ud-eff-head">
+                {{ d.名 }}<span class="dim2"> · {{ d.预览.头部.join(' · ') }}</span>
+              </div>
+              <div v-for="(行, i) in d.预览.行" :key="i" class="ud-line dim2">{{ 行 }}</div>
+            </div>
+            <div v-if="!技能条目(u).length" class="ud-line dim2">（无）</div>
           </div>
         </div>
       </div>
@@ -159,7 +172,10 @@
             <span class="slot-label">反应（预置）</span>
             <select v-model="填写表[u.键].反应">
               <option value="">不预置</option>
-              <option v-for="r in 反应选项" :key="r" :value="r">{{ r }}</option>
+              <!-- 反应动作**只列自己学过的**（行动类型 = 反应动作的技能）——
+                   以前这里是硬编码的六个名字（击溃/识破/招架/闪避/格挡/闪烁），
+                   没学过也能选，选了也没有任何结算。玩家反馈：取消预设，必须自己学。 -->
+              <option v-for="o in 反应选项(u)" :key="o.值" :value="o.值">{{ o.标签 }}</option>
             </select>
           </label>
           <label class="slot">
@@ -185,11 +201,43 @@
           </label>
           <span v-if="!免费选项(u).length" class="dim">（该单位没有免费行动）</span>
         </div>
+
+        <!-- 本回合**行动顺序**：玩家反馈「我次要行动和免费行动都是上 buff，
+             那总不能等我主要行动的大招放完了再上个寂寞吧？」→ 选完自己排。 -->
+        <div v-if="行动条目(u).length > 1" class="order-row">
+          <span class="slot-label">行动顺序（↑↓ 调）</span>
+          <span v-for="(a, i) in 行动条目(u)" :key="a.键" class="order-item">
+            <button class="ord-btn" :disabled="i === 0" title="上移" @click="调序(u, i, -1)">↑</button>
+            <span class="ord-name">{{ a.显示 }}</span>
+            <button class="ord-btn" :disabled="i === 行动条目(u).length - 1" title="下移" @click="调序(u, i, 1)">↓</button>
+          </span>
+        </div>
+
+        <!-- 选中项的效果预览：玩家反馈「各个行动的选项，不知道详细效果，
+             没办法直观地看出来」。选了什么，下面就摆出它到底干什么。 -->
+        <div v-if="选中预览(u).length" class="preview-block">
+          <div v-for="p in 选中预览(u)" :key="p.槽 + p.名" class="pv-item">
+            <div class="pv-head">
+              <span class="pv-slot">{{ p.槽 }}</span>
+              <span class="pv-name">{{ p.名 }}</span>
+              <span class="pv-meta">{{ p.预览.头部.join(' · ') }}</span>
+            </div>
+            <div v-for="(行, i) in p.预览.行" :key="i" class="pv-line">{{ 行 }}</div>
+          </div>
+        </div>
       </div>
 
       <div class="action-submit">
-        <button class="execute-btn" :disabled="!可提交本轮 || 禁用" @click="执行本轮">执行本轮</button>
-        <span class="dim">至少给一个单位下达行动（没下命令的单位本回合不出手）</span>
+        <button class="execute-btn" :disabled="!可提交本轮 || 禁用" @click="执行本轮">
+          {{ 追加模式 ? '提交追加行动' : '执行本轮' }}
+        </button>
+        <span class="dim">
+          {{
+            追加模式
+              ? '这是该单位的额外行动回合（槽位已重置为一整套）—— 指定行动后继续走完本轮剩下的先攻'
+              : '至少给一个单位下达行动（没下命令的单位本回合不出手）'
+          }}
+        </span>
       </div>
     </div>
 
@@ -203,8 +251,8 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
 import { 距离带 } from '../engine/distance';
-import { 可提交, type 行动槽填写 } from '../engine/actionInput';
-import { 造我方条目, 造技能展示, 显示名, type 我方条目 } from '../engine/viewModel';
+import { 可提交, 列行动条目, type 行动槽填写 } from '../engine/actionInput';
+import { 造我方条目, 造技能展示, 选中行动预览, 显示名, type 我方条目 } from '../engine/viewModel';
 import { 列行动选项 } from '../engine/actionOptions';
 import type { 敌方意图 } from '../ai/enemyTactics';
 import type { 战斗状态 } from '../types';
@@ -218,6 +266,8 @@ const props = defineProps<{
   禁用?: boolean;
   /** 正在忙什么（如「正在生成敌方意图（第 3 回合）…」）—— 非空时显示转圈圈 */
   进度?: string;
+  /** 追加行动回合模式：只给某个单位指定行动，按钮文案与提示随之变化 */
+  追加模式?: boolean;
 }>();
 
 const emit = defineEmits<{
@@ -296,6 +346,8 @@ const 我方单位 = computed<我方条目[]>(() => 造我方条目(props.状态
 /** 每个我方单位各自的槽位填写；键 = 状态.单位 的键 */
 const 填写表 = reactive<Record<string, 行动槽填写>>({});
 const 目标表 = reactive<Record<string, string>>({});
+/** 玩家调过的行动顺序（键 → 有序键列表）；没调过的单位不在这里，用默认顺序 */
+const 顺序表 = reactive<Record<string, string[]>>({});
 
 // 单位增删时补齐/清理填写表（Vue 3 的 reactive 对象新增键也是响应式的）
 watch(
@@ -344,8 +396,14 @@ watch(
   { immediate: true },
 );
 
-/** 反应槽可选项（空 = 不预置） */
-const 反应选项 = ['击溃', '识破', '招架', '闪避', '格挡', '闪烁'];
+/**
+ * 反应动作可选项：**只列该单位学过的、行动类型为「反应动作」的技能**。
+ * 玩家口径：「反应动作不应该是有预设的那些反应动作，必须是技能的类型是反应动作才算上。
+ * 取消预设的反应动作，必须要自己学。」→ 没学过就是空的（下拉里只剩"不预置"）。
+ */
+function 反应选项(u: 我方条目) {
+  return 列行动选项(u, '反应动作');
+}
 
 /** 展开详情的单位 id（详情在**单位卡**上，能一次看全状态/装备/技能） */
 const 展开角色 = ref<string[]>([]);
@@ -407,6 +465,35 @@ function 技能条目(条目: 我方条目) {
 }
 
 /**
+ * 该单位**已经选中**的行动的效果预览（主要/次要下拉 + 免费多选）。
+ * 形状与逻辑在 `engine/viewModel.选中行动预览`（纯函数、有测试钉死）。
+ */
+function 选中预览(u: 我方条目) {
+  return 选中行动预览(u, 填写表[u.键] ?? {});
+}
+
+/**
+ * 该单位本回合已选的行动条目（有序）。键的推法**来自引擎**（`列行动条目`）——
+ * 界面不自己推一遍键，否则两边一旦不一致，排序会静默失效。
+ */
+function 行动条目(u: 我方条目) {
+  const 基础 = 列行动条目(填写表[u.键] ?? {}, '');
+  const 序 = 顺序表[u.键] ?? [];
+  if (!序.length) return 基础;
+  const 有序 = 序.map(k => 基础.find(x => x.键 === k)).filter(Boolean) as typeof 基础;
+  return [...有序, ...基础.filter(x => !有序.includes(x))];
+}
+
+/** ↑↓ 调序：把当前顺序固化进 顺序表（换位置只是换数组里两个元素） */
+function 调序(u: 我方条目, i: number, 方向: -1 | 1) {
+  const 列表 = 行动条目(u).map(x => x.键);
+  const j = i + 方向;
+  if (j < 0 || j >= 列表.length) return;
+  [列表[i], 列表[j]] = [列表[j], 列表[i]];
+  顺序表[u.键] = 列表;
+}
+
+/**
  * 能不能点「执行本轮」：至少要有一个单位真的出手（只预置反应不算）。
  * 我方全员倒地时不会走到这里 —— CombatView 会直接把濒死检定算到底并结束战斗
  * （不再空转回合、也不再调 AI）。
@@ -423,7 +510,11 @@ function 执行本轮(): void {
   for (const x of 我方单位.value) {
     const 填写 = 填写表[x.键];
     if (!填写) continue;
-    各单位[x.键] = { 填写: { ...填写 }, 目标: 目标表[x.键] ?? '' };
+    // 带上玩家排好的**行动顺序**（没调过就是默认顺序，引擎自己会兜底）
+    各单位[x.键] = {
+      填写: { ...填写, 行动顺序: 行动条目(x).map(a => a.键) },
+      目标: 目标表[x.键] ?? '',
+    };
   }
   emit('执行本轮', 各单位);
 }
@@ -431,6 +522,7 @@ function 执行本轮(): void {
 /** 上层结算完通知清空（避免下一回合误带上一轮的选择） */
 function 清空填写() {
   for (const 键 of Object.keys(填写表)) 填写表[键] = {};
+  for (const 键 of Object.keys(顺序表)) delete 顺序表[键]; // 顺序也一起清（下一回合重排）
 }
 defineExpose({ 清空填写 });
 </script>
@@ -678,4 +770,58 @@ defineExpose({ 清空填写 });
 
 .battle-log { border-top: 1px solid #2a2a2a; padding-top: 10px; max-height: 30vh; overflow-y: auto; }
 .log-entry { padding: 3px 0; font-size: 13px; color: #bbb; }
+
+/* 行动顺序（↑↓） */
+.order-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 2px;
+}
+.order-item {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  background: #1e1e24;
+  border: 1px solid #33334a;
+  border-radius: 5px;
+  padding: 1px 4px;
+}
+.ord-name { font-size: 12px; color: #cdd; }
+.ord-btn {
+  background: transparent;
+  color: #99a;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 0 3px;
+  &:disabled { opacity: 0.25; cursor: default; }
+  &:not(:disabled):hover { color: #fff; }
+}
+
+/* 选中项的效果预览 */
+.preview-block {
+  margin: 6px 0 2px;
+  padding: 6px 8px;
+  background: #17171c;
+  border: 1px solid #2c2c38;
+  border-radius: 6px;
+}
+.pv-item { margin-bottom: 4px; }
+.pv-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.pv-slot {
+  font-size: 11px;
+  color: #8ab;
+  border: 1px solid #33475a;
+  border-radius: 4px;
+  padding: 0 4px;
+}
+.pv-name { font-size: 13px; color: #e0e6ee; }
+.pv-meta { font-size: 11px; color: #778; }
+.pv-line { font-size: 12px; color: #a8b4c0; padding-left: 8px; }
+
+/* 效果详情（详情面板里的人话区） */
+.ud-eff { margin-bottom: 6px; }
+.ud-eff-head { font-size: 13px; color: #dde; }
 </style>

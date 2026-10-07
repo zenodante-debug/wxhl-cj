@@ -174,6 +174,19 @@ describe('skillInterpreter · 提示词必须教模型用上引擎真正执行�
     expect(提示词).toContain('不再乘位阶系数');
   });
 
+  it('行动类型怎么填：反应动作 / 免费行动 / 装备主动效果都有明确口径', () => {
+    expect(提示词).toContain('行动类型怎么填');
+    expect(提示词).toContain('反应动作');
+    expect(提示词).toContain('打断'); // 打断类要加约定词条
+    expect(提示词).toContain('装备/道具的主动效果');
+  });
+
+  it('「额外行动」两种写法按卡面文本分流（主要行动+1 vs 额外行动回合）', () => {
+    expect(提示词).toContain('额外行动回合');
+    expect(提示词).toContain('额外获得一次主要行动');
+    expect(提示词).toContain('按卡面文本分流');
+  });
+
   it('「该次攻击最终伤害×N」→ 用「最终乘区」（不是「伤害」那种递减乘区）', () => {
     expect(提示词).toContain('最终乘区');
     expect(提示词).toMatch(/填 4 = ×5|填 N−1/);

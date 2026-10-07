@@ -136,19 +136,56 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
     expect(html).toContain('执行本轮');
   });
 
-  it('行动下拉**按行动类型过滤**：主要只列主要行动技能 + 主武器攻击；次要列次要的（这里是空的）', async () => {
+  it('行动下拉**按行动类型过滤**：主要只列主要行动技能 + 基础攻击；次要列次要的（这里是空的）', async () => {
     // 造战斗状态里：月牙天冲/诛仙裂空 都是「主要行动」，两个单位都没有副武器
     const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [] });
 
     const 主要段 = /主要<\/span><select>(.*?)<\/select>/s.exec(html)?.[1] ?? '';
     const 次要段 = /次要<\/span><select>(.*?)<\/select>/s.exec(html)?.[1] ?? '';
 
-    // 主要：技能按行动类型匹配 + 保底的主武器攻击
+    // 主要：技能按行动类型匹配 + 保底的基础攻击（有主武器就是主武器攻击）
     expect(主要段).toContain('月牙天冲');
     expect(主要段).toContain('主武器攻击');
-    // 次要：不出现主要行动技能（这就是"别把所有选项都适配所有类型"）；没有副武器就没有基础攻击
+    // 次要：不出现主要行动技能（这就是"别把所有选项都适配所有类型"）；
+    // 没有副武器也照样能打 —— 只是标签诚实地说「徒手攻击」
     expect(次要段).not.toContain('月牙天冲');
     expect(次要段).not.toContain('主武器攻击');
+    expect(次要段).toContain('徒手攻击');
+  });
+
+  it('反应下拉里**没有预设的招架/识破**（没学过就只有"不预置"）', async () => {
+    const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [] });
+
+    // 注释也会被渲进 HTML（模板里的历史说明），所以只取真正的 option 标签
+    const 反应段 = (/(反应（预置）<\/span><select>)(.*?)<\/select>/s.exec(html)?.[2] ?? '').replace(
+      /<!--[\s\S]*?-->/g,
+      '',
+    );
+    const 选项 = [...反应段.matchAll(/<option[^>]*>(.*?)<\/option>/g)].map(m => m[1]);
+
+    expect(选项).toEqual(['不预置']); // 没学过反应技能 → 只剩这一条
+  });
+
+  it('详情面板的「效果详情」只在展开时渲染（默认折叠，SSR 里看不到）', async () => {
+    const 源码 = fs.readFileSync(path.join(视图目录, 'BattleView.vue'), 'utf8');
+
+    expect(源码).toContain('效果详情');
+    expect(源码).toContain('d.预览.行'); // 渲染的是预览的人话行
+  });
+
+  it('BattleView：追加行动回合模式 → 按钮变成「提交追加行动」并说明这是额外一轮', async () => {
+    const html = await 渲染('BattleView.vue', {
+      状态: 造战斗状态(),
+      日志: [],
+      敌方意图: [],
+      追加模式: true,
+    });
+
+    expect(html).toContain('提交追加行动');
+    expect(html).toContain('额外行动回合');
+    // 按钮上不再是「执行本轮」（注释里提到它是允许的，这里只看 button 标签内容）
+    expect(html).not.toMatch(/<button[^>]*>执行本轮<\/button>/);
+    expect(html).toMatch(/<button[^>]*>提交追加行动<\/button>/);
   });
 
 
