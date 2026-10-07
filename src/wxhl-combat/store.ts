@@ -807,7 +807,10 @@ export async function 写收尾楼层(步骤: 结算步骤[], 状态: 战斗状�
     console.warn('[wxhl-combat] 强路 API 未配置，跳过收尾正文');
     return;
   }
-  const 正文 = await aiGenerate(cfg, 构建收尾提示词(步骤, 状态), undefined, '收尾正文');
+  // 收尾正文**不限字数**（要写完整场战斗），默认 30s 根本生成不完 —— 给一个更宽的超时
+  const 正文 = await aiGenerate(cfg, 构建收尾提示词(步骤, 状态), undefined, '收尾正文', {
+    超时: Math.max(cfg.timeout || 0, 180000),
+  });
   await createChatMessages([{ role: 'assistant', message: 正文 }]);
 }
 

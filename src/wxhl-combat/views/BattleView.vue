@@ -9,18 +9,32 @@
       </button>
     </div>
 
-    <!-- 一维距离条 -->
-    <div class="distance-bar">
+    <!-- 一维距离条：**以玩家为原点**，向左（身后/负）向右（身前/正）双向延伸。
+         同一距离上的多人不再互相遮挡，而是**上下堆叠**（实战反馈）。 -->
+    <div class="distance-bar" :style="{ height: 距离条高度 + 'px' }">
+      <div class="axis-hint left">◀ 身后（负）</div>
+      <div class="axis-hint center" :style="{ left: 原点百分比 + '%' }">玩家原点</div>
+      <div class="axis-hint right">身前（正）▶</div>
+
       <div
-        v-for="u in 排序单位"
-        :key="u.id"
-        class="distance-marker"
-        :class="{ ally: u.阵营 === '我方', enemy: u.阵营 === '敌方' }"
-        :style="{ left: 距离百分比(u.距离) + '%' }"
-        :title="`${u.id} · ${u.距离}米`"
+        v-for="g in 分组标记"
+        :key="g.距离"
+        class="marker-group"
+        :style="{ left: g.左 + '%' }"
       >
-        {{ u.名称 }}
+        <div
+          v-for="(u, i) in g.单位们"
+          :key="u.id"
+          class="distance-marker"
+          :class="{ ally: u.阵营 === '我方', enemy: u.阵营 === '敌方', self: u.类型 === '玩家' }"
+          :style="{ bottom: i * 20 + 'px' }"
+          :title="`${u.id} · ${u.距离}米（${距离带(u.距离)}）`"
+        >
+          {{ u.名称 }} {{ u.距离 }}m
+        </div>
       </div>
+
+      <div v-if="!分组标记.length" class="axis-empty">（战场上没有单位）</div>
     </div>
 
     <!-- 单位卡：每个角色都能展开看全套（状态/buff/装备/技能）—— 实战反馈：战斗界面看不到状态 -->
@@ -233,10 +247,44 @@ const 排序单位 = computed(() =>
     .sort((a, b) => a.距离 - b.距离),
 );
 
-const 最大距离 = computed(() => Math.max(100, ...排序单位.value.map(u => u.距离)));
+/**
+ * 距离轴的两端。
+ * **玩家是原点**（距离 0），负数是身后、正数是身前 —— 所以轴是双向的，
+ * 不能像以前那样把玩家放在最左端、只往右延伸（实战反馈：开场看不到"负距离"这一侧）。
+ * 两端各留一点余量，免得贴边的标记被裁掉。
+ */
+const 距离范围 = computed(() => {
+  const 距离们 = 排序单位.value.map(u => u.距离 ?? 0);
+  const 最远 = Math.max(10, ...距离们.map(Math.abs));
+  return { 最小: Math.min(-10, ...距离们), 最大: Math.max(10, ...距离们), 绝对值: 最远 };
+});
+
+/** 米 → 横向百分比（玩家原点落在中间某处，而不是最左端） */
 function 距离百分比(d: number): number {
-  return Math.min(100, (d / 最大距离.value) * 100);
+  const { 最小, 最大 } = 距离范围.value;
+  const 跨度 = Math.max(最大 - 最小, 1);
+  return Math.min(100, Math.max(0, ((d - 最小) / 跨度) * 100));
 }
+
+/** 玩家原点（0 米）在条上的横向位置 */
+const 原点百分比 = computed(() => 距离百分比(0));
+
+/** 同一个距离上的单位**上下堆叠**（以前会完全重叠、互相遮挡） */
+const 分组标记 = computed(() => {
+  const 按距离 = new Map<number, typeof 排序单位.value>();
+  for (const u of 排序单位.value) {
+    const 距离 = u.距离 ?? 0;
+    按距离.set(距离, [...(按距离.get(距离) ?? []), u]);
+  }
+  return [...按距离.entries()]
+    .sort((a, b) => a[0] - b[0])
+    .map(([距离, 单位们]) => ({ 距离, 左: 距离百分比(距离), 单位们 }));
+});
+
+/** 同一点最多叠几个 → 决定条的高度 */
+const 距离条高度 = computed(() =>
+  Math.max(46, 52 + (Math.max(0, ...分组标记.value.map(g => g.单位们.length)) - 1) * 20),
+);
 
 // ==================== 我方行动区 ====================
 
@@ -411,21 +459,53 @@ defineExpose({ 清空填写 });
 
 .distance-bar {
   position: relative;
-  height: 46px;
-  margin: 16px 0;
+  height: 46px; /* 由 距离条高度 动态覆盖（同一距离人多时变高） */
+  margin: 16px 0 22px;
   border-bottom: 2px solid #444;
 }
-.distance-marker {
+
+.axis-hint {
+  position: absolute;
+  bottom: 2px;
+  font-size: 10px;
+  color: #666;
+  pointer-events: none;
+
+  &.left { left: 0; }
+  &.center { transform: translateX(-50%); color: #6a8a6a; }
+  &.right { right: 0; }
+}
+
+.axis-empty {
+  position: absolute;
+  bottom: 16px;
+  left: 50%;
+  transform: translateX(-50%);
+  font-size: 12px;
+  color: #666;
+}
+
+/* 同一距离的一组：整个组在横向定位，组内上下堆叠 */
+.marker-group {
   position: absolute;
   bottom: 6px;
   transform: translateX(-50%);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+}
+
+.distance-marker {
+  position: relative;
   padding: 2px 8px;
+  margin-top: 2px;
   border-radius: 10px;
   font-size: 12px;
   white-space: nowrap;
 
   &.ally { background: #1d3a1d; border: 1px solid #3a6a3a; color: #9d9; }
   &.enemy { background: #3a1d1d; border: 1px solid #6a3a3a; color: #d99; }
+  &.self { border-color: #8ab; color: #cef; }
 }
 
 .unit-cards { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }

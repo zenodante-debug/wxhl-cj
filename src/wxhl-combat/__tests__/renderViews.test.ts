@@ -224,3 +224,55 @@ describe('BattleView · 倒下的角色要看得出是哪个阶段', () => {
     expect(html).toContain('已稳定（昏迷）');
   });
 });
+
+describe('距离条 · 以玩家为原点双向延伸 + 同一距离上下堆叠（实战反馈）', () => {
+  /** 取第 n 个 marker-group 的内部 HTML */
+  function 取标记组(html: string, n = 0): string {
+    let i = -1;
+    for (let k = 0; k <= n; k++) i = html.indexOf('class="marker-group"', i + 1);
+    if (i < 0) return '';
+    const 起 = html.indexOf('>', i) + 1;
+    const 止 = html.indexOf('</div></div>', 起);
+    return html.slice(起, 止 < 0 ? undefined : 止);
+  }
+
+  it('显示「玩家原点」，并支持负距离（身后）', async () => {
+    const 状态 = 造战斗状态();
+    状态.单位['江薇芷'].距离 = -20; // 跑到玩家身后
+
+    const html = await 渲染('BattleView.vue', { 状态, 日志: [], 敌方意图: [] });
+
+    expect(html).toContain('玩家原点');
+    expect(html).toContain('-20m'); // 负距离真的显示出来了
+    expect(html).toContain('身后（负）');
+    expect(html).toContain('身前（正）');
+  });
+
+  it('同一距离上的多人**上下堆叠**（以前会完全重叠、互相遮挡）', async () => {
+    const 状态 = 造战斗状态();
+    状态.单位['契约者'].距离 = 0;
+    状态.单位['江薇芷'].距离 = 0; // 和玩家同一位置
+
+    const html = await 渲染('BattleView.vue', { 状态, 日志: [], 敌方意图: [] });
+
+    // 两个不同距离（0 与 10）→ 两个标记组
+    const 组数 = (html.match(/class="marker-group"/g) ?? []).length;
+    expect(组数).toBe(2);
+
+    // 第一个组（距离最小 = 0）里同时装了两个人，而不是挤成一个
+    const 第一组 = 取标记组(html, 0);
+    expect(第一组).toContain('黑崎一护');
+    expect(第一组).toContain('江薇芷');
+  });
+
+  it('同一点人多时距离条会变高（不至于被裁掉）', async () => {
+    const 状态 = 造战斗状态();
+    状态.单位['契约者'].距离 = 0;
+    状态.单位['江薇芷'].距离 = 0;
+    状态.单位['骨卫兵'].距离 = 0; // 三人同点
+
+    const html = await 渲染('BattleView.vue', { 状态, 日志: [], 敌方意图: [] });
+
+    expect(html).toMatch(/height:\s*9[0-9]px/); // 52 + (3-1)*20 = 92
+  });
+});
