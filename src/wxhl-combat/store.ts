@@ -6,7 +6,7 @@
 import type { 战斗单位, 战斗解释, 战斗状态, 结算步骤 } from './types';
 import { sanitizeJsonSchema } from '@/wxhl-003/schemaSanitize';
 import type { ApiConfig } from './settings';
-import { 构建翻译提示词, 解析翻译结果, 战斗解释_SCHEMA } from './ai/skillInterpreter';
+import { 构建批量翻译提示词, 解析批量翻译结果, 批量战斗解释_SCHEMA } from './ai/skillInterpreter';
 import { 构建敌方意图提示词, 解析敌方意图, type 敌方意图 } from './ai/enemyTactics';
 import { 构建收尾提示词 } from './ai/aftermath';
 import { buff转字符串 } from './engine/buffMapper';
@@ -145,7 +145,7 @@ export async function 读取战斗单位(路径: string, 阵营?: '我方' | '�
   return 实体转战斗单位(实体, 路径, 阵营 ?? 推断阵营, 实体.类型 || '杂兵');
 }
 
-/** 翻译器输入形状：一个效果来源一条（见 ai/skillInterpreter.ts 的 构建翻译提示词）。 */
+/** 翻译器输入形状：一个效果来源一条（见 ai/skillInterpreter.ts 的 待翻译条目）。 */
 export interface 单位效果源 {
   名称: string;
   类型: string;
@@ -177,7 +177,7 @@ function 技能条目转效果源(名称: string, s: any): 单位效果源 {
 }
 
 /**
- * 把实体的**效果来源**拍平成 `构建翻译提示词` 能吃的一维数组（每个来源一条）：
+ * 把实体的**效果来源**拍平成翻译器能吃的一维数组（`待翻译条目.来源`）（每个来源一条）：
  * 通用技能 / 职业.职业技能 / 职业.传承技能 / 装备（每件已装备槽一条）/ 天赋 / 血统。
  */
 export async function 读取单位效果源(路径: string): Promise<单位效果源[]> {
@@ -424,36 +424,41 @@ export async function aiGenerate(
 }
 
 /**
- * 一次性翻译：把每个技能翻成战斗解释。API 未配置时抛错。
+ * 一次性翻译**全部参战单位的效果** —— 整场战斗**只调 1 次 AI**（spec §10.1）。
  *
- * @param 进度 可选进度回调，**进入每个技能之前**调用一次 —— 开战要连发几十个请求，
- *   没有进度反馈就是「点了没反应」（实战反馈的 bug）。
- *   `已完成` = 该技能之前已经翻好的数量；翻失败的技能不计入 `已完成` 也不中断。
+ * 为什么必须批量：早先是「每个技能各调一次、再按单位调 N 次」，一场战斗几十次请求，
+ * 又慢又费额度（实战反馈的 bug）。现在拍平成一张带编号的清单，一次发出去、一次收回来。
+ *
+ * @param 单位列表 参战单位与其效果源
+ * @returns 单位 id → (效果名 → 战斗解释)。翻不出来的条目**不在表里**，由调用方点名提示。
  */
 export async function 翻译战斗解释(
-  技能列表: any[],
-  进度?: (已完成: number, 总数: number, 当前技能: string) => void,
-): Promise<Record<string, 战斗解释>> {
+  单位列表: Array<{ id: string; 效果源: 单位效果源[] }>,
+): Promise<Record<string, Record<string, 战斗解释>>> {
+  const 结果: Record<string, Record<string, 战斗解释>> = {};
+  for (const u of 单位列表) 结果[u.id] = {};
+
+  // 拍平成带编号的一维清单；回填表与之一一对应（按编号，不按名字 —— 名字会跨单位重名）
+  const 条目: Array<{ 单位: string; 名称: string; 来源: Record<string, any> }> = [];
+  for (const u of 单位列表) {
+    for (const s of u.效果源 ?? []) 条目.push({ 单位: u.id, 名称: s.名称, 来源: s as any });
+  }
+  if (条目.length === 0) return 结果;
+
   const cfg = 读设置().快路;
   if (!cfg.url || !cfg.apiKey) {
     throw new Error('API 未配置：请先在设置里配置 API');
   }
 
-  const 结果: Record<string, 战斗解释> = {};
-  let 已完成 = 0;
-  for (const 技能 of 技能列表) {
-    进度?.(已完成, 技能列表.length, String(技能?.名称 ?? ''));
-    // 逐技能隔离：单个技能三次重试都翻不出 JSON，不该拖垮整场开战（其余技能照常）。
-    // 失败只记警告并跳过 —— 该技能不进结果映射，调用方（CombatView）据此在 UI 里点明「本场不可用」。
-    try {
-      // 必须传 schema —— 否则 aiGenerate 缺省直接返回首答，非法 JSON 不会重试
-      const raw = await aiGenerate(cfg, 构建翻译提示词(技能), 战斗解释_SCHEMA);
-      结果[技能.名称] = 解析翻译结果(raw);
-      已完成++;
-    } catch (e: any) {
-      console.warn('[wxhl-combat] 技能翻译失败', 技能?.名称, e);
-    }
-  }
+  const raw = await aiGenerate(cfg, 构建批量翻译提示词(条目), 批量战斗解释_SCHEMA);
+  const 逐条 = 解析批量翻译结果(raw, 条目.length);
+
+  逐条.forEach((解释, i) => {
+    const 归属 = 条目[i];
+    if (解释) 结果[归属.单位][归属.名称] = 解释;
+    else console.warn('[wxhl-combat] 效果翻译失败（本场不可用）', 归属.名称);
+  });
+
   return 结果;
 }
 
