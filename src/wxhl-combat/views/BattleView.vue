@@ -231,6 +231,10 @@
         <button class="execute-btn" :disabled="!可提交本轮 || 禁用" @click="执行本轮">
           {{ 追加模式 ? '提交追加行动' : '执行本轮' }}
         </button>
+        <!-- 放弃追加：玩家不想要的额外回合不能被强制行动（代码评审 Minor #8） -->
+        <button v-if="追加模式" class="ghost-btn" :disabled="禁用" @click="emit('放弃追加')">
+          放弃追加回合
+        </button>
         <span class="dim">
           {{
             追加模式
@@ -251,7 +255,7 @@
 <script setup lang="ts">
 import { computed, reactive, ref, watch } from 'vue';
 import { 距离带 } from '../engine/distance';
-import { 可提交, 列行动条目, type 行动槽填写 } from '../engine/actionInput';
+import { 可提交, 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
 import { 造我方条目, 造技能展示, 选中行动预览, 显示名, type 我方条目 } from '../engine/viewModel';
 import { 列行动选项 } from '../engine/actionOptions';
 import type { 敌方意图 } from '../ai/enemyTactics';
@@ -274,6 +278,8 @@ const emit = defineEmits<{
   /** 每个我方单位各自的填写 + 目标；键 = 状态.单位 的键（短名） */
   (e: '执行本轮', 各单位: Record<string, { 填写: 行动槽填写; 目标: string }>): void;
   (e: '逃离战斗'): void;
+  /** 追加模式下「放弃追加回合」—— 交一段空行动，继续走完剩下的先攻 */
+  (e: '放弃追加'): void;
 }>();
 
 /** 逃离按钮：第一次点只是亮出确认，第二次才真正逃离（界面逃生口，防误触） */
@@ -473,15 +479,12 @@ function 选中预览(u: 我方条目) {
 }
 
 /**
- * 该单位本回合已选的行动条目（有序）。键的推法**来自引擎**（`列行动条目`）——
- * 界面不自己推一遍键，否则两边一旦不一致，排序会静默失效。
+ * 该单位本回合已选的行动条目（有序）。**直接吃引擎的 `构造行动声明`**——
+ * "按序排 + 漏掉排最后"的合并逻辑只有引擎里那一份，界面不复刻（复刻会随引擎改动走偏，
+ * 代码评审 Minor #13 点过这个隐患）。
  */
 function 行动条目(u: 我方条目) {
-  const 基础 = 列行动条目(填写表[u.键] ?? {}, '');
-  const 序 = 顺序表[u.键] ?? [];
-  if (!序.length) return 基础;
-  const 有序 = 序.map(k => 基础.find(x => x.键 === k)).filter(Boolean) as typeof 基础;
-  return [...有序, ...基础.filter(x => !有序.includes(x))];
+  return 构造行动声明({ ...(填写表[u.键] ?? {}), 行动顺序: 顺序表[u.键] }, '').条目;
 }
 
 /** ↑↓ 调序：把当前顺序固化进 顺序表（换位置只是换数组里两个元素） */
@@ -766,6 +769,20 @@ defineExpose({ 清空填写 });
 
   &:disabled { opacity: 0.4; cursor: not-allowed; }
   &:not(:disabled):hover { background: #254a25; }
+}
+
+.ghost-btn {
+  background: transparent;
+  color: #a99;
+  border: 1px solid #4a3a3a;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 13px;
+  cursor: pointer;
+  margin-left: 6px;
+
+  &:disabled { opacity: 0.4; cursor: not-allowed; }
+  &:not(:disabled):hover { background: #2a2020; }
 }
 
 .battle-log { border-top: 1px solid #2a2a2a; padding-top: 10px; max-height: 30vh; overflow-y: auto; }
