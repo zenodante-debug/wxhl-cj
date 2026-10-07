@@ -53,13 +53,28 @@
         <span class="result" :class="界面[路].结果类别">{{ 界面[路].结果 }}</span>
       </div>
     </section>
+
+    <section class="api-block">
+      <h4>翻译缓存</h4>
+      <p class="sub-hint">
+        技能/装备的翻译结果存在脚本变量里**跨战斗复用**：同样的效果只翻一次，全部命中时一次 AI 都不调。
+        缓存按**内容**（不是名字）认 —— 技能升级、换装备、删技能会自动重翻，不需要手动清。
+      </p>
+      <div class="actions">
+        <span class="result">当前缓存 {{ 缓存条目数 }} 条</span>
+        <button class="copy-btn" :disabled="缓存条目数 === 0" @click="清缓存">
+          清空缓存（下次开战重翻）
+        </button>
+        <span class="result" :class="缓存结果类别">{{ 缓存结果 }}</span>
+      </div>
+    </section>
   </div>
 </template>
 
 <script setup lang="ts">
-import { reactive } from 'vue';
+import { onMounted, reactive, ref } from 'vue';
 import { useSettingsStore } from '../settingsStore';
-import { 拉取模型, 测试连接 } from '../store';
+import { 拉取模型, 测试连接, 翻译缓存条目数, 清空翻译缓存 } from '../store';
 
 const store = useSettingsStore();
 const 路列表 = ['快路', '强路'] as const;
@@ -127,6 +142,32 @@ function 复制快路() {
   store.settings.强路 = { ...store.settings.快路 };
   界面.强路.结果 = '已把快路的配置复制过来（模型名可再改）';
   界面.强路.结果类别 = 'ok';
+}
+
+// ==================== 翻译缓存 ====================
+
+const 缓存条目数 = ref(0);
+const 缓存结果 = ref('');
+const 缓存结果类别 = ref<'' | 'ok' | 'err'>('');
+
+onMounted(() => {
+  try {
+    缓存条目数.value = 翻译缓存条目数();
+  } catch {
+    // 变量还没就绪（脚本刚装/未初始化）→ 显示 0 即可，不必报错
+  }
+});
+
+async function 清缓存() {
+  try {
+    await 清空翻译缓存();
+    缓存条目数.value = 翻译缓存条目数();
+    缓存结果.value = '已清空，下次开战会重新翻译全部效果';
+    缓存结果类别.value = 'ok';
+  } catch (e: any) {
+    缓存结果.value = `清空失败：${e?.message ?? e}`;
+    缓存结果类别.value = 'err';
+  }
 }
 </script>
 

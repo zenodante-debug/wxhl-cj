@@ -7,6 +7,7 @@ import type { 战斗单位, 战斗解释, 战斗状态, 结算步骤 } from './t
 import { sanitizeJsonSchema } from '@/wxhl-003/schemaSanitize';
 import type { ApiConfig } from './settings';
 import { 构建批量翻译提示词, 解析批量翻译结果, 批量战斗解释_SCHEMA, type 条目解析结果 } from './ai/skillInterpreter';
+import { 效果指纹, 翻译缓存版本 } from './ai/translationCache';
 import { 构建敌方意图提示词, 解析敌方意图, 敌方意图_SCHEMA, type 敌方意图 } from './ai/enemyTactics';
 import { 提取JSON } from './ai/jsonExtract';
 import { 构建收尾提示词 } from './ai/aftermath';
@@ -414,18 +415,89 @@ export interface 翻译批量结果 {
   表: Record<string, Record<string, 战斗解释>>;
   /** 没翻出来的条目，供复核界面勾选重试 */
   失败: 翻译失败项[];
+  /** 缓存统计（给玩家看：这次到底省了多少） */
+  缓存: 翻译缓存统计;
+}
+
+export interface 翻译缓存统计 {
+  /** 直接命中缓存的条目数（没花 AI） */
+  命中: number;
+  /** 真正发给 AI 的条目数 */
+  待翻: number;
+}
+
+// ==================== 翻译缓存（跨战斗复用，存脚本变量） ====================
+
+/**
+ * 读翻译缓存（指纹 → 战斗解释）。
+ * 版本不符（`翻译缓存版本` 变过）/ 结构不认识 → 一律视为空缓存：宁可重翻，不可喂旧口径。
+ */
+function 读翻译缓存(): Record<string, 战斗解释> {
+  const v = getVariables({ type: 'script', script_id: getScriptId() }) as any;
+  const 存 = v?.翻译缓存;
+  if (!存 || 存.版本 !== 翻译缓存版本 || !存.条目 || typeof 存.条目 !== 'object') return {};
+  return 存.条目;
 }
 
 /**
- * 一次性翻译**全部参战单位的效果** —— 整场战斗**只调 1 次 AI**（spec §10.1）。
+ * 写翻译缓存。
+ * `replaceVariables` 是**整表替换**语义，必须先取回现有脚本变量再合并 ——
+ * 否则会把 `战斗`（进行中的战斗状态）一起抹掉。
+ */
+function 写翻译缓存(条目: Record<string, 战斗解释>): void {
+  const scriptId = getScriptId();
+  const v = (getVariables({ type: 'script', script_id: scriptId }) as any) ?? {};
+  replaceVariables({ ...v, 翻译缓存: { 版本: 翻译缓存版本, 条目 } }, { type: 'script', script_id: scriptId });
+}
+
+/**
+ * 进战斗时整理缓存：**只保留本次参战单位里出现过的效果**（指纹在本次名单中的即保留）。
  *
- * 为什么必须批量：早先是「每个技能各调一次、再按单位调 N 次」，一场战斗几十次请求，
- * 又慢又费额度（实战反馈的 bug）。现在拍平成一张带编号的清单，一次发出去、一次收回来。
+ * 这就是「遍历一次，看有哪些新增的、有哪些不在的，不在的就删去」——
+ * 技能被删、改名、换装备、升过级之后，旧翻译的指纹不再出现，随之被清掉。
+ * 新增的**不用在这里登记**：它们只是「缓存里没有」，等 `翻译战斗解释` 去翻、翻完自动写入。
+ *
+ * 名单取**本次全部参战单位**（不只玩家）：玩家的技能装备是跨战斗稳定的、能持续命中缓存；
+ * 而副本敌人的技能是每个副本现生成的，留下来的话下一次（不同敌人）也不会被命中，
+ * 只会白占空间、还有机会喂到过期内容。
+ *
+ * @returns 统计（保留/清理各几项），供界面写进战斗日志
+ */
+export async function 整理翻译缓存(
+  单位列表: Array<{ id: string; 效果源: 单位效果源[] }>,
+): Promise<{ 保留: number; 清理: number }> {
+  const 旧 = 读翻译缓存();
+
+  const 在用 = new Set<string>();
+  for (const u of 单位列表) for (const s of u.效果源 ?? []) 在用.add(效果指纹(s));
+
+  const 条目: Record<string, 战斗解释> = {};
+  let 清理 = 0;
+  for (const [指纹, 解释] of Object.entries(旧)) {
+    if (在用.has(指纹)) 条目[指纹] = 解释;
+    else 清理++;
+  }
+
+  // 只在真有清理时写，避免每次开战都无谓改写脚本变量
+  if (清理 > 0) 写翻译缓存(条目);
+
+  return { 保留: Object.keys(条目).length, 清理 };
+}
+
+/**
+ * 一次性翻译**全部参战单位的效果**。
+ *
+ * 两条省法：
+ * 1. **跨战斗缓存**（spec §10.2）：已经翻过的条目按内容指纹直接命中，不进请求；
+ *    全命中时**一次 AI 都不调**。技能升级 / 换装备会改指纹，自动重翻。
+ * 2. **整场只 1 次调用**（spec §10.1）:未命中的条目拍平成一张带编号的清单，
+ *    一次发出去、一次收回来（早先是每个技能各调一次，几十次请求，实战反馈的 bug）。
  *
  * 失败**不抛错也不静默**：整批失败（三次都吐不出合法 JSON）会把每条都标成失败并带上原因，
  * 逐条失败带各自的字段错误 —— 一律交给调用方在复核界面显示并支持勾选重试。
+ * 失败项**不入缓存**（否则下次会拿着一个空的翻译当命中）。
  *
- * @returns `表`：单位 id → (效果名 → 战斗解释)；`失败`：带原因与来源的失败清单
+ * @returns `表`：单位 id → (效果名 → 战斗解释)；`失败`：带原因与来源的失败清单；`缓存`：命中统计
  */
 export async function 翻译战斗解释(
   单位列表: Array<{ id: string; 效果源: 单位效果源[] }>,
@@ -434,16 +506,33 @@ export async function 翻译战斗解释(
   for (const u of 单位列表) if (!表[u.id]) 表[u.id] = {};
   const 失败: 翻译失败项[] = [];
 
-  // 拍平成带编号的一维清单；来源单独存一份，失败时直接挂上去供重试
-  const 条目: Array<{ 单位: string; 名称: string; 来源: Record<string, any> }> = [];
-  const 原始来源: 单位效果源[] = [];
+  // 拍平成带编号的一维清单；来源原样留一份，失败时直接挂上去供复核界面重试
+  const 条目: Array<{
+    单位: string;
+    名称: string;
+    来源: Record<string, any>;
+    原始: 单位效果源;
+    指纹: string;
+  }> = [];
   for (const u of 单位列表) {
     for (const s of u.效果源 ?? []) {
-      条目.push({ 单位: u.id, 名称: s.名称, 来源: s as any });
-      原始来源.push(s);
+      条目.push({ 单位: u.id, 名称: s.名称, 来源: s as any, 原始: s, 指纹: 效果指纹(s) });
     }
   }
-  if (条目.length === 0) return { 表, 失败 };
+  if (条目.length === 0) return { 表, 失败, 缓存: { 命中: 0, 待翻: 0 } };
+
+  // 命中缓存的先落表；只把没命中的送去翻译
+  const 缓存 = 读翻译缓存();
+  const 待翻: typeof 条目 = [];
+  for (const e of 条目) {
+    const 已有 = 缓存[e.指纹];
+    if (已有) 表[e.单位][e.名称] = 已有;
+    else 待翻.push(e);
+  }
+  const 统计: 翻译缓存统计 = { 命中: 条目.length - 待翻.length, 待翻: 待翻.length };
+
+  // 全命中 → 根本不需要 API（也就不该因为「API 未配置」把开战拦下来）
+  if (待翻.length === 0) return { 表, 失败, 缓存: 统计 };
 
   const cfg = 读设置().快路;
   if (!cfg.url || !cfg.apiKey) {
@@ -452,22 +541,35 @@ export async function 翻译战斗解释(
 
   let 逐条: 条目解析结果[];
   try {
-    const raw = await aiGenerate(cfg, 构建批量翻译提示词(条目), 批量战斗解释_SCHEMA);
-    逐条 = 解析批量翻译结果(raw, 条目.length);
+    const raw = await aiGenerate(cfg, 构建批量翻译提示词(待翻), 批量战斗解释_SCHEMA);
+    逐条 = 解析批量翻译结果(raw, 待翻.length);
   } catch (e: any) {
     // 整批失败：不抛出去，改成「每条都失败」并带上原因 ——
     // 抛出去玩家只会得到一个没有细节的错误，也没法勾选重试。
     const 原因 = `整批请求失败：${e?.message ?? e}`;
-    逐条 = 条目.map(() => ({ 成功: false as const, 原因 }));
+    逐条 = 待翻.map(() => ({ 成功: false as const, 原因 }));
   }
 
+  // 新翻出来的并回缓存（成功的才写）；缓存里已有的条目原样保留，
+  // **不在这里裁剪** —— 裁剪是 `整理翻译缓存` 的职责（复核界面重试时只带失败项，
+  // 若在这里按「本次条目」裁剪，会把整场其余缓存全删掉）。
+  const 新缓存 = { ...缓存 };
+  let 有新增 = false;
+
   逐条.forEach((r, i) => {
-    const 归属 = 条目[i];
-    if (r.成功) 表[归属.单位][归属.名称] = r.解释;
-    else 失败.push({ 单位: 归属.单位, 名称: 归属.名称, 原因: r.原因, 来源: 原始来源[i] });
+    const 归属 = 待翻[i];
+    if (r.成功) {
+      表[归属.单位][归属.名称] = r.解释;
+      新缓存[归属.指纹] = r.解释;
+      有新增 = true;
+    } else {
+      失败.push({ 单位: 归属.单位, 名称: 归属.名称, 原因: r.原因, 来源: 归属.原始 });
+    }
   });
 
-  return { 表, 失败 };
+  if (有新增) 写翻译缓存(新缓存);
+
+  return { 表, 失败, 缓存: 统计 };
 }
 
 /**
@@ -567,6 +669,25 @@ export async function 写战斗状态(状态: 战斗状态 | null): Promise<void
   const 新变量 = { ...v, 战斗: 状态 ? 战斗状态转纯对象(状态) : undefined };
   if (!状态) delete 新变量.战斗;
   replaceVariables(新变量, { type: 'script', script_id: scriptId });
+}
+
+// ================================================================
+// 设置页：翻译缓存
+// ================================================================
+
+/** 当前翻译缓存里的条目数（设置页显示用） */
+export function 翻译缓存条目数(): number {
+  return Object.keys(读翻译缓存()).length;
+}
+
+/**
+ * 清空翻译缓存 —— 设置页的出口。
+ *
+ * 为什么需要有：缓存只认**内容指纹**，所以一条「JSON 合法但译得很糟」的解释会被永久命中；
+ * 而复核界面只列翻译**失败**的条目，玩家没有别的办法让它重翻。
+ */
+export async function 清空翻译缓存(): Promise<void> {
+  写翻译缓存({});
 }
 
 // ================================================================

@@ -24,8 +24,14 @@ const 合法解释 = (编号: number) =>
 const 配置 = { url: 'https://a.b', apiKey: 'k', model: 'm', timeout: 5000 };
 
 function 装好环境(引用: { 次数: number }) {
+  // 脚本变量表同时充当设置来源与翻译缓存：必须让 replaceVariables 真的留住写入
+  // （跨战斗缓存靠它落盘，见 translateCache.test.ts）
+  let 变量: any = { 快路: 配置 };
   (globalThis as any).getScriptId = () => 'wxhl-combat';
-  (globalThis as any).getVariables = () => ({ 快路: 配置 });
+  (globalThis as any).getVariables = () => 变量;
+  (globalThis as any).replaceVariables = (v: any) => {
+    变量 = v;
+  };
   (globalThis as any).generateRaw = async () => {
     引用.次数++;
     return 合法解释(0);
@@ -64,6 +70,7 @@ describe('翻译战斗解释 · 整场只调 1 次 AI（实战反馈：逐个技
     };
     (globalThis as any).getScriptId = () => 'wxhl-combat';
     (globalThis as any).getVariables = () => ({ 快路: { url: '', apiKey: '', model: '' } });
+    (globalThis as any).replaceVariables = () => {};
 
     await expect(翻译战斗解释([{ id: '契约者', 效果源: [{ 名称: '甲' }] as any }])).rejects.toThrow(
       'API 未配置',
@@ -74,6 +81,7 @@ describe('翻译战斗解释 · 整场只调 1 次 AI（实战反馈：逐个技
   it('单条字段不全 → 该条不进表、其余照常、整批不抛错', async () => {
     (globalThis as any).getScriptId = () => 'wxhl-combat';
     (globalThis as any).getVariables = () => ({ 快路: 配置 });
+    (globalThis as any).replaceVariables = () => {};
     // 第 0 条只回编号不回字段（坏），第 1 条正常
     (globalThis as any).generateRaw = async () =>
       JSON.stringify({ 解释: [{ 编号: 0 }, { 编号: 1, 行动消耗: '次要行动', 射程: '自身', 目标: '自身', 消耗: '无', 冷却: 0, 分类: '基础', 类型: '被动', 可预判: false, 规则: [], 托管: [] }] });
@@ -94,6 +102,7 @@ describe('翻译战斗解释 · 整场只调 1 次 AI（实战反馈：逐个技
   it('整批请求失败（三次都吐不出 JSON）→ 不抛错，改成每条都失败并带原因', async () => {
     (globalThis as any).getScriptId = () => 'wxhl-combat';
     (globalThis as any).getVariables = () => ({ 快路: 配置 });
+    (globalThis as any).replaceVariables = () => {};
     (globalThis as any).generateRaw = async () => '这不是 JSON';
 
     const 结果 = await 翻译战斗解释([

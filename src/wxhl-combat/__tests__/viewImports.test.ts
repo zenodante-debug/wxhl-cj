@@ -15,6 +15,7 @@ import {
   读取可参战单位,
   读取战斗单位,
   读取单位效果源,
+  整理翻译缓存,
   翻译战斗解释,
   生成敌方意图,
   读战斗状态,
@@ -23,6 +24,8 @@ import {
   写收尾楼层,
   拉取模型,
   测试连接,
+  翻译缓存条目数,
+  清空翻译缓存,
 } from '../store';
 import { 读设置, useSettingsStore } from '../settingsStore';
 import { 找单位, 跑敌方意图, 跑一个回合, 结算行动 } from '../engine/loop';
@@ -55,6 +58,7 @@ describe('views 的 import 契约', () => {
       写回战斗结果,
       读取战斗单位,
       读取单位效果源,
+      整理翻译缓存,
       翻译战斗解释,
       // views/BattleView.vue
       距离带,
@@ -63,6 +67,8 @@ describe('views 的 import 契约', () => {
       useSettingsStore,
       拉取模型,
       测试连接,
+      翻译缓存条目数,
+      清空翻译缓存,
       // 非 view 直接引用，但同属 store / engine 的公开入口（防回归）
       读设置,
       跑敌方意图,
