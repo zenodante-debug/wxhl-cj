@@ -3,6 +3,10 @@
     <div class="battle-header">
       <h3>第 {{ 状态.回合 }} 回合</h3>
       <div class="order">先攻：{{ 状态.先攻.join(' → ') }}</div>
+      <!-- 逃离：界面逃生口（卡在战斗里时的出路）。要再点一次确认，防误触 -->
+      <button class="flee-btn" :disabled="禁用" @click="逃离点击">
+        {{ 逃离确认 ? '再点一次确认逃离' : '逃离战斗' }}
+      </button>
     </div>
 
     <!-- 一维距离条 -->
@@ -28,8 +32,13 @@
         :class="{ enemy: u.阵营 === '敌方', ally: u.阵营 === '我方', dead: u.濒死 !== null }"
       >
         <div class="unit-name">{{ u.名称 }}</div>
-        <div class="unit-hp">HP {{ u.HP_当前 }}/{{ u.HP_最大 }}</div>
-        <div class="unit-dist">{{ u.距离 }}米（{{ 距离带(u.距离) }}）</div>
+        <div class="unit-hp">HP {{ u.HP_当前 }}/{{ u.HP_最大 }} · MP {{ u.MP_当前 }}/{{ u.MP_最大 }} · 耐力 {{ u.耐力_当前 }}/{{ u.耐力_最大 }}</div>
+        <!-- 防御/闪避/属性 都要展示出来 —— 玩家要看得见面板才打得出决策（实战反馈：这些根本没显示） -->
+        <div class="unit-stats">
+          防御 {{ u.防御 }} · 闪避 {{ u.闪避值 }} · {{ u.阶位 }}
+        </div>
+        <div class="unit-attrs">STR {{ u.属性.实际.STR }} · AGI {{ u.属性.实际.AGI }} · CON {{ u.属性.实际.CON }} · PER {{ u.属性.实际.PER }}</div>
+        <div class="unit-dist">{{ u.距离 }}米（{{ 距离带(u.距离) }}）· 额度 {{ u.额度 }}</div>
         <div class="unit-slots">主{{ u.行动槽.主要 }} 次{{ u.行动槽.次要 }} 移{{ u.行动槽.移动 }} 反{{ u.行动槽.反应 }}</div>
         <div v-if="u.状态.length" class="unit-status">状态: {{ u.状态.map(s => s.名 + (s.层数 ? `×${s.层数}` : '')).join('，') }}</div>
         <div v-if="u.护盾 > 0" class="unit-shield">护盾: {{ u.护盾 }}</div>
@@ -121,12 +130,29 @@ const props = defineProps<{
   进度?: string;
 }>();
 
-const emit = defineEmits<{ (e: '执行本轮', 填写: 行动槽填写, 目标: string): void }>();
+const emit = defineEmits<{
+  (e: '执行本轮', 填写: 行动槽填写, 目标: string): void;
+  (e: '逃离战斗'): void;
+}>();
 
-// 距玩家排序（0 在前）—— 只补名称，不动其他字段（HP 等保持原样）
+/** 逃离按钮：第一次点只是亮出确认，第二次才真正逃离（界面逃生口，防误触） */
+const 逃离确认 = ref(false);
+let 逃离计时: ReturnType<typeof setTimeout> | undefined;
+function 逃离点击() {
+  if (!逃离确认.value) {
+    逃离确认.value = true;
+    clearTimeout(逃离计时);
+    逃离计时 = setTimeout(() => (逃离确认.value = false), 3000);
+    return;
+  }
+  逃离确认.value = false;
+  emit('逃离战斗');
+}
+
+// 距玩家排序（0 在前）—— 用变量里的姓名（头部.姓名）；老存档没有名称字段时退回 id 末段
 const 排序单位 = computed(() =>
   Object.values(props.状态.单位)
-    .map(u => ({ ...u, 名称: u.id.split('.').pop() || u.id }))
+    .map(u => ({ ...u, 名称: u.名称 || u.id.split('.').pop() || u.id }))
     .sort((a, b) => a.距离 - b.距离),
 );
 
@@ -172,8 +198,25 @@ function 执行本轮(): void {
 
 <style scoped lang="scss">
 .battle-view { color: #ddd; }
-.battle-header { margin-bottom: 12px; }
-.order { color: #999; font-size: 13px; }
+.battle-header { margin-bottom: 12px; position: relative; }
+.battle-header h3 { margin: 0 0 4px; }
+.order { color: #999; font-size: 13px; padding-right: 96px; }
+
+.flee-btn {
+  position: absolute;
+  top: 0;
+  right: 0;
+  padding: 5px 12px;
+  background: #2a1d1d;
+  border: 1px solid #6a3a3a;
+  border-radius: 6px;
+  color: #d99;
+  font-size: 12px;
+  cursor: pointer;
+
+  &:hover { background: #3a2424; }
+  &:disabled { opacity: 0.4; cursor: not-allowed; }
+}
 
 .distance-bar {
   position: relative;
@@ -205,6 +248,8 @@ function 执行本轮(): void {
   &.dead { opacity: 0.5; }
   .unit-name { font-weight: 700; }
   .unit-hp { color: #f88; font-size: 13px; }
+  .unit-stats { color: #9db2d0; font-size: 12px; }
+  .unit-attrs { color: #8a8a8a; font-size: 11px; }
   .unit-dist, .unit-slots { color: #999; font-size: 12px; }
   .unit-status { color: #fa0; font-size: 12px; }
   .unit-shield { color: #8af; font-size: 12px; }

@@ -18,6 +18,8 @@ export interface 战斗状态 {
 
 export interface 战斗单位 {
   id: string;        // 变量路径键：'契约者' | '小队.成员.白露露' | '副本角色.骨卫兵'
+  /** 显示名（变量里的 头部.姓名；缺省/老存档退回 id 末段）。界面/日志一律用它，不要把「契约者」当名字。 */
+  名称?: string;
   阵营: '我方' | '敌方';
   类型: string;      // 杂兵/精英/BOSS/… → 决定 HP 系数与致命效果分层
   属性: { 实际: { STR: number; AGI: number; CON: number; PER: number } };
@@ -30,6 +32,8 @@ export interface 战斗单位 {
   耐力_最大: number;
   防御: number;
   闪避值: number;
+  /** 移动距离（= 每回合移动额度上限，读自 衍生属性.移动距离，含额外加成；缺省/老存档按公式现算） */
+  移动距离?: number;
   距离: number;      // 距玩家米数；-1 = 已脱离
   行动槽: 行动槽;
   额度: number;      // 本回合剩余移动额度（米），每回合重置为【移动距离】

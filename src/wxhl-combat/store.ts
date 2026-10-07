@@ -13,6 +13,7 @@ import { 提取JSON } from './ai/jsonExtract';
 import { 构建收尾提示词 } from './ai/aftermath';
 import { buff转字符串 } from './engine/buffMapper';
 import { 解析伤害骰 } from './engine/damage';
+import { 移动距离计算 } from './engine/distance';
 import { 读设置 } from './settingsStore';
 
 /** 数值兜底：只接受有限数（合法的 0 与负数照收），其余（undefined/NaN/字符串）退回兜底值。 */
@@ -84,25 +85,37 @@ function 定位单位(stat_data: any, 路径: string): { 实体: any; 容器: st
 /**
  * 从实体对象读四维/阶位/资源/防闪，缺字段给兜底。
  * 资源与防闪一律读 `衍生属性.*`（前端代算落盘后的值）。
+ * 防御/闪避值/移动距离 在卡里**已经是含额外加成的总值**（见 wxhl-003 statusbar 的代算：
+ * `def = ⌊(conMod+5)×0.2⌋ + 防御额外加成 + 装备防御`）—— 直接读，不要再自己加。
  */
 function 实体转战斗单位(实体: any, id: string, 阵营: '我方' | '敌方', 类型: string): 战斗单位 {
   const 头部 = 实体.头部 ?? {};
   const 属性实际 = 实体.属性?.实际 ?? {};
   const 衍生 = 实体.衍生属性 ?? {};
 
+  const 阶位 = 头部.阶位 || '一阶';
+  const AGI = 读数值(属性实际, 'AGI', 5);
+
+  // 显示名：变量里的「头部.姓名」；缺省退回 id 末段（界面/日志一律用它，别再把玩家叫「契约者」）
+  const 姓名 = typeof 头部.姓名 === 'string' ? 头部.姓名.trim() : '';
+
+  // 移动距离：读卡里的衍生值（含「移动距离额外加成」）；还没代算过（=0）就按公式现算
+  const 卡内移动距离 = 读数值(衍生, '移动距离', 0);
+
   return {
     id,
+    名称: 姓名 || id.split('.').pop()!,
     阵营,
     类型,
     属性: {
       实际: {
         STR: 读数值(属性实际, 'STR', 5),
-        AGI: 读数值(属性实际, 'AGI', 5),
+        AGI,
         CON: 读数值(属性实际, 'CON', 5),
         PER: 读数值(属性实际, 'PER', 5),
       },
     },
-    阶位: 头部.阶位 || '一阶',
+    阶位,
     HP_当前: 读数值(衍生, 'HP_当前', 0),
     HP_最大: 读数值(衍生, 'HP_最大', 0),
     MP_当前: 读数值(衍生, 'MP_当前', 0),
@@ -111,6 +124,7 @@ function 实体转战斗单位(实体: any, id: string, 阵营: '我方' | '敌�
     耐力_最大: 读数值(衍生, '耐力_最大', 0),
     防御: 读数值(衍生, '防御', 0),
     闪避值: 读数值(衍生, '闪避值', 0),
+    移动距离: 卡内移动距离 > 0 ? 卡内移动距离 : 移动距离计算(AGI, 阶位, 0),
     距离: 0,
     行动槽: { 主要: 1, 次要: 1, 移动: 1, 反应: 1, 免费: 999 },
     额度: 0,
@@ -624,14 +638,17 @@ export async function 写回战斗结果(
   await Mvu.replaceMvuData(data, { type: 'message', message_id: -1 });
 }
 
-/** 战斗结束：生成收尾正文 → 写入一条 assistant 楼层 */
-export async function 写收尾楼层(步骤: 结算步骤[]): Promise<void> {
+/** 战斗结束：生成收尾正文 → 写入一条 assistant 楼层。
+ * 状态也一并带上：收尾要**按击杀发放钥匙**（杂兵白/精英白银/BOSS黄金/隐藏BOSS钻石/契约者血腥）
+ * 与主角真名，这两样都得从战斗状态里取。
+ */
+export async function 写收尾楼层(步骤: 结算步骤[], 状态: 战斗状态): Promise<void> {
   const cfg = 读设置().强路;
   if (!cfg.url || !cfg.apiKey) {
     console.warn('[wxhl-combat] 强路 API 未配置，跳过收尾正文');
     return;
   }
-  const 正文 = await aiGenerate(cfg, 构建收尾提示词(步骤));
+  const 正文 = await aiGenerate(cfg, 构建收尾提示词(步骤, 状态));
   await createChatMessages([{ role: 'assistant', message: 正文 }]);
 }
 

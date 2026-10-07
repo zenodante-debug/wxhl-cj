@@ -40,12 +40,13 @@
         :禁用="忙碌"
         :进度="战场进度"
         @执行本轮="执行本轮"
+        @逃离战斗="逃离战斗"
       />
       <PendingModal :待决="战斗.待决" @决策="处理决策" />
     </template>
     <div v-else class="settle-stage">
-      <h3>战斗结束</h3>
-      <p class="dim">正在生成收尾正文…</p>
+      <h3>{{ 结局文案 === '逃离' ? '已逃离战斗' : 结局文案 === '败北' ? '战斗失败' : '战斗结束' }}</h3>
+      <p v-if="结局文案 !== '逃离'" class="dim">正在生成收尾正文…</p>
       <!-- 收尾期间还要写回变量 / 落楼，失败只记在 日志 里：这里也要渲染，否则错误被吞掉 -->
       <div v-if="日志.length" class="settle-log">
         <div v-for="(s, i) in 日志" :key="i" class="settle-log-entry">{{ s }}</div>
@@ -67,6 +68,7 @@ import { 行动槽重置 } from '../engine/actionEconomy';
 import { 移动距离计算, 移动额度重置 } from '../engine/distance';
 import { 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
 import type { 敌方意图, 意图行动 } from '../ai/enemyTactics';
+import { 保底意图 } from '../ai/enemyTactics';
 import {
   生成敌方意图,
   读战斗状态,
@@ -91,6 +93,8 @@ const 敌方意图列表 = ref<敌方意图[]>([]);
 const 忙碌 = ref(false);
 /** 战斗已分出胜负：挡住收尾期间误点「执行本轮」 */
 const 战斗结束 = ref(false);
+/** 收尾界面标题（胜利/败北/逃离）—— 逃离没有收尾正文，标题和副标要分开写 */
+const 结局文案 = ref<'胜利' | '败北' | '逃离'>('胜利');
 /**
  * 开战进度。
  * 开战要连发几十个 AI 请求（每个效果翻一次 + 一次敌方意图），
@@ -136,6 +140,14 @@ async function 开始战斗(选择: { id: string; 阵营: '我方' | '敌方' }[
   翻译失败清单.value = [];
   待开战.value = null;
   阶段.value = '准备'; // 失败时留在准备态（Review Focus 5）
+
+  // 没有敌方单位 → 开不了战（玩家实测：只勾了自己进去，出不来也没法结束）。
+  // 挡住它；真要中途走，战斗界面里有「逃离战斗」。
+  if (!选择.some(c => c.阵营 === '敌方')) {
+    日志.value.push('无法开战：没有选任何敌方单位（在名单里把对手勾成「敌方」）');
+    return;
+  }
+
   开战中.value = true;
   try {
     开战进度.value = '读取参战单位…';
@@ -291,7 +303,8 @@ async function 推进回合() {
     新单位[键] = {
       ...阶段A资源恢复(u),
       行动槽: 行动槽重置(u.行动槽),
-      额度: 移动额度重置(移动距离计算(u.属性.实际.AGI, u.阶位, 0)),
+      // 移动额度 = 本回合【移动距离】（含「移动距离额外加成」）；老存档没有这个字段就按公式现算
+      额度: 移动额度重置((u.移动距离 ?? 0) > 0 ? u.移动距离! : 移动距离计算(u.属性.实际.AGI, u.阶位, 0)),
     };
   }
   战斗.value = { ...战斗.value, 单位: 新单位 };
@@ -303,11 +316,16 @@ async function 推进回合() {
   战场进度.value = `正在生成敌方意图（第 ${战斗.value.回合} 回合，1 次 AI 调用）…`;
   try {
     敌方意图列表.value = await 生成敌方意图(战斗.value);
+  } catch (e: any) {
+    // 意图生成失败不再让本回合"凭空消失" —— 兜底成保底战术，敌人至少会移动并出手
+    日志.value.push(`意图生成失败（${e?.message ?? e}）→ 敌人按保底战术行动`);
+    敌方意图列表.value = 保底意图(战斗.value);
   } finally {
     战场进度.value = '';
   }
   if (敌方意图列表.value.length === 0) {
-    日志.value.push('【意图】模型没有给出任何敌方意图 —— 本回合敌人会全部空过');
+    日志.value.push('模型没有给出任何敌方意图 → 敌人按保底战术行动');
+    敌方意图列表.value = 保底意图(战斗.value);
   }
   日志.value.push(
     ...敌方意图列表.value.flatMap(x =>
@@ -362,7 +380,7 @@ async function 执行本轮(填写: 行动槽填写, 目标: string) {
     const 我方存活 = Object.values(战斗.value.单位).some(u => u.阵营 === '我方' && u.HP_当前 > 0);
     if (!敌方存活 || !我方存活) {
       日志.value.push(!我方存活 ? '—— 败北 ——' : '—— 胜利 ——');
-      await 收尾();
+      await 收尾(!我方存活 ? '败北' : '胜利');
       return; // 收尾 走完 finally 释放忙碌锁，不再进下一回合
     }
 
@@ -382,10 +400,14 @@ async function 执行本轮(填写: 行动槽填写, 目标: string) {
 /**
  * 收尾：写回 MVU → 生成收尾正文落楼 → 清持久化。
  * 先切「收尾」态卸载 BattleView（忙碌锁仍持有，挡住「回到准备」）。
+ *
+ * 收尾正文要按击杀发放钥匙（杂兵白/精英白银/BOSS黄金/隐藏BOSS钻石/契约者血腥）、
+ * 并用主角真名 —— 这两样都在 战斗.value 里，所以要把状态传进去。
  */
-async function 收尾() {
+async function 收尾(结局: '胜利' | '败北') {
   战斗结束.value = true;
   阶段.value = '收尾';
+  结局文案.value = 结局;
   try {
     const hp表: Record<string, { HP_当前: number; MP_当前: number; 耐力_当前: number }> = {};
     for (const u of Object.values(战斗.value.单位)) {
@@ -396,8 +418,11 @@ async function 收尾() {
     日志.value.push(`写回变量失败：${e?.message ?? e}`);
   }
   try {
-    // 写收尾楼层 需要 结算步骤[]（只用到 .内容）；这里把整条日志当战报交过去
-    await 写收尾楼层(日志.value.map(内容 => ({ 类: '日志', 内容 })));
+    // 写收尾楼层 需要 结算步骤[]（只用到 .内容）+ 战斗状态（击杀掉落与主角名）；这里把整条日志当战报交过去
+    await 写收尾楼层(
+      日志.value.map(内容 => ({ 类: '日志', 内容 })),
+      战斗.value,
+    );
   } catch (e: any) {
     日志.value.push(`收尾正文失败：${e?.message ?? e}`);
   }
@@ -405,6 +430,42 @@ async function 收尾() {
     await 写战斗状态(null);
   } catch (e: any) {
     日志.value.push(`清除持久化失败：${e?.message ?? e}`);
+  }
+}
+
+/**
+ * 逃离战斗 —— 卡在战斗里的出口。
+ *
+ * 不走收尾正文（没有胜负叙事），不写钥匙，只把 HP/MP/耐力写回 + 清持久化，
+ * 然后停在收尾界面让玩家看到日志、再点「回到准备」。
+ * （规则级的「脱离近战吃借机攻击」是另一回事 —— 这是界面逃生口，不做那个判定。）
+ */
+async function 逃离战斗() {
+  if (忙碌.value || 战斗结束.value) return;
+  忙碌.value = true;
+  战场进度.value = '';
+  try {
+    日志.value.push('—— 你逃离了战斗 ——');
+    战斗结束.value = true;
+    结局文案.value = '逃离';
+    阶段.value = '收尾'; // 复用收尾界面（显示日志 + 回到准备按钮），但不生成收尾正文
+
+    try {
+      const hp表: Record<string, { HP_当前: number; MP_当前: number; 耐力_当前: number }> = {};
+      for (const u of Object.values(战斗.value.单位)) {
+        hp表[u.id] = { HP_当前: u.HP_当前, MP_当前: u.MP_当前, 耐力_当前: u.耐力_当前 };
+      }
+      await 写回战斗结果(战斗.value, hp表);
+    } catch (e: any) {
+      日志.value.push(`逃离时写回变量失败：${e?.message ?? e}`);
+    }
+    try {
+      await 写战斗状态(null);
+    } catch (e: any) {
+      日志.value.push(`逃离时清除持久化失败：${e?.message ?? e}`);
+    }
+  } finally {
+    忙碌.value = false;
   }
 }
 

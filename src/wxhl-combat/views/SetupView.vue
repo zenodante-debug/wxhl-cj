@@ -31,9 +31,11 @@
         <span class="dim">实际距离开战时掷骰</span>
       </div>
 
-      <button class="start-btn" :disabled="开战单位数 === 0 || 忙碌 || 禁用" @click="开战">
+      <button class="start-btn" :disabled="开战单位数 === 0 || 敌方单位数 === 0 || 忙碌 || 禁用" @click="开战">
         {{ 忙碌 ? '开战中…' : `开战（${开战单位数} 个单位）` }}
       </button>
+      <!-- 没有敌方单位就开不了战（玩家实测：只勾了自己进去，出不来也没法结束） -->
+      <p v-if="敌方单位数 === 0" class="no-enemy-hint">没有选任何敌方单位 —— 在名单里把对手勾成「敌方」才能开战</p>
 
       <!-- 开战要连发几十个 AI 请求（每个效果翻一次 + 一次敌方意图），没有进度就是「点了没反应」 -->
       <div v-if="忙碌" class="progress" role="status" aria-live="polite">
@@ -83,6 +85,10 @@ const 开战单位数 = computed(
   () => 名单.value.filter(u => 选中.value[u.id] && 阵营.value[u.id] !== '待定').length,
 );
 
+const 敌方单位数 = computed(
+  () => 名单.value.filter(u => 选中.value[u.id] && 阵营.value[u.id] === '敌方').length,
+);
+
 function 开战() {
   const 选择 = 名单.value
     .filter(u => 选中.value[u.id] && 阵营.value[u.id] !== '待定')
@@ -116,6 +122,7 @@ function 开战() {
 
   &:disabled { opacity: 0.4; cursor: not-allowed; }
 }
+.no-enemy-hint { margin-top: 8px; font-size: 12px; color: #e0a0a0; }
 select, input[type='checkbox'] { accent-color: #4a7; }
 
 .progress {
