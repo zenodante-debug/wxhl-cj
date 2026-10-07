@@ -43,6 +43,7 @@ interface 单位 {
  * @param 防御方 防御方单位
  * @param 攻击属性 攻击方用的属性（默认 STR）
  * @param 防御属性 防御方用的属性（默认 CON）
+ * @param 掷骰 本次 d20 的点数（测试注入；缺省现场掷）
  */
 export function 规则系判定(
   _效果: 规则系效果,
@@ -50,6 +51,7 @@ export function 规则系判定(
   防御方: 单位,
   攻击属性: 'STR' | 'AGI' | 'CON' | 'PER' = 'STR',
   防御属性: 'STR' | 'AGI' | 'CON' | 'PER' = 'CON',
+  掷骰: number = rollDie(20),
 ): {
   判定值: number;
   对抗目标: number;
@@ -57,7 +59,7 @@ export function 规则系判定(
 } {
   // 判定值 = 1d20 + 关联属性修正
   const 攻击修正 = 属性修正值(攻击方.属性.实际[攻击属性], 攻击方.阶位);
-  const 判定值 = rollDie(20) + 攻击修正;
+  const 判定值 = 掷骰 + 攻击修正;
 
   // 对抗目标 =（基础DC + 目标对应属性修正）× 类型系数 + 目标对应属性修正
   const 基础DC = 基础DC表[防御方.阶位];
@@ -85,6 +87,7 @@ export function 规则系判定(
  * @param 防御属性 防御方用的属性
  * @param 攻击方过了 攻击方是否过了判定
  * @param 防御方过了 防御方是否过了判定
+ * @param 掷骰 修正持平时 1d2 的点数（测试注入；缺省现场掷）
  */
 export function 规则系对抗(
   攻击方: 单位,
@@ -93,6 +96,7 @@ export function 规则系对抗(
   防御属性: 'STR' | 'AGI' | 'CON' | 'PER',
   攻击方过了: boolean,
   防御方过了: boolean,
+  掷骰: number = rollDie(2),
 ): {
   赢家: '攻击方' | '防御方' | '无';
   骰值?: number;
@@ -122,9 +126,8 @@ export function 规则系对抗(
   }
 
   // 修正相等 → 掷 1d2
-  const 骰值 = rollDie(2);
   return {
-    赢家: 骰值 === 1 ? '攻击方' : '防御方',
-    骰值,
+    赢家: 掷骰 === 1 ? '攻击方' : '防御方',
+    骰值: 掷骰,
   };
 }
