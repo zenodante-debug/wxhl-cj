@@ -72,8 +72,45 @@ describe('store · 生成敌方意图', () => {
     expect(意图[0].行动[0].技能).toBe('骨爪撕裂');
   });
 
-  it('AI 返回非数组 JSON → 抛错（形状校验交给 解析敌方意图）', async () => {
+  it('AI 返回找不到意图数组的 JSON → 抛错（由 开始回合 记日志，不静默）', async () => {
     (globalThis as any).generateRaw = async () => '{"a":1}';
-    await expect(生成敌方意图(造状态())).rejects.toThrow('敌方意图必须是数组');
+    await expect(生成敌方意图(造状态())).rejects.toThrow('找不到意图数组');
+  });
+
+  it('必须走 json_schema 通道 —— 以前不传 schema，零校验零重试，一次围栏就让整回合消失', async () => {
+    let 收到的: any = null;
+    (globalThis as any).generateRaw = async (cfg: any) => {
+      收到的 = cfg;
+      return '{"意图":[]}';
+    };
+
+    await 生成敌方意图(造状态());
+
+    expect(收到的.json_schema).toBeDefined();
+    expect(收到的.json_schema.name).toBe('enemy_intent');
+  });
+
+  it('模型把 JSON 包在 ```json 围栏里 → 照样解析出意图（回归：敌人不出招的第二个根因）', async () => {
+    (globalThis as any).generateRaw = async () =>
+      '```json\n{"意图":[{"单位":"骨卫兵","行动":[{"类型":"主要行动","技能":"骨爪撕裂","目标":"玩家"}]}]}\n```';
+
+    const 意图 = await 生成敌方意图(造状态());
+
+    expect(意图).toHaveLength(1);
+    expect(意图[0].行动[0].技能).toBe('骨爪撕裂');
+  });
+
+  it('发给模型的提示词里必须带上该单位的技能表原名（否则模型只能瞎编 → 行动被跳过）', async () => {
+    let 提示词 = '';
+    (globalThis as any).generateRaw = async (cfg: any) => {
+      提示词 = cfg.user_input;
+      return '{"意图":[]}';
+    };
+    const 状态 = 造状态();
+    状态.单位.骨卫兵.技能 = { 骨爪撕裂: { 行动消耗: '主要行动', 射程: '近战', 目标: '单体', 消耗: '无', 冷却: 0, 分类: '基础', 类型: '主动', 可预判: true, 规则: [], 托管: [] } };
+
+    await 生成敌方意图(状态);
+
+    expect(提示词).toContain('骨爪撕裂');
   });
 });

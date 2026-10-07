@@ -60,7 +60,7 @@ import SetupView from './SetupView.vue';
 import BattleView from './BattleView.vue';
 import PendingModal from './PendingModal.vue';
 import { 初始化战斗状态, 开场距离随机, 开场距离选项 } from '../engine/setup';
-import { 结算行动, 找单位 } from '../engine/loop';
+import { 跑一个回合 } from '../engine/loop';
 import { 阶段A资源恢复, 阶段F结算 } from '../engine/turn';
 import { 行动槽重置 } from '../engine/actionEconomy';
 import { 移动距离计算, 移动额度重置 } from '../engine/distance';
@@ -281,9 +281,13 @@ async function 推进回合() {
 
   // 敌方意图：一次 AI 调用，为全体敌方决定本回合行动
   敌方意图列表.value = await 生成敌方意图(战斗.value);
+  if (敌方意图列表.value.length === 0) {
+    日志.value.push('【意图】模型没有给出任何敌方意图 —— 本回合敌人会全部空过');
+  }
   日志.value.push(
     ...敌方意图列表.value.flatMap(x =>
-      x.行动.map(a => `【意图】${x.单位} → ${a.类型}${a.技能 ? `·${a.技能}` : ''}`),
+      // 没写技能 = 基础攻击：日志里也要看得见，否则「敌人只是挥了下拳头」会被当成没出招
+      x.行动.map(a => `【意图】${x.单位} → ${a.类型}${a.技能 ? `·${a.技能}` : '·基础攻击'}`),
     ),
   );
 }
@@ -306,28 +310,12 @@ async function 执行本轮(填写: 行动槽填写, 目标: string) {
     let 状态 = 战斗.value;
     const 追加日志: string[] = [];
 
-    // 按先攻顺序逐单位行动（玩家与敌方交错）。
-    // 结算行动 是纯函数：状态用局部变量逐次推进，循环外一次性写回，避免半成品暴露给 UI。
-    for (const id of [...状态.先攻]) {
-      const u = 状态.单位[id] ?? Object.values(状态.单位).find(x => x.id === id);
-      if (!u) continue;
-
-      const 是玩家 = u.id === '契约者';
-      // 敌方意图的「单位」可能是短名/全路径/「玩家」——用 找单位 归一化后再按 id 比对
-      const 本意图 = 敌方意图列表.value.find(x => 找单位(状态, x.单位)?.id === u.id);
-      const 本行动: 意图行动[] = 是玩家 ? (玩家行动 as 意图行动[]) : (本意图?.行动 ?? []);
-
-      for (const a of 本行动) {
-        // 每个行动前按 id 重取行动者：上一个行动可能已改了它的 HP（如一命换一命的自我代价），
-        // 结算行动的存活守卫要看到最新值，不能拿本轮开头的旧引用。
-        const 行动者 = Object.values(状态.单位).find(x => x.id === u.id);
-        if (!行动者) break;
-
-        const r = 结算行动(状态, 行动者, a);
-        状态 = r.状态;
-        追加日志.push(...r.步骤.map(s => s.内容));
-      }
-    }
+    // 按先攻顺序逐单位行动（玩家与敌方交错）—— 整段逻辑是 engine/loop.跑一个回合（纯函数、有单测）。
+    // 为什么不写在 view 里：本仓库无 vue-tsc，`.vue` 只做语法编译、跑不到运行时，
+    // 「敌方意图没接上 / 技能名对不上」这类坏在 view 层是测不到的 —— 而「敌人完全不出招」正是死在这里。
+    const 本轮 = 跑一个回合(状态, 玩家行动 as 意图行动[], 敌方意图列表.value);
+    状态 = 本轮.状态;
+    追加日志.push(...本轮.步骤.map(s => s.内容));
 
     // 阶段F：持续伤害与状态递减
     const 新单位 = { ...状态.单位 };

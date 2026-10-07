@@ -7,7 +7,8 @@ import type { 战斗单位, 战斗解释, 战斗状态, 结算步骤 } from './t
 import { sanitizeJsonSchema } from '@/wxhl-003/schemaSanitize';
 import type { ApiConfig } from './settings';
 import { 构建批量翻译提示词, 解析批量翻译结果, 批量战斗解释_SCHEMA, type 条目解析结果 } from './ai/skillInterpreter';
-import { 构建敌方意图提示词, 解析敌方意图, type 敌方意图 } from './ai/enemyTactics';
+import { 构建敌方意图提示词, 解析敌方意图, 敌方意图_SCHEMA, type 敌方意图 } from './ai/enemyTactics';
+import { 提取JSON } from './ai/jsonExtract';
 import { 构建收尾提示词 } from './ai/aftermath';
 import { buff转字符串 } from './engine/buffMapper';
 import { 解析伤害骰 } from './engine/damage';
@@ -307,29 +308,6 @@ export async function 读取可参战单位(): Promise<可参战单位[]> {
   return 结果;
 }
 
-/** 从 AI 回复文本中抠出 JSON（直接 parse → 代码围栏 → 首个平衡括号段）。 */
-function extractJSON(text: string): any {
-  try { return JSON.parse(text.trim()); } catch (_) {}
-  const fence = text.match(/```(?:json)?\s*([\s\S]*?)```/);
-  if (fence) { try { return JSON.parse(fence[1].trim()); } catch (_) {} }
-  const first = text.search(/[\{\[]/);
-  if (first >= 0) {
-    const chars = [...text.slice(first)];
-    let d = 0, inS = false, esc = false, end = -1;
-    for (let i = 0; i < chars.length; i++) {
-      const ch = chars[i];
-      if (esc) { esc = false; continue; }
-      if (ch === '\\') { esc = true; continue; }
-      if (ch === '"') { inS = !inS; continue; }
-      if (inS) continue;
-      if (ch === '{' || ch === '[') d++;
-      else if (ch === '}' || ch === ']') { d--; if (d === 0) { end = i; break; } }
-    }
-    if (end > 0) { try { return JSON.parse(text.slice(first, first + end + 1)); } catch (_) {} }
-  }
-  throw new Error('AI 回复中未找到有效 JSON，原始回复: ' + text.slice(0, 300));
-}
-
 /**
  * 给一个 Promise 套上超时。
  * 为什么必须自己兜：`generateRaw` 的 config **没有 timeout 字段**（见 @types/function/generate.d.ts），
@@ -394,7 +372,7 @@ export async function aiGenerate(
       if (!jsonSchema) return text;
 
       try {
-        extractJSON(text);
+        提取JSON(text);
         return text;
       } catch (_) {
         if (attempt < 2) {
@@ -494,14 +472,16 @@ export async function 翻译战斗解释(
 
 /**
  * 调快路 AI 为敌方单位生成行动意图（每回合一次）。
- * API 未配置时抛错；AI 回复不是合法 JSON 数组时由 `解析敌方意图` 抛错。
- * 注意：**不传 jsonSchema** —— 依赖 `aiGenerate` 的「无 schema 直返首答」路径，
- * 形状校验交给 `解析敌方意图`（非数组 / 缺字段都会抛错，由调用方兜底记日志）。
+ * API 未配置时抛错；AI 回复不是合法 JSON / 找不到意图数组时由 `解析敌方意图` 抛错。
+ *
+ * **传 jsonSchema**：与技能翻译走同一条「净化 → 非法 JSON 自动重试 → 400 降级」通道。
+ * 早先这里不传 schema，`aiGenerate` 会走「无 schema 直返首答」路径 —— 零校验、零重试，
+ * 模型回一次 ```json 围栏就让**整个敌方回合凭空消失**（表现为敌人不出招）。
  */
 export async function 生成敌方意图(状态: 战斗状态): Promise<敌方意图[]> {
   const cfg = 读设置().快路;
   if (!cfg.url || !cfg.apiKey) throw new Error('API 未配置：请先在设置里配置 API');
-  const raw = await aiGenerate(cfg, 构建敌方意图提示词(状态));
+  const raw = await aiGenerate(cfg, 构建敌方意图提示词(状态), 敌方意图_SCHEMA);
   return 解析敌方意图(raw);
 }
 

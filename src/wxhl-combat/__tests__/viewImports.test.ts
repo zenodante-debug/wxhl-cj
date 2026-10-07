@@ -25,7 +25,7 @@ import {
   测试连接,
 } from '../store';
 import { 读设置, useSettingsStore } from '../settingsStore';
-import { 找单位, 跑敌方意图, 结算行动 } from '../engine/loop';
+import { 找单位, 跑敌方意图, 跑一个回合, 结算行动 } from '../engine/loop';
 import { 初始化战斗状态, 开场距离选项, 开场距离随机 } from '../engine/setup';
 import { 阶段A资源恢复, 阶段F结算 } from '../engine/turn';
 import { 行动槽重置 } from '../engine/actionEconomy';
@@ -41,8 +41,7 @@ describe('views 的 import 契约', () => {
       // views/CombatView.vue
       初始化战斗状态,
       开场距离随机,
-      结算行动,
-      找单位,
+      跑一个回合,
       阶段A资源恢复,
       阶段F结算,
       行动槽重置,
@@ -64,9 +63,11 @@ describe('views 的 import 契约', () => {
       useSettingsStore,
       拉取模型,
       测试连接,
-      // 非 view 直接引用，但同属 store 的公开入口（防回归）
+      // 非 view 直接引用，但同属 store / engine 的公开入口（防回归）
       读设置,
       跑敌方意图,
+      结算行动,
+      找单位,
     ];
 
     for (const f of 符号) expect(f).toBeDefined();
