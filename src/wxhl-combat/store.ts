@@ -331,9 +331,34 @@ function extractJSON(text: string): any {
 }
 
 /**
+ * 给一个 Promise 套上超时。
+ * 为什么必须自己兜：`generateRaw` 的 config **没有 timeout 字段**（见 @types/function/generate.d.ts），
+ * 一个不响应的请求会永远挂着 —— 界面上表现为「点了没反应」。开战要连发几十个请求，
+ * 没有这道兜底就没法给玩家任何交代。
+ * @param ms 非正数/非有限数视为「不超时」
+ */
+function 带超时<T>(promise: Promise<T>, ms: number): Promise<T> {
+  if (!Number.isFinite(ms) || ms <= 0) return promise;
+  return new Promise<T>((resolve, reject) => {
+    const 计时器 = setTimeout(() => reject(new Error(`请求超时（${ms}ms 未返回）`)), ms);
+    promise.then(
+      v => {
+        clearTimeout(计时器);
+        resolve(v);
+      },
+      e => {
+        clearTimeout(计时器);
+        reject(e);
+      },
+    );
+  });
+}
+
+/**
  * 精简版 aiGenerate（独立脚本自己的 AI 通道）。
  * - 请求侧 schema 先经 sanitizeJsonSchema 净化
  * - API 以 400 拒收 schema 时自动降级为纯提示词重试
+ * - 单次请求受 `cfg.timeout` 约束（generateRaw 自己不提供超时）
  */
 export async function aiGenerate(
   cfg: ApiConfig,
@@ -363,7 +388,7 @@ export async function aiGenerate(
         config.json_schema = { name: jsonSchema.name, strict: true, value: sanitizeJsonSchema(jsonSchema.value) };
       }
 
-      const result = await generateRaw(config);
+      const result = await 带超时(generateRaw(config) as Promise<any>, cfg.timeout);
       const text = typeof result === 'string' ? result : (result as any).content || '';
 
       if (!jsonSchema) return text;
@@ -398,21 +423,33 @@ export async function aiGenerate(
   throw new Error(lastErr || '生成失败');
 }
 
-/** 一次性翻译：把每个技能翻成战斗解释。API 未配置时抛错。 */
-export async function 翻译战斗解释(技能列表: any[]): Promise<Record<string, 战斗解释>> {
+/**
+ * 一次性翻译：把每个技能翻成战斗解释。API 未配置时抛错。
+ *
+ * @param 进度 可选进度回调，**进入每个技能之前**调用一次 —— 开战要连发几十个请求，
+ *   没有进度反馈就是「点了没反应」（实战反馈的 bug）。
+ *   `已完成` = 该技能之前已经翻好的数量；翻失败的技能不计入 `已完成` 也不中断。
+ */
+export async function 翻译战斗解释(
+  技能列表: any[],
+  进度?: (已完成: number, 总数: number, 当前技能: string) => void,
+): Promise<Record<string, 战斗解释>> {
   const cfg = 读设置().快路;
   if (!cfg.url || !cfg.apiKey) {
     throw new Error('API 未配置：请先在设置里配置 API');
   }
 
   const 结果: Record<string, 战斗解释> = {};
+  let 已完成 = 0;
   for (const 技能 of 技能列表) {
+    进度?.(已完成, 技能列表.length, String(技能?.名称 ?? ''));
     // 逐技能隔离：单个技能三次重试都翻不出 JSON，不该拖垮整场开战（其余技能照常）。
     // 失败只记警告并跳过 —— 该技能不进结果映射，调用方（CombatView）据此在 UI 里点明「本场不可用」。
     try {
       // 必须传 schema —— 否则 aiGenerate 缺省直接返回首答，非法 JSON 不会重试
       const raw = await aiGenerate(cfg, 构建翻译提示词(技能), 战斗解释_SCHEMA);
       结果[技能.名称] = 解析翻译结果(raw);
+      已完成++;
     } catch (e: any) {
       console.warn('[wxhl-combat] 技能翻译失败', 技能?.名称, e);
     }

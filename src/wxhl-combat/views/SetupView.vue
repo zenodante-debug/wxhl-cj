@@ -31,9 +31,16 @@
         <span class="dim">实际距离开战时掷骰</span>
       </div>
 
-      <button class="start-btn" :disabled="开战单位数 === 0" @click="开战">
-        开战（{{ 开战单位数 }} 个单位）
+      <button class="start-btn" :disabled="开战单位数 === 0 || 忙碌" @click="开战">
+        {{ 忙碌 ? '开战中…' : `开战（${开战单位数} 个单位）` }}
       </button>
+
+      <!-- 开战要连发几十个 AI 请求（每个效果翻一次 + 一次敌方意图），没有进度就是「点了没反应」 -->
+      <div v-if="忙碌" class="progress" role="status" aria-live="polite">
+        <span class="spinner" aria-hidden="true"></span>
+        <span>{{ 进度 || '准备中…' }}</span>
+      </div>
+      <div v-else-if="进度" class="progress done">{{ 进度 }}</div>
     </template>
   </div>
 </template>
@@ -42,6 +49,13 @@
 import { computed, onMounted, ref } from 'vue';
 import { 读取可参战单位, type 可参战单位 } from '../store';
 import { 开场距离选项 } from '../engine/setup';
+
+defineProps<{
+  /** 开战进行中：禁用按钮、显示进度 */
+  忙碌?: boolean;
+  /** 进度文案（如「翻译技能 3/8：裂骨重击」） */
+  进度?: string;
+}>();
 
 const emit = defineEmits<{ (e: '开战', 选择: { id: string; 阵营: '我方' | '敌方' }[], 开场模式: string): void }>();
 
@@ -101,4 +115,30 @@ function 开战() {
   &:disabled { opacity: 0.4; cursor: not-allowed; }
 }
 select, input[type='checkbox'] { accent-color: #4a7; }
+
+.progress {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin-top: 12px;
+  font-size: 13px;
+  color: #9cc;
+  line-height: 1.5;
+
+  &.done { color: #7bc47f; }
+}
+
+.spinner {
+  flex-shrink: 0;
+  width: 12px;
+  height: 12px;
+  border: 2px solid #3a5a5a;
+  border-top-color: #9cc;
+  border-radius: 50%;
+  animation: progress-spin 0.8s linear infinite;
+}
+
+@keyframes progress-spin {
+  to { transform: rotate(360deg); }
+}
 </style>

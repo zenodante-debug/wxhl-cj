@@ -1,7 +1,7 @@
 <template>
   <div class="combat-view-root">
     <template v-if="阶段 === '准备'">
-      <SetupView @开战="开始战斗" />
+      <SetupView :忙碌="开战中" :进度="开战进度" @开战="开始战斗" />
       <!-- 开战失败（如 API 未配置）会留在此态：错误只在 日志 里，必须在这里也渲染出来 -->
       <div v-if="日志.length" class="prep-log">
         <div v-for="(s, i) in 日志" :key="i" class="prep-log-entry">{{ s }}</div>
@@ -64,6 +64,13 @@ const 敌方意图列表 = ref<敌方意图[]>([]);
 const 忙碌 = ref(false);
 /** 战斗已分出胜负：挡住收尾期间误点「执行本轮」 */
 const 战斗结束 = ref(false);
+/**
+ * 开战进度。
+ * 开战要连发几十个 AI 请求（每个效果翻一次 + 一次敌方意图），
+ * 没有这个玩家看到的就是「点了没反应」（实测反馈的 bug）。
+ */
+const 开战中 = ref(false);
+const 开战进度 = ref('');
 
 function 空战斗(): 战斗状态 {
   return { 进行中: false, 回合: 0, 先攻: [], 单位: {}, 待决: null, 领域: [] };
@@ -80,11 +87,14 @@ onMounted(async () => {
 });
 
 async function 开始战斗(选择: { id: string; 阵营: '我方' | '敌方' }[], 开场模式: string) {
+  if (开战中.value) return; // 按钮已禁用，这里再挡一层重入
   日志.value = [];
   敌方意图列表.value = [];
   战斗结束.value = false;
   阶段.value = '准备'; // 失败时留在准备态（Review Focus 5）
+  开战中.value = true;
   try {
+    开战进度.value = '读取参战单位…';
     const 单位列表: 战斗单位[] = [];
     const 效果源: Record<string, 单位效果源[]> = {};
     for (const c of 选择) {
@@ -94,19 +104,24 @@ async function 开始战斗(选择: { id: string; 阵营: '我方' | '敌方' }[
 
     // 一次性翻译（整场缓存）。API 未配置时抛「API 未配置：请先在设置里配置 API」
     // 逐技能隔离（翻译器内部已 catch）：某个技能翻不出来 → 不进技能表，这里点名提示，绝不静默吞掉。
+    // 进度必须实时上报：这一步是逐个技能串行调 AI，没有反馈玩家只会看到「点了没反应」。
     for (const u of 单位列表) {
       const 源 = 效果源[u.id] ?? [];
       if (源.length === 0) {
         u.技能 = {};
         continue;
       }
-      u.技能 = await 翻译战斗解释(源);
+      const 单位名 = u.id.split('.').pop() || u.id;
+      u.技能 = await 翻译战斗解释(源, (已完成, 总数, 当前) => {
+        开战进度.value = `翻译技能 ${Math.min(已完成 + 1, 总数)}/${总数}：${当前}（${单位名}）`;
+      });
       const 缺失 = 源.map(s => s.名称).filter(名称 => !(名称 in u.技能));
       if (缺失.length) {
         日志.value.push(`技能翻译失败（本场不可用）：${缺失.join('、')}`);
       }
     }
 
+    开战进度.value = '掷先攻、初始化战场…';
     const 选项 = 开场距离选项().find(o => o.名 === 开场模式) ?? 开场距离选项()[2];
     const 战斗0 = 初始化战斗状态(单位列表, 开场距离随机(选项.范围));
     战斗.value = 战斗0;
@@ -115,9 +130,12 @@ async function 开始战斗(选择: { id: string; 阵营: '我方' | '敌方' }[
     阶段.value = '战斗';
 
     // 进入第 1 回合：重置行动槽/额度 → 阶段A → 生成敌方意图
+    开战进度.value = '生成敌方意图…';
     await 开始回合();
   } catch (e: any) {
     日志.value.push(`开战失败：${e?.message ?? e}`);
+  } finally {
+    开战中.value = false;
   }
 }
 

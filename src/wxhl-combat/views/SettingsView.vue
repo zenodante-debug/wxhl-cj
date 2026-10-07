@@ -36,6 +36,15 @@
         </div>
       </div>
 
+      <label class="field">
+        <span>超时（毫秒）</span>
+        <input v-model.number="store.settings[路].timeout" type="number" min="0" step="1000" />
+        <span class="sub-hint">
+          单次请求的上限。酒馆的 generateRaw 自己不提供超时，这里是脚本兜的 ——
+          超时算一次失败并重试，避免一个卡住的请求让界面永远没反应。填 0 表示不限时。
+        </span>
+      </label>
+
       <div class="actions">
         <button class="test-btn" :disabled="界面[路].测试中" @click="测试(路)">
           {{ 界面[路].测试中 ? '测试中…' : '测试连接' }}
@@ -177,8 +186,15 @@ function 复制快路() {
   }
 }
 
-.model-row {
-  display: flex;
+.sub-hint {
+  display: block;
+  margin-top: 4px;
+  font-size: 11px;
+  line-height: 1.6;
+  color: #777;
+}
+
+.model-row {  display: flex;
   gap: 6px;
 
   input {
