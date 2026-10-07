@@ -1829,74 +1829,227 @@
 
             <template v-if="!settlementStore.settlement">
               <div class="set-hint">
-                结算会读取当前副本的任务与奖励、并读取聊天记录判定完成情况。确认写入前不会改动任何变量。
+                结算分两步。第一步（评价等级、资格分、资源清单）由脚本直接读变量里任务的「状态」算出，
+                <b>不发任何 AI 请求</b>；第二步是单独一个按钮，只为「生成物品」调用 AI。
+                确认写入前不会改动任何变量。
               </div>
-              <button class="roll-btn" :disabled="settlementStore.generating" @click="onGenerateSettlement">
-                {{ settlementStore.generating ? '结算中...' : '副本结算' }}
-              </button>
+              <button class="roll-btn" @click="onComputeSettlementStage1">第 1~3 步 · 结算（纯脚本）</button>
             </template>
 
             <template v-else>
-              <!-- 资格分逐项: 规则第二步要求「明文逐项展示」, 而规则给的面板模板里没有分项行 —— 面板保持严格模板, 分项放这里 -->
+              <!-- ═══ 阶段一（纯脚本, 一次 AI 请求都不发）: 完成后这些数就定下来了 ═══ -->
+              <!-- 评价是怎么来的 + 本次完成了哪些任务/成就 —— 结算前玩家就能核对,
+                   写入后这仍是「存档里的数从哪来」的唯一说明（评价按已达成成就的星数和判定）。 -->
               <div class="settlement-scores">
-                <div class="ss-title">资格分逐项 · 本次 {{ settlementStore.settlement.计算结果.资格分_本次 }}</div>
-                <div class="ss-row">
-                  <span>评价分</span><span>{{ settlementStore.settlement.计算结果.资格分_评价 }}</span>
+                <div class="ss-title">
+                  阶段一 · 完成清单与评价（脚本读变量, 不看聊天）
                 </div>
                 <div class="ss-row">
-                  <span>击杀分</span><span>{{ settlementStore.settlement.计算结果.资格分_击杀 }}</span>
+                  <span>评价等级</span><span>{{ settlementStore.settlement.计算结果.评价等级 }}</span>
+                </div>
+                <div class="ss-row ss-row-wrap">
+                  <span>评价依据</span><span>{{ settlementStore.settlement.评价依据 }}</span>
+                </div>
+                <div v-if="settlementStore.settlement.完成清单.length === 0" class="ss-row">
+                  <span>本次完成</span><span>无</span>
+                </div>
+                <div
+                  v-for="(x, i) in settlementStore.settlement.完成清单"
+                  :key="i"
+                  class="ss-row ss-row-wrap"
+                >
+                  <span>{{ x.类别 }}｜{{ x.名称 }}</span
+                  ><span>{{ x.奖励 || '（变量里没有填奖励）' }}</span>
+                </div>
+              </div>
+
+              <!-- 资源清单: 规则第二步要求「明文逐项展示」资格分, 而规则给的面板模板里没有分项行 ——
+                   面板保持严格模板, 明细放这里。数值全部来自阶段一的计算结果（= 写进存档的那一份）。 -->
+              <div class="settlement-scores">
+                <div class="ss-title">阶段一 · 资源清单（脚本算好, 与写入同源）</div>
+                <div class="ss-row">
+                  <span>评价倍率 × CR奖励倍率 × 位阶修正</span
+                  ><span
+                    >×{{ settlementStore.settlement.计算结果.评价倍率 }} ×
+                    {{ Math.round(settlementStore.settlement.计算结果.CR奖励倍率 * 100) }}% ×
+                    {{ settlementStore.settlement.计算结果.位阶修正 }}</span
+                  >
                 </div>
                 <div class="ss-row">
-                  <span>任务分</span><span>{{ settlementStore.settlement.计算结果.资格分_任务 }}</span>
+                  <span>CR态度 / 回廊态度</span
+                  ><span
+                    >{{ settlementStore.settlement.计算结果.CR态度 }} →
+                    {{ settlementStore.settlement.计算结果.更新后回廊态度 }}</span
+                  >
                 </div>
-                <!-- 规则第十一步要求「本次资格分**累加进赛季资格分**并明文展示」: 上面三行只有「本次」,
-             而真正写进存档的是「旧资格分 + 本次」= 新资格分 —— 不摆出来玩家无从核对写进去的是什么。 -->
+                <div class="ss-row ss-row-wrap">
+                  <span>基础EXP汇总 / 最终EXP</span
+                  ><span
+                    >{{ settlementStore.settlement.计算结果.基础EXP汇总 }} →
+                    {{ settlementStore.settlement.计算结果.最终EXP }}</span
+                  >
+                </div>
+                <div class="ss-row ss-row-wrap">
+                  <span>基础UP汇总 / 最终UP</span
+                  ><span
+                    >{{ settlementStore.settlement.计算结果.基础UP汇总 }} →
+                    {{ settlementStore.settlement.计算结果.最终UP }}</span
+                  >
+                </div>
+                <div class="ss-row">
+                  <span>RP获得（结算后余额）</span
+                  ><span
+                    >+{{ settlementStore.settlement.计算结果.RP }}（{{
+                      settlementStore.settlement.快照.当前RP + settlementStore.settlement.计算结果.RP
+                    }}）</span
+                  >
+                </div>
+                <div class="ss-row">
+                  <span>PEXP获得（结算后）</span
+                  ><span
+                    >+{{ settlementStore.settlement.计算结果.PEXP }}（{{
+                      settlementStore.settlement.快照.当前PEXP + settlementStore.settlement.计算结果.PEXP
+                    }}）</span
+                  >
+                </div>
+                <div class="ss-row">
+                  <span>资格分 · 评价 {{ settlementStore.settlement.计算结果.资格分_评价 }}</span
+                  ><span
+                    >击杀 {{ settlementStore.settlement.计算结果.资格分_击杀 }} / 任务
+                    {{ settlementStore.settlement.计算结果.资格分_任务 }}</span
+                  >
+                </div>
+                <div class="ss-row">
+                  <span>本次资格分</span><span>{{ settlementStore.settlement.计算结果.资格分_本次 }}</span>
+                </div>
+                <!-- 规则第十一步要求「本次资格分**累加进赛季资格分**并明文展示」: 上面几行只有「本次」,
+                     而真正写进存档的是「旧资格分 + 本次」= 新资格分 —— 不摆出来玩家无从核对写进去的是什么。 -->
                 <div class="ss-row">
                   <span>赛季累计（结算后）</span><span>{{ settlementStore.settlement.计算结果.新资格分 }}</span>
                 </div>
+                <div class="ss-row">
+                  <span>CR变动 / 更新后CR</span
+                  ><span
+                    >{{ settlementStore.settlement.计算结果.CR变动 === 0 ? '不变' : (settlementStore.settlement.计算结果.CR变动 > 0 ? '+' : '') + settlementStore.settlement.计算结果.CR变动 }} →
+                    {{ settlementStore.settlement.计算结果.更新后CR }}</span
+                  >
+                </div>
+                <div class="ss-row">
+                  <span>副本周期（+1）</span><span>{{ settlementStore.settlement.计算结果.新周期 }}</span>
+                </div>
+                <div class="ss-row ss-row-wrap">
+                  <span>现实日期（按副本天数推）</span
+                  ><span>{{
+                    settlementStore.settlement.计算结果.新现实日期 ||
+                    settlementStore.settlement.快照.当前现实日期 + '（格式无法识别, 本次未更新）'
+                  }}</span>
+                </div>
               </div>
 
-              <div class="roll-section">
-                <div class="roll-section-title">结算面板（数字全部来自模块计算, 可直接复制）</div>
-                <pre class="enemy-panel-text">{{ settlementStore.settlement.面板 }}</pre>
-              </div>
-
-              <div class="set-hint">
-                面板的「掉落清单」列的是本次掉落量；写进存档的「背包.数量」是已有 + 本次的余额 —— 两者语义不同,
-                不是不一致。
+              <!-- ═══ 阶段二（AI）: 只生成掉落物品; 可单独重跑, 不碰上面的任何数值 ═══ -->
+              <div class="settlement-scores">
+                <div class="ss-title">阶段二 · 掉落物品（AI 按完成清单的奖励原文生成）</div>
+                <div v-if="settlementStore.settlement.掉落物品 === null" class="ss-row ss-row-wrap">
+                  <span>掉落物品</span><span class="settle-warn">尚未生成</span>
+                </div>
+                <div
+                  v-else-if="settlementStore.settlement.掉落物品.length === 0"
+                  class="ss-row ss-row-wrap"
+                >
+                  <span>掉落物品</span><span>本次没有掉落</span>
+                </div>
+                <template v-else>
+                  <div
+                    v-for="(d, i) in settlementStore.settlement.掉落物品"
+                    :key="i"
+                    class="ss-row ss-row-wrap"
+                  >
+                    <span>{{ d.名称 }} ×{{ d.数量 }}</span
+                    ><span>{{ [d.品质, d.属性, d.效果].filter(Boolean).join('｜') }}</span>
+                  </div>
+                </template>
               </div>
 
               <div class="dc-actions">
-                <button class="confirm-btn modify" @click="onCopySettlementPanel">复制面板文本</button>
+                <!-- 未生成 = 阶段二的入口; 已生成 = 重掷（两个状态互斥, 画面上永远只有一个） -->
+                <button
+                  v-if="settlementStore.settlement.掉落物品 === null"
+                  class="confirm-btn modify"
+                  :disabled="
+                    settlementStore.generatingItems ||
+                    settlementStore.writing ||
+                    settlementStore.settlement.已写入 ||
+                    settlementStore.settlement.写入完成
+                  "
+                  @click="onGenerateSettlementItems"
+                >
+                  {{ settlementStore.generatingItems ? '生成中...' : '生成物品' }}
+                </button>
+                <button
+                  v-else
+                  class="confirm-btn reroll"
+                  :disabled="
+                    settlementStore.generatingItems ||
+                    settlementStore.writing ||
+                    settlementStore.settlement.已写入 ||
+                    settlementStore.settlement.写入完成
+                  "
+                  @click="onGenerateSettlementItems"
+                >
+                  {{ settlementStore.generatingItems ? '生成中...' : '🔄 重新结算（重掷物品）' }}
+                </button>
+              </div>
+
+              <!-- 面板与「填入输入框」的提示词都要等阶段二（它们含「掉落清单」一行）—— 未生成时不给 -->
+              <template v-if="settlementStore.settlement.面板">
+                <div class="roll-section">
+                  <div class="roll-section-title">结算面板（数字全部来自模块计算, 可直接复制）</div>
+                  <pre class="enemy-panel-text">{{ settlementStore.settlement.面板 }}</pre>
+                </div>
+
+                <div class="set-hint">
+                  面板的「掉落清单」列的是本次掉落量；写进存档的「背包.数量」是已有 + 本次的余额 —— 两者语义不同,
+                  不是不一致。
+                </div>
+
+                <div class="set-hint">
+                  面板的「称号获得 / 称号效果 / 史诗记录」留空是正常的: 称号与副本经历不再由脚本写进存档,
+                  改由正文 AI 在结算写入后补写（点「填入输入框」给的提示词会让它按本次表现生成并写入变量）。
+                </div>
+              </template>
+              <div v-else class="set-hint">
+                结算面板与「填入输入框」的提示词里都含「掉落清单」, 所以要等上面的「生成物品」跑完才拼出来 ——
+                在那之前它们会一直空着（模板行不给, 免得替 AI 编一个「本次没有掉落」）。
+              </div>
+
+              <div class="dc-actions">
+                <!-- 面板要等阶段二（它含「掉落清单」一行）—— 未生成时 `面板` 是 null, 没东西可复制 -->
+                <button
+                  class="confirm-btn modify"
+                  :disabled="!settlementStore.settlement.面板"
+                  @click="onCopySettlementPanel"
+                >
+                  复制面板文本
+                </button>
                 <!-- 写入成功后才可用: 本模块是累加语义, 结算必须真正落进存档, 面板上的数才与存档同源 -->
                 <button
                   class="confirm-btn modify"
                   :disabled="
-                    settlementStore.generating || settlementStore.writing || !settlementStore.settlement.写入完成
+                    settlementStore.generatingItems || settlementStore.writing || !settlementStore.settlement.写入完成
                   "
                   @click="onFillSettlementInput"
                 >
                   填入输入框
                 </button>
-                <button
-                  class="confirm-btn reroll"
-                  :disabled="
-                    settlementStore.generating ||
-                    settlementStore.writing ||
-                    settlementStore.settlement.已写入 ||
-                    settlementStore.settlement.写入完成
-                  "
-                  @click="onGenerateSettlement"
-                >
-                  {{ settlementStore.generating ? '结算中...' : '🔄 重算' }}
-                </button>
+                <!-- 写入需要物品清单齐全: 阶段二未生成时这道入口也锁着（store 里还有一道同样的兜底） -->
                 <button
                   class="confirm-btn"
                   :disabled="
-                    settlementStore.generating ||
+                    settlementStore.generatingItems ||
                     settlementStore.writing ||
                     settlementStore.settlement.已写入 ||
-                    settlementStore.settlement.写入完成
+                    settlementStore.settlement.写入完成 ||
+                    settlementStore.settlement.掉落物品 === null
                   "
                   @click="onConfirmSettlement"
                 >
@@ -1907,35 +2060,43 @@
                         ? '已写入存档'
                         : settlementStore.writing
                           ? '写入中...'
-                          : '确认结算'
+                          : settlementStore.settlement.掉落物品 === null
+                            ? '待生成物品'
+                            : '确认结算'
                   }}
                 </button>
                 <button
                   class="confirm-btn reroll"
-                  :disabled="settlementStore.generating || settlementStore.writing || settlementStore.settlement.已写入"
+                  :disabled="
+                    settlementStore.generatingItems || settlementStore.writing || settlementStore.settlement.已写入
+                  "
                   @click="onDiscardSettlement"
                 >
                   放弃本次结算
                 </button>
               </div>
-              <!-- 已写入 = 变量已经落进存档（只是回读没核对上）: 累加语义下重试会让整份结算翻倍, 重算/确认入口都锁掉 -->
+              <!-- 已写入 = 变量已经落进存档（只是回读没核对上）: 累加语义下重试会让整份结算翻倍, 重掷/确认入口都锁掉 -->
               <div class="set-hint">
                 「放弃本次结算」只丢弃这份预览（面板文本与「填入输入框」的提示词将无法再取得），不会撤销已经写入存档的数值。
               </div>
               <div v-if="settlementStore.settlement.已写入" class="set-hint settle-warn">
-                ⚠ 本次结算已经写进存档（回读校验失败, 明细见上方红框）。累加语义下再次结算会让数值翻倍，请先读存档确认。
+                ⚠ 本次结算已经写进存档（回读校验失败, 明细见上方红框）。累加语义下再次写入会让数值翻倍，请先读存档确认。
               </div>
               <div v-else-if="settlementStore.settlement.写入完成" class="set-hint">
                 ✓
-                本次结算已写入存档。点「填入输入框」把玩家送进回廊的结算空间（只填入、不发送）。重复结算会让数值翻倍，重算/确认入口已锁住。
+                本次结算已写入存档。点「填入输入框」把玩家送进回廊的结算空间（只填入、不发送）。重复写入会让数值翻倍，重掷/确认入口已锁住。
+              </div>
+              <div v-else-if="settlementStore.settlement.掉落物品 === null" class="set-hint settle-warn">
+                ⚠ 阶段一已经算完（上面的数与写进存档的完全同源）。点「生成物品」补出掉落清单后才能「确认结算」——
+                写入会清空副本资料且不可撤销，而物品清单必须一并写进去。
               </div>
               <div v-else class="set-hint settle-warn">⚠ 确认后会写入存档并清空副本资料，不可撤销</div>
             </template>
           </div>
 
-          <div v-if="settlementStore.generating" class="gen-overlay">
+          <div v-if="settlementStore.generatingItems" class="gen-overlay">
             <div class="gen-spinner"></div>
-            <span>AI 正在结算副本...</span>
+            <span>AI 正在生成掉落物品...</span>
           </div>
           <!-- writing 期间全屏遮罩: 遮住返回按钮与整页, 结算写入不可中断也不可半途切走 -->
           <div v-if="settlementStore.writing" class="write-mask">
@@ -2582,8 +2743,16 @@ function openSettlement() {
   // 「聊天里看到的」与「写进存档的」不同源, 恰好违反本模块的核心不变量。
   settlementStore.lastError = '';
 }
-async function onGenerateSettlement() {
-  await settlementStore.generateSettlement();
+/**
+ * 阶段一: 纯脚本的第 1~3 步（**不发 AI 请求**, 所以没有 loading 态, 也没有 API 配置前置检查）。
+ * 失败时 store 会把原因写进 `lastError`, 视图顶部照旧显示。
+ */
+function onComputeSettlementStage1() {
+  settlementStore.computeSettlementStage1();
+}
+/** 阶段二: 只生成掉落物品; 第一次是「生成物品」, 之后就是「重掷物品」（同一条路径, 不碰阶段一的数） */
+async function onGenerateSettlementItems() {
+  await settlementStore.generateItems();
 }
 async function onConfirmSettlement() {
   await settlementStore.writeSettlement();
@@ -2610,9 +2779,9 @@ function onDiscardSettlement() {
     return;
   settlementStore.reset();
 }
-/** 复制结算面板（复用副本生成的面板复制逻辑, 只是文本来源不同） */
+/** 复制结算面板（复用副本生成的面板复制逻辑, 只是文本来源不同）; 阶段二未生成时 `面板` 为 null */
 async function onCopySettlementPanel() {
-  await onCopyPanel({ panelText: settlementStore.settlement?.面板 });
+  await onCopyPanel({ panelText: settlementStore.settlement?.面板 ?? undefined });
 }
 
 const ACHIEVEMENT_TIERS = ['★ 探索级', '★★ 挑战级', '★★★ 破局级', '★★★★ 史诗级', '★★★★★ 传说级', '★★★★★★ 世界天花板'];
@@ -5954,6 +6123,18 @@ onUnmounted(() => {
   padding: 4px 8px;
   font-size: 11px;
   border-top: 1px solid rgba(120, 80, 40, 0.12);
+}
+/* 第 1~2 步的两栏（评价依据、完成清单的「名称｜奖励」）都比一行宽: 允许折行,
+   并让右栏在最右对齐 —— 否则长奖励文本会顶破 11px 的窄栏。 */
+.ss-row-wrap {
+  flex-wrap: wrap;
+  gap: 2px 10px;
+  line-height: 1.5;
+}
+.ss-row-wrap > span:last-child {
+  flex: 1 1 auto;
+  text-align: right;
+  word-break: break-word;
 }
 .settle-warn {
   color: var(--blood-b);

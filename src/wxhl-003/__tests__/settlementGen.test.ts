@@ -1,12 +1,18 @@
 import { describe, expect, it } from 'vitest';
-import { buildSettlementPrompt, buildSettlementEnterPrompt } from '../settlementGen';
+import { buildItemGenPrompt, buildSettlementEnterPrompt } from '../settlementGen';
 import { assembleSettlementPanel, computeSettlement, type SettlementGenResult, type SettlementSnapshot } from '../settlementRules';
 import { SETTLEMENT_RULES } from '../data';
 
-describe('buildSettlementPrompt', () => {
-  const p = buildSettlementPrompt('契约者: 刘林', '[玩家]: 打完了', '世界书内容');
+/**
+ * 2026-09-25 改: `buildSettlementPrompt`（让 AI 一次做六件事）已删除, 换成 `buildItemGenPrompt`
+ * —— AI 只剩一件事: 按脚本给出的「完成清单 + 奖励原文」生成掉落物品。
+ * 于是下面钉的是**新口径**: 只回 JSON、不许输出评价/称号/完成名单、不内联规则原文之外的东西。
+ */
+describe('buildItemGenPrompt', () => {
+  const 完成清单 = '- 主线「血色的黎明」｜奖励原文: 250 UP + 500 EXP\n- 成就「初见」｜奖励原文: 20 UP + 40 EXP + 2 RP';
+  const p = buildItemGenPrompt(完成清单, 'S', '关注', '[玩家]: 打完了', '世界书内容');
 
-  it('内联了规则原文', () => {
+  it('内联了规则原文（装备/消耗品的生成规范在里面）', () => {
     expect(p).toContain('副本结算');
     expect(p).toContain('第一步_评价判定');
     expect(p).toContain('第十一步_副本经历与面板更新');
@@ -16,43 +22,51 @@ describe('buildSettlementPrompt', () => {
     expect(p).toContain('不适用于本次生成');
     expect(p).toContain('严禁');
     // 真断言: 显式禁止的那句本身。规则原文里没有这一句, 删掉优先级声明即红。
-    expect(p).toContain('在 JSON 前后输出任何 <Settlement Beautification> 面板或结算画面');
+    expect(p).toContain('输出任何 <Settlement Beautification> 面板或结算画面');
   });
 
-  it('武装 F 守卫: 主线失败必须填 "F"', () => {
-    // 真断言: 规则原文里没有「填 "F"」这个串, 删掉 prompt 那句即红。
-    expect(p).toContain('填 "F"');
+  it('只回 JSON: 结构里只有「掉落物品」一个字段', () => {
+    expect(p).toContain('只返回一个 JSON 对象, 不要 markdown 代码块, 不要任何解释文字');
+    expect(p).toContain('"掉落物品": [ { "名称": "字符串", "品质": "字符串", "属性": "字符串", "效果": "字符串", "数量": 1 } ]');
   });
 
-  it('副本天数指向 客观时间', () => {
-    // 天数来自 当前时间.客观时间（= 本次副本已度过的天数）, 不是已废弃的 副本日期。
+  it('新口径: 点名「不要输出评价 / 称号 / 史诗记录 / 完成名单」', () => {
+    // AI 不再判任何东西 —— 它若照旧回一份评价, 那些字段会被丢弃, 但更糟的是可能把
+    // 面板文本一起吐出来（`extractJSON` 解析失败 → 整次白跑）。所以这条要逐字在场。
+    expect(p).toContain('**不要**输出评价等级、击杀、濒死、完成名单、称号、史诗记录');
+    expect(p).toContain('评价与完成情况已由系统从变量判定完毕, 你输出的这些字段会被丢弃');
+  });
+
+  it('日数不再由 AI 读（天数改由脚本解析变量的 客观时间）', () => {
     // 真断言: '客观时间'/'副本日期' 都不在规则原文 SETTLEMENT_RULES 里（见 data.ts 的 grep）,
-    // 所以这两条只在 settlementGen.ts 的这句话上成立 —— 改回 副本日期 即红。
-    expect(p).toContain('客观时间');
+    // 所以这两条只在**有人把天数判断塞回这个 prompt** 时才成立 —— 那正是要挡的回归。
+    expect(p).not.toContain('客观时间');
     expect(p).not.toContain('副本日期');
   });
 
-  it('点名了 JSON 的每个字段', () => {
-    for (const k of ['评价等级', '击杀', '濒死次数', '副本天数', '完成的支线',
-      '完成的隐藏任务', '达成的成就', '职业专属支线条数', '天赋试炼次数', '掉落物品', '称号', '史诗记录']) {
-      expect(p).toContain(k);
-    }
+  it('技能以物品形式发放, 不另立字段', () => {
+    expect(p).toContain('技能书');
+    expect(p).toContain('卷轴');
+    expect(p).toContain('不要另立字段');
   });
 
-  it('三条硬要求点名', () => {
-    expect(p).toContain('不要计算');          // AI 不许算数
-    expect(p).toContain('逐字一致');          // 完成的支线必须用变量里的键名
-    expect(p).toContain('数值由系统计算');     // 倍率/汇总由模块算
+  it('数量与效果的类型要求点名（填 0 会让整次 parse 失败）', () => {
+    expect(p).toContain('至少为 1');
+    expect(p).toContain('填 0 会让整次 parse 失败');
+    expect(p).toContain('写成字符串');
+    expect(p).toContain('没有掉落就给空数组');
   });
 
-  it('带上玩家数据与聊天记录', () => {
-    expect(p).toContain('契约者: 刘林');
+  it('带上完成清单（含奖励原文）、评价、CR 态度、聊天记录与世界书', () => {
+    expect(p).toContain(完成清单);
+    expect(p).toContain('- 评价等级: S');
+    expect(p).toContain('- 结算前回廊态度（CR态）: 关注');
     expect(p).toContain('[玩家]: 打完了');
     expect(p).toContain('世界书内容');
   });
 
-  it('空输入时回退到占位串', () => {
-    const q = buildSettlementPrompt('契约者: 刘林', '', '');
+  it('空聊天 / 空世界书时回退到占位串', () => {
+    const q = buildItemGenPrompt('（无）', 'D', '漠视', '', '');
     expect(q).toContain('（未读取到聊天记录）');
     expect(q).toContain('（无世界书内容）');
   });
@@ -151,12 +165,17 @@ describe('buildSettlementEnterPrompt', () => {
     expect(快照.当前PEXP + c.PEXP).not.toBe(c.PEXP);
   });
 
-  it('第二组: 掉落 / 称号 / 史诗记录 / 现实时间 都在场', () => {
+  it('第二组: 掉落 / 现实时间 都在场', () => {
     expect(p).toContain('- 掉落清单: 血刃（金色｜STR+5｜流血）×1');
-    expect(p).toContain('- 称号获得: 血夜行者');
-    expect(p).toContain('- 称号效果: 嗜血：击杀回血');
-    expect(p).toContain(`- 史诗记录: ${快照.副本名称} · ${c.评价等级} · ${假AI.史诗记录}`);
     expect(p).toContain(`- 现实时间: ${c.新现实日期} ${快照.当前现实时间}`);
+  });
+
+  it('第二组: 称号与史诗记录**不在**模块给出的结果清单里（它们是正文 AI 的活）', () => {
+    // 2026-09-25 改: 模块不再提供称号与史诗记录, 于是清单里不该出现这两行 ——
+    // 若它们还在, AI 会拿一个模块编的名字去叙述, 而真正写进存档的是它自己生成的另一个称号。
+    expect(p).not.toContain('- 称号获得: ');
+    expect(p).not.toContain('- 称号效果: ');
+    expect(p).not.toContain('- 史诗记录: ');
   });
 
   it('第二组: 成就 / 隐藏任务公示与结算面板**逐字同口径**（列 / 分隔符 / 空值占位都一致）', () => {
@@ -256,16 +275,47 @@ describe('buildSettlementEnterPrompt', () => {
     expect(p).toContain('50 UP/天');
   });
 
-  it('非 A/S 级（称号为 null）时不出现「获得称号」的假象, 而是如实说跳过', () => {
-    // AI 即便给了称号, 只要 computed 不是 A/S, 就不能印出来 —— 与面板 / 写入清单同一道守卫
-    const cB = computeSettlement({ ...输入, 评价等级: 'B' }, 满骰());
-    const pB = buildSettlementEnterPrompt(cB, 假AI, 快照);
-    expect(pB).not.toContain('血夜行者');
-    expect(pB).not.toContain('嗜血');
-    expect(pB).toContain('本次没有称号');
-    expect(pB).toContain('未达 A/S');
-    expect(pB).toContain('跳过');
-    // 反退化: A/S 级时称号照常印出来（否则上面两条在「称号恒不印」下也绿）
-    expect(p).toContain('血夜行者');
+  // 2026-09-25 改: 称号与副本经历不再由模块写入变量, 改由正文 AI 按本 prompt 补写。
+  // 下面一组钉的就是那一段（称号的 A/S 闸门仍在, 只是从「模块印不印」变成「AI 写不写」）。
+  describe('你要补写: 称号 与 副本经历', () => {
+    it('点明要写哪两条路径, 并给出 MVU 命令的写法', () => {
+      expect(p).toContain('你要补写：称号 与 副本经历');
+      expect(p).toContain('契约者.头部.称号.当前称号');
+      expect(p).toContain(`契约者.副本经历.${快照.副本名称}`);
+      expect(p).toContain('_.set');
+      expect(p).toContain('<UpdateVariable>');
+      // 副本经历的字段名与写入清单/面板同口径（评价等级 + 简要说明）
+      expect(p).toContain('"评价等级"');
+      expect(p).toContain('"简要说明"');
+      // 副本名必须逐字用变量里的那一个（否则会写出第二条不同的经历键）
+      expect(p).toContain(`副本名**逐字**用「${快照.副本名称}」`);
+    });
+
+    it('把「这两项要你写」讲成死命令的**唯一**例外（否则与「一个字段都别改」自相矛盾）', () => {
+      expect(p).toContain('上面死命令的**唯一**例外');
+      expect(p).toContain('第 2 条的例外**仅限**本文末尾「你要补写」点名的两条路径');
+      // 死命令本身仍在（不能因为有了例外就把整段约束撤掉）
+      expect(p).toContain('不要 insert、不要 replace、不要 delta、不要 set 任何字段, 一个都不要改。');
+    });
+
+    it('A/S 级: 要求生成本副本专属称号并写入（不再是模块印一个名字）', () => {
+      const 要求 = '请按契约者在本副本的表现生成一个**独一无二**的称号';
+      expect(p).toContain(要求);
+      expect(p).toContain('- 本次评价: S');
+      // 反退化: 未达 A/S 的措辞不能同时出现（否则「允许 A/S」与「跳过」两句互相打架）
+      expect(p).not.toContain('**不要**写这一条, 整个跳过');
+    });
+
+    it('非 A/S 级: 明确要求**不要**写称号这一条（规则第七步「未达 A 级直接跳过」）', () => {
+      const cB = computeSettlement({ ...输入, 评价等级: 'B' }, 满骰());
+      const pB = buildSettlementEnterPrompt(cB, 假AI, 快照);
+      expect(pB).toContain('未达 A/S');
+      expect(pB).toContain('跳过');
+      expect(pB).toContain('**不要**写这一条, 整个跳过');
+      // 反退化: B 级时不许再要求生成称号（否则上面那条在「两段都印」下也绿）
+      expect(pB).not.toContain('请按契约者在本副本的表现生成一个**独一无二**的称号');
+      // 副本经历与评价无关: 任何级别都要写, 所以它必须在场
+      expect(pB).toContain(`契约者.副本经历.${快照.副本名称}`);
+    });
   });
 });

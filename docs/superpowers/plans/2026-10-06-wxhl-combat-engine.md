@@ -434,7 +434,10 @@ export const useSettingsStore = defineStore('wxhl-combat-settings', () => {
   const settings = ref(Settings.parse(getVariables({ type: 'script', script_id: scriptId })));
 
   watchEffect(() => {
-    replaceVariables(klona(settings.value), { type: 'script', script_id: scriptId });
+    // 必须与现有脚本变量合并，不得整体替换 —— 持久化任务（Task 11）会把 战斗 存进同一
+    // scope，整体替换会在每次改设置时抹掉它（评审发现，裁决 R2）
+    const 现有 = getVariables({ type: 'script', script_id: scriptId }) as any;
+    replaceVariables({ ...现有, ...klona(settings.value) }, { type: 'script', script_id: scriptId });
   });
 
   return { settings };
@@ -473,7 +476,7 @@ export function get强路(): import('./settings').ApiConfig {
         模型
         <input v-model="store.settings[路].model" placeholder="模型名" />
       </label>
-      <button class="copy-btn" @click="复制(路)">把快路复制过来</button>
+      <button v-if="路 === '强路'" class="copy-btn" @click="复制(路)">把快路复制过来</button>
     </section>
   </div>
 </template>
@@ -654,7 +657,14 @@ export async function 读取可参战单位(): Promise<可参战单位[]> {
     容器: '小队.成员' | '其他契约者' | '副本角色',
     默认阵营: 可参战单位['默认阵营'],
   ) => {
-    const obj = 契约者[容器] || {};
+    // 容器名是带点的路径（如 '小队.成员'），对应 MVU 变量里的嵌套结构：
+    // 契约者.小队.成员.<名称>。逐段下钻，任一段缺失都当作空容器。
+    const obj =
+      (容器
+        .split('.')
+        .reduce<any>((node, key) => (node ? node[key] : undefined), 契约者) as
+        | Record<string, any>
+        | undefined) || {};
     for (const [名称, 实体] of Object.entries<any>(obj)) {
       结果.push({
         id: `${容器}.${名称}`,
@@ -1129,36 +1139,63 @@ Expected: FAIL
 - Modify: `src/wxhl-combat/store.ts`（在文件末尾追加）
 
 ```ts
-import { 构建翻译提示词, 解析翻译结果 } from './ai/skillInterpreter';
+import { 构建翻译提示词, 解析翻译结果, 战斗解释_SCHEMA } from './ai/skillInterpreter';
 import type { 战斗解释 } from './types';
-
-/** 从设置读快路 API 配置（直接读脚本变量，避免 store 循环依赖） */
-function 读快路(): ApiConfig {
-  const v = getVariables({ type: 'script', script_id: getScriptId() }) as any;
-  const 快路 = v?.快路 || {};
-  return {
-    url: 快路.url || '',
-    apiKey: 快路.apiKey || '',
-    model: 快路.model || '',
-    timeout: 快路.timeout ?? 30000,
-  };
-}
+import { 读设置 } from './settingsStore';
 
 /** 一次性翻译：把每个技能翻成战斗解释。API 未配置时抛错。 */
 export async function 翻译战斗解释(技能列表: any[]): Promise<Record<string, 战斗解释>> {
-  const cfg = 读快路();
+  const cfg = 读设置().快路;
   if (!cfg.url || !cfg.apiKey) {
     throw new Error('API 未配置：请先在设置里配置 API');
   }
 
   const 结果: Record<string, 战斗解释> = {};
   for (const 技能 of 技能列表) {
-    const raw = await aiGenerate(cfg, 构建翻译提示词(技能));
+    // 必须传 schema —— 否则 aiGenerate 缺省直接返回首答，非法 JSON 不会重试（裁决 R6）
+    const raw = await aiGenerate(cfg, 构建翻译提示词(技能), 战斗解释_SCHEMA);
     结果[技能.名称] = 解析翻译结果(raw);
   }
   return 结果;
 }
 ```
+
+`ai/skillInterpreter.ts` 同时导出 schema（裁决 R6，手写 JSON Schema，与 wxhl-003 的 `DUNGEON_V1_SCHEMA` 同风格）：
+
+```ts
+/** 战斗解释的 JSON Schema —— 传给 aiGenerate 以启用「非法 JSON 重试」链路。
+ *  只约束顶层字段，规则/动作的深层结构由 解析翻译结果 兜底校验。 */
+export const 战斗解释_SCHEMA = {
+  name: 'combat_interpretation',
+  value: {
+    type: 'object',
+    properties: {
+      行动消耗: { type: 'string' },
+      射程: { type: 'string' },
+      目标: { type: 'string' },
+      消耗: { type: 'string' },
+      冷却: { type: 'number' },
+      分类: { type: 'string' },
+      类型: { type: 'string' },
+      可预判: { type: 'boolean' },
+      规则: { type: 'array' },
+      托管: { type: 'array' },
+    },
+    required: ['行动消耗', '射程', '目标', '消耗', '冷却', '分类', '类型', '可预判', '规则', '托管'],
+  },
+};
+```
+
+`settingsStore.ts` 同时导出一个不依赖 pinia 的纯读取助手（裁决 R6）：
+
+```ts
+/** 直接读脚本变量里的设置（不经过 pinia，供 store.ts 等非组件场景使用） */
+export function 读设置(): import('./settings').Settings {
+  return Settings.parse(getVariables({ type: 'script', script_id: getScriptId() }));
+}
+```
+
+并把 store 的初始化改为复用它：`const settings = ref(读设置());`
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -1250,11 +1287,12 @@ const props = defineProps<{
   日志: string[];
 }>();
 
-// 距玩家排序（0 在前）
+// 距玩家排序（0 在前）。名称取 id 末段（'副本角色.骨卫兵' → '骨卫兵'）；
+// HP 等字段直接来自 战斗单位（Task 1 的 R1 已把数值字段并进该类型），不得清零。
 const 排序单位 = computed(() =>
   Object.values(props.状态.单位)
-    .map(u => ({ ...u, 名称: u.id.split('.').pop() || u.id, HP_当前: 0, HP_最大: 0 } as any))
-    .sort((a: any, b: any) => a.距离 - b.距离),
+    .map(u => ({ ...u, 名称: u.id.split('.').pop() || u.id }))
+    .sort((a, b) => a.距离 - b.距离),
 );
 
 const 最大距离 = computed(() => Math.max(100, ...排序单位.value.map((u: any) => u.距离)));
@@ -1392,18 +1430,33 @@ import type { 战斗状态, 结算步骤 } from '../types';
 import type { 敌方意图 } from '../ai/enemyTactics';
 
 /**
+ * 解析一个"单位引用"。
+ * 引用既可能是 `状态.单位` 的键（短名，如 `骨卫兵`），也可能是 `战斗单位.id`（变量路径，如 `副本角色.骨卫兵`）；
+ * 敌方意图提示词里还会用固定称呼 `玩家` 指代契约者本体。
+ * **一律精确匹配** —— 绝不用 `endsWith`：那会让「卫兵」误配到「骨卫兵」，且 Object.values 的顺序决定谁中招。
+ */
+function 找单位(状态: 战斗状态, 引用: string): 战斗单位 | undefined {
+  if (状态.单位[引用]) return 状态.单位[引用];
+  const 按id = Object.values(状态.单位).find(u => u.id === 引用);
+  if (按id) return 按id;
+  // 「玩家」是 敌方意图提示词 对契约者本体的固定称呼（见 ai/enemyTactics.ts 的输出格式）
+  if (引用 === '玩家') return Object.values(状态.单位).find(u => u.类型 === '玩家');
+  return undefined;
+}
+
+/**
  * 跑敌方意图：把 AI 返回的意图落到战斗状态上。
- * 遇到不存在的单位/技能/目标 → 跳过该行动并记日志，绝不抛错中断整回合。
+ * 遇到不存在的单位/目标 → 跳过该行动并记日志，绝不抛错中断整回合。
  */
 export function 跑敌方意图(状态: 战斗状态, 意图: 敌方意图[]): {
   状态: 战斗状态;
   步骤: 结算步骤[];
 } {
   const 步骤: 结算步骤[] = [];
-  let 新状态 = { ...状态, 单位: { ...状态.单位 } };
+  const 新状态 = { ...状态, 单位: { ...状态.单位 } };
 
   for (const 单位意图 of 意图) {
-    const 单位 = 新状态.单位[单位意图.单位] || Object.values(新状态.单位).find(u => u.id.endsWith(单位意图.单位));
+    const 单位 = 找单位(新状态, 单位意图.单位);
     if (!单位) {
       步骤.push({ 类: '跳过', 内容: `跳过：单位「${单位意图.单位}」不在战场上` });
       continue;
@@ -1411,15 +1464,12 @@ export function 跑敌方意图(状态: 战斗状态, 意图: 敌方意图[]): {
 
     for (const 行动 of 单位意图.行动) {
       // 校验目标存在
-      if (行动.目标 && 行动.目标 !== '契约者') {
-        const 目标在 = Object.values(新状态.单位).some(u => u.id.endsWith(行动.目标!) || u.id === 行动.目标);
-        if (!目标在) {
-          步骤.push({ 类: '跳过', 内容: `跳过：「${单位意图.单位}」的目标「${行动.目标}」不在战场上` });
-          continue;
-        }
+      if (行动.目标 && !找单位(新状态, 行动.目标)) {
+        步骤.push({ 类: '跳过', 内容: `跳过：「${单位意图.单位}」的目标「${行动.目标}」不在战场上` });
+        continue;
       }
 
-      // TODO: 具体的行动结算（移动/攻击/技能）接 damage.ts / distance.ts / turn.ts
+      // TODO(Task 13): 具体的行动结算（移动/攻击/技能）接 damage.ts / distance.ts / turn.ts
       步骤.push({ 类: '敌方行动', 内容: `「${单位意图.单位}」执行 ${行动.类型}${行动.技能 ? `·${行动.技能}` : ''}`, 单位: 单位意图.单位 });
     }
   }
@@ -1427,6 +1477,8 @@ export function 跑敌方意图(状态: 战斗状态, 意图: 敌方意图[]): {
   return { 状态: 新状态, 步骤 };
 }
 ```
+
+**注意（Task 13 必须遵守）**：契约者本体单位的 `类型` 必须是 `'玩家'`，否则 `找单位` 解析不了 `玩家` 这个称呼。`读取可参战单位`（Task 3）已经这么填了。
 
 - [ ] **Step 4: 运行测试确认通过**
 
@@ -1606,8 +1658,11 @@ describe('settleWriteback · MVU 写回', () => {
 
     expect(写入.length).toBeGreaterThan(0);
     const 写回 = JSON.stringify(写入);
-    expect(写回).toContain('HP_当前');
-    expect(写回).not.toContain('HP_最大\":');   // 严禁写最大值
+    // 铁律：只写 *_当前，严禁改写 *_最大 —— 原有 HP_最大 必须原样保留（270），
+    // 且绝不能被当前值（124）覆盖。注意 replaceMvuData 按仓库范式回写整棵 MVU 树，
+    // 所以载荷里必然含未改动的 HP_最大；断言要查的是"有没有被改写"，不是"有没有出现"。
+    expect(写回).toContain('"HP_当前":124');
+    expect(写回).toContain('"HP_最大":270');
   });
 });
 ```
@@ -1623,6 +1678,7 @@ Expected: FAIL
 
 ```ts
 import { 构建收尾提示词 } from './ai/aftermath';
+import { buff转字符串 } from './engine/buffMapper';
 import type { 战斗状态, 结算步骤 } from './types';
 
 /**
@@ -1645,12 +1701,16 @@ export async function 写回战斗结果(
     if (hp.耐力_当前 !== undefined) _.set(data, `stat_data.${路径前缀}.衍生属性.耐力_当前`, hp.耐力_当前);
   }
 
-  // 特殊状态：把战斗里的 状态 写回
+  // 特殊状态：把战斗里的 状态 写回。
+  // **必须用 engine/buffMapper 的 buff转字符串** —— 它是本模块的规范编码器（有单测），
+  // 会把「引擎段」的词条一并编码进去（如 元素崩坏 的 禁回复HP/禁回复MP）。
+  // 手搓 `${层数}层|持续${持续}回合` 会**整个丢掉词条**，读回时引擎段就没了（评审发现，裁决 R10）。
+  // 语义：战斗引擎在战斗期间独占该字段，收尾时按存活状态重写（＝顺带清掉战斗期间已到期的）。
   for (const 单位 of Object.values(状态.单位)) {
     const 路径前缀 = 单位.id === '契约者' ? '契约者' : `契约者.${单位.id}`;
     const 特殊状态: Record<string, string> = {};
     for (const s of 单位.状态) {
-      特殊状态[s.名] = s.层数 !== undefined ? `${s.层数}层|持续${s.持续}回合` : `持续${s.持续}回合`;
+      特殊状态[s.名] = buff转字符串(s);
     }
     _.set(data, `stat_data.${路径前缀}.状态.特殊状态`, 特殊状态);
   }
@@ -1733,7 +1793,9 @@ describe('persistence · 战斗状态持久化', () => {
     let 存的: any = null;
     (globalThis as any).getScriptId = () => 'wxhl-combat';
     (globalThis as any).getVariables = () => (存的 ? { 战斗: 存的 } : {});
-    (globalThis as any).replaceVariables = (v: any) => { 存的 = v?.战斗 ?? null; };
+    // 关键：必须过一遍 JSON 序列化边界 —— 真实场景里脚本变量就是 JSON 存的。
+    // 直接按引用存的话，写侧漏掉 Set→数组 转换测试也照样绿（Set 存引用还是 Set）。
+    (globalThis as any).replaceVariables = (v: any) => { 存的 = v?.战斗 ? JSON.parse(JSON.stringify(v.战斗)) : null; };
 
     const 原 = 造状态();
     await 写战斗状态(原);
@@ -1742,19 +1804,24 @@ describe('persistence · 战斗状态持久化', () => {
     expect(读回).not.toBe(null);
     expect(读回!.回合).toBe(3);
     expect(读回!.单位['契约者'].资源['保存']).toBe(12);
+    // 落盘的是数组，不是 Set（Set 经 JSON 会变 {}）
+    expect(Array.isArray(存的.单位['契约者'].词条)).toBe(true);
     expect(读回!.单位['契约者'].词条 instanceof Set).toBe(true);
     expect(读回!.单位['契约者'].词条.has('不可被常规攻击命中')).toBe(true);
   });
 
-  it('写入 null → 清除', async () => {
-    let 存的: any = { 进行中: true };
+  it('写入 null → 清除战斗键，但保留同 scope 的设置键', async () => {
+    let 写入的: any = null;
     (globalThis as any).getScriptId = () => 'wxhl-combat';
-    (globalThis as any).getVariables = () => ({ 战斗: 存的 });
-    (globalThis as any).replaceVariables = () => { 存的 = null; };
+    (globalThis as any).getVariables = () => ({ 战斗: { 进行中: true }, 快路: { url: 'u' }, 强路: { url: 's' } });
+    (globalThis as any).replaceVariables = (v: any) => { 写入的 = v; };
 
     await 写战斗状态(null);
-    const 读回 = await 读战斗状态();
-    expect(读回).toBe(null);
+    // 战斗键被真删掉（不是写成 undefined 靠 JSON 丢弃）
+    expect(写入的 && '战斗' in 写入的).toBe(false);
+    // 同 scope 的设置键必须活着（裁决 R2）
+    expect(写入的?.快路?.url).toBe('u');
+    expect(写入的?.强路?.url).toBe('s');
   });
 });
 ```
@@ -1774,7 +1841,7 @@ function 战斗状态转纯对象(状态: 战斗状态): any {
   return {
     ...状态,
     单位: Object.fromEntries(
-      Object.entries(状态.单位).map(([k, u]) => [k, { ...u, 词条: [...u.词条] }]),
+      Object.entries(状态.单位).map(([k, u]) => [k, { ...u, 词条: [...(u.词条 ?? [])] }]),
     ),
   };
 }
@@ -1920,6 +1987,7 @@ git commit -m "feat(wxhl): CombatView 三态重组——准备/战斗/收尾"
 **Files:**
 - Modify: `src/wxhl-combat/engine/combatInterpreter.ts`（补 领域/切换形态/追加攻击/范围伤害/条件分支）
 - Modify: `src/wxhl-combat/engine/turn.ts`（补 阶段 A/B/D/F）
+- Modify: `src/wxhl-combat/engine/loop.ts`（补行动结算 + **技能名校验**）
 - Modify: `src/wxhl-combat/views/CombatView.vue`（接敌方 AI + 引擎结算）
 - Create: `src/wxhl-combat/__tests__/interpreterActions.test.ts`
 - Create: `src/wxhl-combat/__tests__/turnPhases.test.ts`
@@ -1927,6 +1995,8 @@ git commit -m "feat(wxhl): CombatView 三态重组——准备/战斗/收尾"
 **Interfaces:**
 - Consumes: 所有前面任务的产出
 - Produces: 完整的回合循环
+
+**From Task 8's dispatch, carried forward (裁决 R7):** `engine/loop.ts` currently validates only that the intent's **target** exists. Review Focus 4 also requires the **技能名** case — an intent naming a skill the unit does not have must be skipped with a 跳过 reason. Task 13 must add the skill list to `战斗单位`（翻译出的 `战斗解释` 映射）and extend `跑敌方意图` to validate the skill name against it, with a test for the unknown-skill case.
 
 **这是最大的任务。** 拆成子步骤，每个子步骤都有自己的红绿循环。
 

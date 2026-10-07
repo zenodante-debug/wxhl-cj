@@ -51,18 +51,20 @@ import {
   type GeneratedEnemy,
 } from './enemyRules';
 import {
-  SettlementGenResultSchema,
+  SettlementItemsSchema,
   computeSettlement,
   汇总基础奖励,
   assembleSettlementPanel,
   buildSettlementWrites,
   成就星数,
   存在条目数,
+  判定评价等级,
+  评价依据文本,
   type SettlementGenResult,
   type SettlementSnapshot,
   type SettlementComputed,
 } from './settlementRules';
-import { buildSettlementPrompt, buildSettlementEnterPrompt } from './settlementGen';
+import { buildItemGenPrompt, buildSettlementEnterPrompt } from './settlementGen';
 import { sanitizeJsonSchema } from './schemaSanitize';
 import { pushSyslog } from './syslog';
 
@@ -2952,8 +2954,9 @@ function 取数字(v: unknown): number {
 /**
  * 楼层探测读取 `stat_data.契约者` 的**原文**（与 `readPlayerBrief` 同款回退链）。
  *
- * `readSettlementSnapshot` 要把它压成只读快照, 但 prompt 的「变量快照」段要的是原文
- * （AI 需要看到 `当前副本任务` 里逐字的任务名与奖励文本）。两处共用这一个读取口。
+ * `readSettlementSnapshot` 要把它压成只读快照; 而组装 `SettlementInputs` 还要几个**不在快照里**的
+ * 原文（`阶位` / `赛季信息.当前副本周期` / `当前时间.客观时间` / 主线任务名）——
+ * 两处共用这一个读取口, 免得各写一条回退链。
  */
 function read契约者(): any {
   try {
@@ -3021,14 +3024,17 @@ function readSettlementSnapshot(): SettlementSnapshot | null {
     if (条目 && typeof 条目 === 'object') 已有背包[名] = 取数字((条目 as any).数量);
   }
 
-  // ── 成就 / 隐藏任务的**全量**清单（含未达成 / 未触发）─────────────────
-  // 规则第九步要公示「本次错过的」, 所以不能只留已达成的那几条; 已完否由面板拿 AI 的名单比对。
+  // ── 成就 / 隐藏任务 / 支线的**全量**清单（含未达成 / 未触发 / 未完成）──────────
+  // 规则第九步要公示「本次错过的」, 所以不能只留已完成的那几条。
+  // `状态` 一律照原文读出（缺失取 `''`）: 2026-09-25 改后**完成与否只看它**
+  //（`已完成` 才算完成; 成就看 `已达成`）, 不再由 AI 报名单。
   const 成就清单 = Object.entries((c.当前副本任务?.副本成就 ?? {}) as Record<string, any>).map(
     ([名称, a]: [string, any]) => ({
       名称,
       说明: 取文本(a?.说明),
       难度: 取文本(a?.难度),
       奖励: 取文本(a?.奖励),
+      状态: 取文本(a?.状态),
     }),
   );
   const 隐藏任务清单 = Object.entries((c.当前副本任务?.隐藏任务 ?? {}) as Record<string, any>).map(
@@ -3036,6 +3042,16 @@ function readSettlementSnapshot(): SettlementSnapshot | null {
       名称,
       说明: 取文本(t?.说明),
       奖励: 取文本(t?.奖励),
+      状态: 取文本(t?.状态),
+    }),
+  );
+  // 与 `隐藏任务清单` 同款写法（只多不少地照抄: 少了 `状态` 这一格, 完成支线数就会恒为 0,
+  // 评价等级随之永远落在 D —— 而画面上看不出哪里错了）。
+  const 支线清单 = Object.entries((c.当前副本任务?.支线任务 ?? {}) as Record<string, any>).map(
+    ([名称, t]: [string, any]) => ({
+      名称,
+      奖励: 取文本(t?.奖励),
+      状态: 取文本(t?.状态),
     }),
   );
 
@@ -3068,23 +3084,159 @@ function readSettlementSnapshot(): SettlementSnapshot | null {
     已有背包,
     成就清单,
     隐藏任务清单,
+    支线清单,
+    // 评价的第一道闸门: 只有 `已完成` 才算主线完成（其余一律 F = 抹杀, 见 computeSettlementStage1）
+    主线状态: 取文本(c.当前副本任务?.主线任务?.状态),
     小队成员,
   };
 }
 
-/** 一次结算的完整产物（只在内存里, 不落盘） */
+/** 「第 1~2 步」的公示条目: 本次完成的一条任务/成就 + 它的**奖励原文**（AI 生成物品的依据） */
+export interface 完成条目 {
+  /** `主线` / `支线` / `隐藏任务` / `成就` */
+  类别: string;
+  名称: string;
+  /** 变量里的 `奖励` 原文 —— 空串表示这条没有奖励文本（不是「奖励为 0」） */
+  奖励: string;
+}
+
+/**
+ * 本次完成的清单 —— **纯读变量**（与 `readSettlementSnapshot` 同一条链, 不碰 MVU）。
+ *
+ * 完成口径（2026-09-25 用户定稿）: **一律看变量的 `状态` 字段** ——
+ * 支线与隐藏任务看 `已完成`、成就看 `已达成`, 主线看 `已完成`。**不再由 AI 判**,
+ * 于是「AI 漏报一条已完成的支线」这类问题从根上没有了。
+ *
+ * 主线在主线未完成时**整条不进来**（那种情况下评价是 F, 结算根本不会走到这里）——
+ * 判断放在这里而不是让每个调用方各判一次。
+ */
+function 组装完成清单(快照: SettlementSnapshot, 主线名称: string): 完成条目[] {
+  const 出: 完成条目[] = [];
+  if (快照.主线状态 === '已完成') {
+    出.push({ 类别: '主线', 名称: 主线名称 || '主线任务', 奖励: 快照.任务奖励?.['主线'] ?? '' });
+  }
+  for (const t of 快照.支线清单 ?? []) {
+    if (t.状态 === '已完成') 出.push({ 类别: '支线', 名称: t.名称, 奖励: t.奖励 });
+  }
+  for (const t of 快照.隐藏任务清单 ?? []) {
+    if (t.状态 === '已完成') 出.push({ 类别: '隐藏任务', 名称: t.名称, 奖励: t.奖励 });
+  }
+  for (const a of 快照.成就清单 ?? []) {
+    if (a.状态 === '已达成') 出.push({ 类别: '成就', 名称: a.名称, 奖励: a.奖励 });
+  }
+  return 出;
+}
+
+/**
+ * 完成清单 → 给 `buildItemGenPrompt` 的文本。每条都带上**奖励原文** ——
+ * 那是 AI 该发什么的唯一依据（生成物品时不许自己编数值）。
+ */
+function 完成清单文本(清单: 完成条目[]): string {
+  if (清单.length === 0) return '（本次没有任何完成记录 —— 除非确有掉落, 否则掉落清单应为空数组）';
+  return 清单.map(x => `- ${x.类别}「${x.名称}」｜奖励原文: ${x.奖励 === '' ? '（变量里没有填奖励）' : x.奖励}`).join('\n');
+}
+
+/**
+ * `当前时间.客观时间` → 本次副本已度过的天数。
+ *
+ * 2026-09-25 改: 天数不再让 AI 读, 改由脚本从变量解析。**解析不出就填 0, 绝不编造** ——
+ * 这个字段的实际写法本仓库看不到（卡不在仓库里）, 所以只认「开头一个可选的 `第` + 连续数字」
+ *（`3` / `3天` / `第3天` 都取到 3）, 其余一律 0。填 0 的后果是「现实日期不变」——
+ * 一个看得见的、可纠正的结果, 好过按猜的系数把日期推到一个像真的日子上。
+ */
+export function 解析副本天数(客观时间: unknown): number {
+  const m = /^\s*(?:第\s*)?(\d+)/.exec(取文本(客观时间));
+  if (!m) return 0;
+  const n = Number(m[1]);
+  return Number.isInteger(n) && n >= 0 ? n : 0;
+}
+
+/**
+ * 把「阶段一走完的确定性结果 + 阶段二的物品」组装成 `SettlementGenResult` 形状的容器 ——
+ * 面板 / 写入清单 / 结算空间提示词这三个纯函数读的就是它。
+ *
+ * **只有 `掉落物品` 是 AI 给的**; 其余全部来自变量与脚本: 评价与依据是 `判定评价等级` /
+ * `评价依据文本` 的产物, 完成名单是 `组装完成清单` 从变量的 `状态` 摘的, 击杀 / 濒死 /
+ * 天赋试炼 / 职业专属支线一律 0（用户定稿「全部无视」）, 称号与史诗记录不参与
+ *（它们改由正文 AI 按 `结算空间提示词` 补写）。
+ *
+ * 阶段一也要用它（`汇总基础奖励` 要一份完成名单）—— 那时 `掉落物品` 传空数组。
+ */
+function 组装判定(
+  评价等级: SettlementGenResult['评价等级'],
+  评价依据: string,
+  完成清单: 完成条目[],
+  副本天数: number,
+  掉落物品: SettlementGenResult['掉落物品'],
+): SettlementGenResult {
+  return {
+    评价等级,
+    评价依据,
+    击杀: { 精英: 0, BOSS: 0, 隐藏BOSS: 0 },
+    濒死次数: 0,
+    副本天数,
+    完成的支线: 完成清单.filter(x => x.类别 === '支线').map(x => x.名称),
+    完成的隐藏任务: 完成清单.filter(x => x.类别 === '隐藏任务').map(x => x.名称),
+    达成的成就: 完成清单.filter(x => x.类别 === '成就').map(x => x.名称),
+    职业专属支线条数: 0,
+    天赋试炼次数: 0,
+    掉落物品,
+    称号: null,
+    史诗记录: '',
+  };
+}
+
+/**
+ * 由预览组装判定容器（写入与阶段二共用）。
+ *
+ * `掉落物品 === null` 时**抛错**: 空数组会拼出一份「掉落清单: 无」的面板与写入清单 ——
+ * 那不是「本次没有掉落」, 而是「还没生成」。fail-closed, 免得出现一份少了掉落的半成品结算。
+ */
+function 由预览组装判定(预览: SettlementPreview): SettlementGenResult {
+  if (预览.掉落物品 === null) {
+    throw new Error('阶段二的物品还没生成, 不能拼面板 / 写入清单（请先点「生成物品」）');
+  }
+  return 组装判定(预览.计算结果.评价等级, 预览.评价依据, 预览.完成清单, 预览.副本天数, 预览.掉落物品);
+}
+
+/**
+ * 一次结算的完整产物（只在内存里, 不落盘）。
+ *
+ * **分两个显式阶段**, 中间态就是本接口要表达的东西:
+ * - 阶段一（纯脚本, 一次 AI 请求都不发）: 快照 / 完成清单 / 评价依据 / 计算结果 / 副本天数;
+ * - 阶段二（AI, 只生成物品）: `掉落物品`（`null` = 尚未生成）+ 据此拼出的面板与提示词。
+ *
+ * 于是「阶段一已算完、阶段二待生成」是**类型里就写着的状态**, 而不是靠视图的某个 if 记着。
+ */
 export interface SettlementPreview {
   快照: SettlementSnapshot;
   计算结果: SettlementComputed;
-  ai: SettlementGenResult;
-  /** `assembleSettlementPanel` 的产物, 逐行照规则模板 */
-  面板: string;
+  /** 阶段一的公示: 本次完成的主线/支线/隐藏/成就清单（含奖励原文）—— 视图照它展示, 供玩家核对评价 */
+  完成清单: 完成条目[];
+  /** 评价依据（`评价依据文本` 的产物）—— 与 `计算结果.评价等级` 同一口径, 说明这个等级是怎么来的 */
+  评价依据: string;
+  /**
+   * 阶段一解析出的副本内天数（`当前时间.客观时间`）。
+   * 存下来是因为阶段二组装判定时要它, 而再解析一次就多了一处会各自漂开的口径。
+   */
+  副本天数: number;
+  /**
+   * 阶段二的产物: 本次掉落的物品。**`null` = 阶段二尚未生成** ——
+   * 写入入口据此拦住（写完就清空副本资料, 之后再补物品已经写不进去了）。
+   */
+  掉落物品: SettlementGenResult['掉落物品'] | null;
+  /**
+   * `assembleSettlementPanel` 的产物, 逐行照规则模板。**阶段二生成后才拼** ——
+   * 面板里有「## 掉落清单」一行, 阶段一就拼等于替 AI 编一个「本次没有掉落」。
+   */
+  面板: string | null;
   /**
    * 「进入回廊结算空间」的提示词, 由 `buildSettlementEnterPrompt` 产出 ——
    * 供 `fillInput` 填进酒馆输入框（只填入不发送）。
-   * 在 `generateSettlement` 里一次算好存下（它只读 computed / ai / 快照, 与面板同源）。
+   * 同样在阶段二生成后一次算好存下（它只读 computed / 判定 / 快照, 与面板同源）；
+   * **每次重掷物品都会重拼**（掉落清单变了, 提示词里的那一行也必须跟着变）。
    */
-  结算空间提示词: string;
+  结算空间提示词: string | null;
   /**
    * `replaceMvuData` 已返回、但回读校验没过 —— 变量**已经写进存档**了, 只是没能核对上。
    *
@@ -3121,7 +3273,8 @@ function 是零数量(路径: string[], 值: unknown): boolean {
 }
 
 export const useSettlementStore = defineStore('settlement', () => {
-  const generating = ref(false);
+  /** 阶段二（AI 生成物品）进行中 —— 阶段一是纯脚本, 没有对应的 loading（它一瞬间就完了） */
+  const generatingItems = ref(false);
   const writing = ref(false);
   const lastError = ref('');
   /**
@@ -3142,96 +3295,92 @@ export const useSettlementStore = defineStore('settlement', () => {
     return useForumStore();
   }
 
-  async function generateSettlement() {
-    if (generating.value) return;
-
-    const 快照 = readSettlementSnapshot();
-    if (!快照) {
-      lastError.value = '读取不到契约者数据';
-      return;
-    }
-    // 副本资料被清空后 副本名称 是 '未生成'（见 buildSettlementWrites 的清除清单）——
-    // 它正是「这一轮副本已经结算过了」的标志, 第二次点结算会停在这里
-    if (快照.副本名称 === '' || 快照.副本名称 === '未生成') {
-      lastError.value = '当前没有进行中的副本';
-      return;
-    }
-
-    // 原文另读一份: prompt 的「变量快照」段要的是**原文**（AI 需要逐字的任务名与奖励文本）,
-    // 而快照是给纯函数用的只读视图 —— 它不含 阶位 / 当前副本周期 这些组装 SettlementInputs 才要的字段
-    const c = read契约者() ?? {};
-
-    // 先判主线状态: 失败 = 抹杀, **不调 AI、不写任何变量**。
-    // computeSettlement 对 'F' 也会抛错, 但那是花掉一次 AI 调用之后的事 —— 这里用变量里的状态先挡住
-    if (c.当前副本任务?.主线任务?.状态 === '失败') {
-      lastError.value = '主线失败 = 抹杀，不进入结算流程';
-      return;
-    }
-
-    const forumStore = getForumStore();
-    const cfg = getActiveCfg(forumStore.settings);
-    if (!cfg.url || !cfg.apiKey) {
-      lastError.value = '请先在终端设置中配置 API';
-      return;
-    }
-
-    generating.value = true;
+  /**
+   * **阶段一: 第 1~3 步 —— 纯脚本读变量, 一次 AI 请求都不发。**
+   *
+   * 读变量 → 罗列本次完成的主线/支线/隐藏/成就（含奖励原文）→ 判定评价 → 算资源清单
+   *（EXP / UP / RP / PEXP / 资格分 / CR 变动 / 新周期 / 新现实日期）。
+   *
+   * 三条纪律:
+   * 1. **不碰 API** —— 所以这里既不读 `cfg` 也不做 API 配置检查（配置好没好是阶段二的事）。
+   *    这也是「阶段一按下去不会花钱」的唯一保证: 想在阶段一偷偷加一次 AI 调用, 得先绕过本函数
+   *    里根本没有的 `aiGenerate` 引用。
+   * 2. **不写任何变量**（只读快照 + 原文）。
+   * 3. 产出仍是「未生成物品」的中间态 (`掉落物品: null`) —— 面板与提示词要等阶段二才能拼。
+   *
+   * ⚠️ 重跑会**重新掷骰**（`computeSettlement` 的 RP/PEXP 用 `rollDie`）, 于是得到另一组数 ——
+   * 所以视图只在「还没有预览」时给它入口; 已经算好之后的「再来一次」只重跑阶段二（掷的是物品, 不是数值）。
+   * 返回是否成功（失败时看 `lastError`）。
+   */
+  function computeSettlementStage1(): boolean {
     lastError.value = '';
     try {
-      // 变量快照: 给 AI 看「逐字的任务名与奖励」, 由它判定哪些完成了。
-      // 只摘结算用得到的段落 —— 不作全量 JSON.stringify（契约者里还有背包/技能等大块内容）。
-      const 变量快照 = [
-        '【当前副本元数据】' + JSON.stringify(c.当前副本元数据 ?? {}),
-        // 第十一步「按副本内所待天数更新现实时间」的天数来源: 当前时间.客观时间 = 本次副本已度过的天数。
-        // 不摘这一段, AI 就看不到 当前时间, 【副本天数】只能靠聊天记录猜。
-        '【当前时间】' + JSON.stringify(c.当前时间 ?? {}),
-        '【当前副本任务】' + JSON.stringify(c.当前副本任务 ?? {}),
-        '【其他契约者名单】' + JSON.stringify(c.其他契约者名单 ?? {}),
-        '【固有角色名单】' + JSON.stringify(c.固有角色名单 ?? {}),
-        '【副本角色】' + (Object.keys(c.副本角色 ?? {}).join('、') || '（无）'),
-        '【头部】' + JSON.stringify(c.头部 ?? {}),
-        '【职业】' + JSON.stringify(c.职业 ?? {}),
-        '【经济】' + JSON.stringify(c.经济 ?? {}),
-      ].join('\n');
-
-      const wb = await forumStore.getWorldbookContent();
-      const prompt = buildSettlementPrompt(变量快照, forumStore.readRecentChat(30), wb);
-      const raw = await aiGenerate(cfg, prompt, {
-        name: 'dungeon_settlement',
-        value: JSON.parse(JSON.stringify(z.toJSONSchema(SettlementGenResultSchema, { io: 'input' }))),
-      });
-      const parsed = SettlementGenResultSchema.parse(extractJSON(raw));
-
-      // 第二道 F 守卫: AI 也可以直接把评价定成 F（规则原文「若主线失败, 填 F」）。
-      // 走到这里说明变量里的状态没写「失败」, 但 AI 从聊天记录里判出了失败 —— 同样不产出画面、不写任何变量。
-      if (parsed.评价等级 === 'F') {
-        lastError.value = '主线失败 = 抹杀，不进入结算流程';
-        return;
+      const 快照 = readSettlementSnapshot();
+      if (!快照) {
+        lastError.value = '读取不到契约者数据';
+        return false;
+      }
+      // 副本资料被清空后 副本名称 是 '未生成'（见 buildSettlementWrites 的清除清单）——
+      // 它正是「这一轮副本已经结算过了」的标志, 第二次点结算会停在这里
+      if (快照.副本名称 === '' || 快照.副本名称 === '未生成') {
+        lastError.value = '当前没有进行中的副本';
+        return false;
       }
 
+      // 原文另读一份: 快照是给纯函数用的只读视图, 而 阶位 / 当前副本周期 / 客观时间 / 主线名称
+      // 这些组装 SettlementInputs 与评价才要的字段不在快照里（它们不参与面板与写入清单）。
+      const c = read契约者() ?? {};
+
+      // ── 第 1~2 步: 完成清单 → 评价等级（**纯脚本读变量**）─────────────────────
+      // 评价不再由 AI 判, 改为按「已达成成就的星数之和」定级（`判定评价等级`）,
+      // 完成与否一律看变量的 `状态` 字段（`组装完成清单`）。
+      const 完成清单 = 组装完成清单(快照, 取文本(c.当前副本任务?.主线任务?.名称));
+      const 主线完成 = 快照.主线状态 === '已完成';
+      const 完成支线数 = 完成清单.filter(x => x.类别 === '支线').length;
+      // 星数走 `成就星数` 的既有口径（只数 `难度` 开头连续的 ★, 描述里的 ★ 不虚增）
+      const 星数 = 成就星数(快照, 完成清单.filter(x => x.类别 === '成就').map(x => x.名称));
+      const 星和 = 星数.reduce((和, 星) => 和 + 星, 0);
+      const 评价等级 = 判定评价等级(星和, 完成支线数, 主线完成);
+
+      // F 守卫: 主线没完成 = 抹杀, **不写任何变量、不产出画面, 也不花一次 API 调用**
+      //（评价由脚本算, 所以这道守卫天然落在「任何 AI 请求之前」）。
+      // 后面 computeSettlement 对 'F' 仍会抛错, 那道是**纯函数自己的**兜底, 与本守卫各管一段。
+      if (评价等级 === 'F') {
+        lastError.value = '主线失败 = 抹杀，不进入结算流程';
+        return false;
+      }
+      const 评价依据 = 评价依据文本(星和, 完成支线数, 主线完成);
+      // 天数从变量解析（解析不出填 0, 不编造）, 不再让 AI 从聊天记录里猜
+      const 副本天数 = 解析副本天数(c.当前时间?.客观时间);
+
       // 基础奖励汇总（纯函数）。变量里**存在**的奖励文本解析失败会在这里抛错 → 由 catch 接住并报出任务名,
-      // 绝不静默当 0。`未找到` 是 AI 报告了、但变量里没有的键名: 不阻断结算, 但必须让玩家看见。
-      const 基础 = 汇总基础奖励(快照, parsed);
+      // 绝不静默当 0。`未找到` 是「清单里有这条、变量的 `奖励` 却不是字符串」: 不阻断结算, 但必须让玩家看见。
+      // 这里传的 `掉落物品` 是空数组 —— 汇总只看完成名单, 物品要到阶段二才有。
+      const 基础 = 汇总基础奖励(快照, 组装判定(评价等级, 评价依据, 完成清单, 副本天数, []));
       if (基础.未找到.length > 0) {
         lastError.value = '变量中未找到这些任务：' + 基础.未找到.join('、') + '（这些任务的奖励按 0 计, 请核对键名）';
       }
 
+      // ── 第 3 步: 资源清单（算术全是纯函数, 掷骰只在本阶段发生一次）────────────
       const 计算结果 = computeSettlement(
         {
-          评价等级: parsed.评价等级,
-          击杀: parsed.击杀,
-          副本天数: parsed.副本天数,
+          评价等级,
+          击杀: { 精英: 0, BOSS: 0, 隐藏BOSS: 0 },
+          副本天数,
           基础EXP汇总: 基础.EXP,
           基础UP汇总: 基础.UP,
-          // 资格分的「支线+5/条」用 **AI 报告的数组长度**（见 SettlementInputs 的注释）
-          完成的支线数: parsed.完成的支线.length,
+          // 资格分的「支线+5/条」用**变量里 `状态` 为 已完成 的支线条数**（见 SettlementInputs 的注释）
+          完成的支线数: 完成支线数,
           // 隐藏项与成就项**只计变量里真的存在的条目**（与 `汇总基础奖励` 同口径）——
-          // 否则 AI 多报的名字会让资格分 +20 / +10, 而同一份名单它的奖励已被按 0 计、UI 还明说「按 0 计」
-          隐藏任务数: 存在条目数(快照.隐藏任务清单, parsed.完成的隐藏任务),
-          成就星数: 成就星数(快照, parsed.达成的成就),
-          天赋试炼次数: parsed.天赋试炼次数,
-          // 只用于第六步 PEXP 的「每条掷 50~100」；**不是**上面那个 完成的支线数, 别混
-          职业专属支线条数: parsed.职业专属支线条数,
+          // 名单现在本就来自变量, 这道过滤是留着防「将来名单又从哪里读回来」的闸门
+          隐藏任务数: 存在条目数(
+            快照.隐藏任务清单,
+            完成清单.filter(x => x.类别 === '隐藏任务').map(x => x.名称),
+          ),
+          成就星数: 星数,
+          天赋试炼次数: 0,
+          // 只用于第六步 PEXP 的「每条掷 50~100」；用户定稿「职业专属支线直接无视」→ 恒 0
+          职业专属支线条数: 0,
           CR: 快照.当前CR,
           // 下面两项不在 SettlementSnapshot 里, 从 `契约者` 另读。
           // 阶位与旧周期**都不做兜底**（不写 `?? '一阶'` / `|| 1`）: 缺失/不可识别时让 computeSettlement
@@ -3247,20 +3396,97 @@ export const useSettlementStore = defineStore('settlement', () => {
         rollDie,
       );
 
+      // 阶段一产物: 面板与提示词留 null —— 它们含「掉落清单」一行, 此刻拼出来等于替 AI 编「本次没有掉落」
       settlement.value = {
         快照,
         计算结果,
-        ai: parsed,
-        面板: assembleSettlementPanel(计算结果, parsed, 快照),
-        结算空间提示词: buildSettlementEnterPrompt(计算结果, parsed, 快照),
+        完成清单,
+        评价依据,
+        副本天数,
+        掉落物品: null,
+        面板: null,
+        结算空间提示词: null,
         已写入: false,
         写入完成: false,
       };
+      return true;
     } catch (e: any) {
       lastError.value = e.message || '结算失败';
       toastr.error('结算失败: ' + lastError.value);
+      return false;
+    }
+  }
+
+  /**
+   * **阶段二: 只为「生成物品」调 AI**, 在阶段一的确定性结果之上补出 `掉落物品`。
+   *
+   * - **可单独重跑**（视图的「重新结算（重掷物品）」就是它）: 整块替换 `掉落物品`,
+   *   并据此**重拼面板与结算空间提示词**（两者的「掉落清单」一行必须跟着变）;
+   * - **绝不重算阶段一的任何数值**: 本函数不碰 `快照` / `计算结果` / `完成清单` / `评价依据` /
+   *   `副本天数` —— 玩家在画面上看到的评价与资源清单原样不动; 掷的骰只有「物品」这一次;
+   * - 写入之后拒绝重掷: 那时存档里已有本次掉落, 再换一份物品就是「画面与存档两份不同源的数」。
+   *
+   * 喂给 AI 的东西**只有生成物品所需的那些**（见 `buildItemGenPrompt` 的签名）:
+   * 完成清单+各自奖励原文 / 评价等级与 CR 态度（掉落加成的档位参考）/ 聊天记录 / 世界书。
+   * **不塞任何数值结果**（最终 EXP/UP/RP/PEXP/资格分/倍率都不给）—— 它们对「发什么物品」没有用,
+   * 给了只会让 AI 顺手复述甚至据以编物品。
+   */
+  async function generateItems(): Promise<boolean> {
+    const 预览 = settlement.value;
+    if (!预览) {
+      lastError.value = '请先完成阶段一（第 1~3 步结算）';
+      return false;
+    }
+    if (generatingItems.value) return false;
+    // 与 writeSettlement 同款: 「已写入」意味着变量已经落进存档（只是回读没核对上）, 同样不许再动
+    if (预览.已写入) {
+      lastError.value = '本次结算已提交（回读校验失败），不能再重掷物品，请先读存档确认';
+      return false;
+    }
+    if (预览.写入完成) {
+      lastError.value = '本次结算已经写入存档，不能再重掷物品';
+      return false;
+    }
+
+    const forumStore = getForumStore();
+    const cfg = getActiveCfg(forumStore.settings);
+    if (!cfg.url || !cfg.apiKey) {
+      lastError.value = '请先在终端设置中配置 API';
+      return false;
+    }
+
+    generatingItems.value = true;
+    lastError.value = '';
+    try {
+      const wb = await forumStore.getWorldbookContent();
+      const prompt = buildItemGenPrompt(
+        完成清单文本(预览.完成清单),
+        预览.计算结果.评价等级,
+        预览.计算结果.CR态度,
+        forumStore.readRecentChat(30),
+        wb,
+      );
+      const raw = await aiGenerate(cfg, prompt, {
+        name: 'dungeon_settlement',
+        value: JSON.parse(JSON.stringify(z.toJSONSchema(SettlementItemsSchema, { io: 'input' }))),
+      });
+      // AI 没给掉落物品（或整块缺省）→ 空数组, **不因此整次失败**: 物品是锦上添花,
+      // 为它把已经算好的评价与数值一起废掉、让玩家白付一次 AI 费用并重掷一遍, 代价与收益不成比例。
+      // 反过来, `extractJSON` 失败仍照旧抛错 —— 那是「AI 根本没回 JSON」, 与「回了但没有物品」不是一回事。
+      // 抛错时**不动**旧物品（下面这行赋值在 parse 之后）—— 一次坏回复不该把上一次的掉落抹掉。
+      const 物品 = SettlementItemsSchema.parse(extractJSON(raw));
+
+      预览.掉落物品 = 物品.掉落物品;   // 重跑即整块替换 = 重掷物品
+      const 判定 = 由预览组装判定(预览);
+      预览.面板 = assembleSettlementPanel(预览.计算结果, 判定, 预览.快照);
+      预览.结算空间提示词 = buildSettlementEnterPrompt(预览.计算结果, 判定, 预览.快照);
+      return true;
+    } catch (e: any) {
+      lastError.value = e.message || '生成掉落物品失败';
+      toastr.error('生成掉落物品失败: ' + lastError.value);
+      return false;
     } finally {
-      generating.value = false;
+      generatingItems.value = false;
     }
   }
 
@@ -3283,6 +3509,13 @@ export const useSettlementStore = defineStore('settlement', () => {
       lastError.value = '本次结算已经写入存档，不能重复写入';
       return false;
     }
+    // 阶段二没走完就不许写入: 写入会把 `掉落物品` 累加进背包**并清空副本资料**, 而物品清单
+    // 此刻还不存在 —— 等写完了再想起来生成, 那些物品已经落不进这次结算了（写入是一次性的）。
+    // 这一道是视图 `:disabled` 之外的兜底, fail-closed。
+    if (预览.掉落物品 === null) {
+      lastError.value = '阶段二的物品还没生成（请先点「生成物品」），现在写入会把本次掉落丢掉';
+      return false;
+    }
 
     writing.value = true;
     lastError.value = '';
@@ -3300,7 +3533,8 @@ export const useSettlementStore = defineStore('settlement', () => {
 
       // 清单在写入前一次性生成。`buildSettlementWrites` 会先校验 `快照.已有背包` 是否供上 ——
       // 缺席时抛错, 绝不退化成「覆盖写」把玩家原有的同名物品冲掉。
-      const writes = buildSettlementWrites(预览.计算结果, 预览.ai, 预览.快照);
+      // 判定容器从预览摊平（上面已挡住「物品未生成」, 所以这里不会拿到空物品清单）。
+      const writes = buildSettlementWrites(预览.计算结果, 由预览组装判定(预览), 预览.快照);
       const mvu = Mvu.getMvuData({ type: 'message', message_id });
       for (const w of writes) {
         if (是零数量(w.路径, w.值)) continue;
@@ -3391,7 +3625,9 @@ export const useSettlementStore = defineStore('settlement', () => {
     }
     const text = 预览.结算空间提示词;
     if (!text) {
-      lastError.value = '该预览没有结算空间提示词';
+      // 走不到: 上面已要求 `写入完成`, 而写入前必过「阶段二已生成」那道守卫。
+      // 留着是为了 `null` 不漏进 `$ta.val(null)`（那会把提示词填成 "null" 发出去）。
+      lastError.value = '该预览没有结算空间提示词（阶段二尚未生成）';
       return false;
     }
     lastError.value = '';
@@ -3414,5 +3650,15 @@ export const useSettlementStore = defineStore('settlement', () => {
     }
   }
 
-  return { settlement, generating, writing, lastError, generateSettlement, writeSettlement, fillInput, reset };
+  return {
+    settlement,
+    generatingItems,
+    writing,
+    lastError,
+    computeSettlementStage1,
+    generateItems,
+    writeSettlement,
+    fillInput,
+    reset,
+  };
 });

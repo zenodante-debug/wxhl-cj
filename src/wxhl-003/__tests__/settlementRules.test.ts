@@ -426,13 +426,14 @@ describe('buildSettlementWrites', () => {
     expect(取(['当前副本任务', '主线任务', '名称'])).toBe('无');
   });
 
-  it('副本经历写入「副本名 → {评价等级, 简要说明}」', () => {
-    expect(取(['副本经历', '血色黎明'])).toEqual({ 评价等级: 'S', 简要说明: '他在血雨里站成了碑。' });
-  });
-
-  it('称号只写「备用称号（只记录不生效）」, 绝不碰「当前称号」', () => {
-    expect(取(['头部', '称号', '备用称号（只记录不生效）'])).toEqual(假AI.称号);
+  it('2026-09-25 改: **不写**副本经历与称号（改由正文 AI 用 MVU 命令补写）', () => {
+    // 这两项的内容（称号名与效果、一句话史诗总结）该由叙事那边定, 模块只能编 ——
+    // 两边都写就会出现「面板/存档一个称号、正文另一个称号」两份不同源的数。
+    // 断言改成「不写」而不是删掉: 删掉之后把这两行加回来任何测试都不会红。
+    expect(w.some(x => x.路径[0] === '副本经历')).toBe(false);
+    expect(w.some(x => x.路径.join('.') === '头部.称号.备用称号（只记录不生效）')).toBe(false);
     expect(w.some(x => x.路径.join('.') === '头部.称号.当前称号')).toBe(false);
+    expect(w.some(x => x.路径[0] === '头部' && x.路径[1] === '称号')).toBe(false);
   });
 
   it('只允许写这三个 *_当前, 其余一律不出现', () => {
@@ -563,22 +564,22 @@ describe('副本成就 / 隐藏任务公示 · 按变量清单 + AI 名单比对
 describe('称号的 A/S 守卫（规则第七步「未达 A 级直接跳过」）', () => {
   const cB = computeSettlement({ ...基准输入, 评价等级: 'B' }, 满骰());
   const cS = computeSettlement(基准输入, 满骰());
-  const 备用称号值 = (w: ReturnType<typeof buildSettlementWrites>) =>
-    w.find(x => x.路径.join('.') === '头部.称号.备用称号（只记录不生效）')?.值;
+  const 称号写入 = (w: ReturnType<typeof buildSettlementWrites>) =>
+    w.filter(x => x.路径[0] === '头部' && x.路径[1] === '称号');
 
-  it('非 A/S 级: 即使 AI 给了称号, 面板留空且只写「无」', () => {
-    // 假AI 声称 S 级并给了称号, 但 computed 是 B —— 守卫看的是 computed 的评价等级
+  it('非 A/S 级: 面板的称号行留空', () => {
     expect(cB.评价等级).toBe('B');
     const p = assembleSettlementPanel(cB, 假AI, 假快照 as any);
     expect(p).not.toContain('血夜行者');
     expect(p.split('\n').find(l => l.startsWith('## 称号获得:'))?.trim()).toBe('## 称号获得:');
-    expect(备用称号值(buildSettlementWrites(cB, 假AI, 假快照 as any))).toEqual({ 名称: '无', 效果: {} });
   });
 
-  it('A/S 级照常显示, 并写进备用称号', () => {
+  it('A/S 级: 面板照常显示（即便给了称号也不写变量 —— 写入改由正文 AI 做）', () => {
     const p = assembleSettlementPanel(cS, 假AI, 假快照 as any);
     expect(p).toContain('## 称号获得: 血夜行者');
-    expect(备用称号值(buildSettlementWrites(cS, 假AI, 假快照 as any))).toEqual(假AI.称号);
+    // 2026-09-25 改后**任何**级别都不再写称号: 底下的 AI 给了也不行
+    expect(称号写入(buildSettlementWrites(cS, 假AI, 假快照 as any))).toEqual([]);
+    expect(称号写入(buildSettlementWrites(cB, 假AI, 假快照 as any))).toEqual([]);
   });
 });
 

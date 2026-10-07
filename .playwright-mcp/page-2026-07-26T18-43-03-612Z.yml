@@ -1,0 +1,14 @@
+- generic [ref=f5e40]:
+  - generic [ref=f5e41]:
+    - generic [ref=f5e50] [cursor=pointer]:
+      - generic [ref=f5e51]: 自 主 捏 人
+      - generic [ref=f5e52]: ⚒ 铸造你的契约
+    - generic [ref=f5e55] [cursor=pointer]:
+      - generic [ref=f5e56]: 开 局 预 设
+      - generic [ref=f5e57]: ◆ 直接坠入深渊
+    - generic [ref=f5e59]: 你已踏入回廊
+  - generic [ref=f5e61] [cursor=pointer]: ← 转身离开
+  - generic [ref=f5e63]:
+    - generic [ref=f5e64]: ◆
+    - heading "契 约 之 厅" [level=1] [ref=f5e65]
+    - paragraph [ref=f5e66]: 选择一扇门，缔结你的命运
