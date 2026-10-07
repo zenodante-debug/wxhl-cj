@@ -128,8 +128,17 @@
     if (指纹 !== 上次诊断) {
       上次诊断 = 指纹;
       const 之后 = button.getBoundingClientRect();
+      // **最关键的一行**：球中心点上真正的最顶层元素是谁？它在球上=没问题；
+      // 是别的东西=被盖住了（这里会直接报出是谁盖的）。
+      const 中心 = hostDocument.elementFromPoint(之后.left + 之后.width / 2, 之后.top + 之后.height / 2);
+      const 描述 = el => {
+        if (!el) return '(无)';
+        const 类 = typeof el.className === 'string' ? el.className.trim().split(/\s+/).slice(0, 3).join('.') : '';
+        return `${el.tagName.toLowerCase()}${el.id ? `#${el.id}` : ''}${类 ? `.${类}` : ''}`;
+      };
+      const 是我的 = 中心 === button || button.contains(中心);
       console.log(
-        `[wxhl-combat] 悬浮球：视口 ${viewport.left},${viewport.top} ${viewport.width}×${viewport.height} → 目标 ${Math.round(位置.left)},${Math.round(位置.top)}；实际 ${Math.round(之后.left)},${Math.round(之后.top)} ${Math.round(之后.width)}×${Math.round(之后.height)}`,
+        `[wxhl-combat] 悬浮球：视口 ${viewport.left},${viewport.top} ${viewport.width}×${viewport.height} → 目标 ${Math.round(位置.left)},${Math.round(位置.top)}；实际 ${Math.round(之后.left)},${Math.round(之后.top)} ${Math.round(之后.width)}×${Math.round(之后.height)}；中心点最顶层=${描述(中心)}${是我的 ? '（是球本身 ✓）' : '（**被挡住** ✗）'}`,
       );
     }
   };
@@ -207,8 +216,22 @@
 
   let 上次诊断 = '';
 
+  /**
+   * 让我们的根节点始终是 body 的**最后一个元素**。
+   * 拉满 z-index（2147483647）之后，同级元素靠 DOM 顺序决胜 ——
+   * 而美化正则 / 状态栏模板是在每条消息渲染时往 body 里插元素的（比我们晚），
+   * 不把自己挪到最后就会被它们盖住（"点都点不了"就是这么来的）。
+   * 已经在最后就是空操作。
+   */
+  const keepRootLast = root => {
+    const body = hostDocument.body;
+    if (!body || !root || body.lastElementChild === root) return;
+    body.appendChild(root); // 移动节点；固定定位不受影响，Vue 照常 patch 它内部
+  };
+
   const update = () => {
     if (!isPhone()) return;
+    keepRootLast(hostDocument.querySelector(ROOT_SELECTOR));
     placeLauncher();
     fitShell();
   };

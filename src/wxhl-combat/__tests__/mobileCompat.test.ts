@@ -94,3 +94,27 @@ describe('手机端补丁 · 悬浮球必须能找得到', () => {
     expect(补丁).toContain('悬浮球：视口');
   });
 });
+
+describe('层级 · 不能被美化正则 / 楼层盖住（玩家报的"点都点不了"）', () => {
+  it('外壳根节点 z-index 拉到 int32 上限（低一位就会被美化正则盖住）', () => {
+    const z = /\.wxhl-combat-root\s*\{[^}]*?z-index:\s*(\d+)/s.exec(外壳源码)?.[1];
+    expect(z).toBe('2147483647');
+  });
+
+  it('外层根节点固定铺满 + 不吃点击（否则会挤压酒馆布局、并受祖先层叠上下文牵连）', () => {
+    expect(入口源码).toContain('position: fixed');
+    expect(入口源码).toContain('zIndex: 2147483647');
+    expect(入口源码).toContain("pointerEvents: 'none'");
+  });
+
+  it('补丁把根节点保持在 body 最后（同级 z-index 靠 DOM 顺序决胜，美化正则会后插元素）', () => {
+    expect(补丁).toContain('keepRootLast');
+    expect(补丁).toContain('body.appendChild(root)');
+    expect(补丁).toContain('lastElementChild === root');
+  });
+
+  it('诊断打出"球中心点的最顶层元素"—— 被谁挡住一眼可查', () => {
+    expect(补丁).toContain('elementFromPoint');
+    expect(补丁).toContain('被挡住');
+  });
+});
