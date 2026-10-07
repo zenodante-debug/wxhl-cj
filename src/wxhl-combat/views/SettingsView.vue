@@ -5,6 +5,21 @@
       技能翻译与敌方意图走「快路」（高频，建议用快模型）；收尾正文走「强路」（要文笔）。两路可共用同一 URL/Key，只改模型名。
     </p>
 
+    <section class="api-block">
+      <h4>敌方意图怎么产生</h4>
+      <label class="field">
+        <span>模式</span>
+        <select v-model="store.settings.意图模式">
+          <option value="ai">AI 生成（每回合 1 次调用，会读面板做战术决策）</option>
+          <option value="随机">掷骰子抽（**不调 AI**：按行动类型列选项，1dN 抽一个）</option>
+        </select>
+        <span class="sub-hint">
+          「掷骰子抽」按每个行动类型（主要/次要）列出该单位能做的事（技能 + 基础武器攻击），
+          掷骰决定用哪个：比如主要行动有三个选项就 1d3。选这个模式后，敌方意图**不再消耗 AI 额度**。
+        </span>
+      </label>
+    </section>
+
     <section v-for="路 in 路列表" :key="路" class="api-block">
       <h4>{{ 路 === '快路' ? '快路（意图 / 翻译，高频）' : '强路（收尾正文，文笔）' }}</h4>
 
@@ -211,7 +226,8 @@ async function 清缓存() {
     margin-bottom: 4px;
   }
 
-  input {
+  input,
+  select {
     width: 100%;
     padding: 7px 10px;
     background: #1a1a1a;

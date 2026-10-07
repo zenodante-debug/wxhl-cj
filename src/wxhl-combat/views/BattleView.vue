@@ -23,25 +23,74 @@
       </div>
     </div>
 
-    <!-- 单位卡 -->
+    <!-- 单位卡：每个角色都能展开看全套（状态/buff/装备/技能）—— 实战反馈：战斗界面看不到状态 -->
     <div class="unit-cards">
       <div
         v-for="u in 排序单位"
         :key="u.id"
         class="unit-card"
-        :class="{ enemy: u.阵营 === '敌方', ally: u.阵营 === '我方', dead: u.濒死 !== null }"
+        :class="{ enemy: u.阵营 === '敌方', ally: u.阵营 === '我方', down: u.HP_当前 <= 0 }"
       >
-        <div class="unit-name">{{ u.名称 }}</div>
+        <div class="unit-name">
+          {{ u.名称 }}
+          <span v-if="u.HP_当前 <= 0" class="unit-down-tag">{{ 倒地标签(u) }}</span>
+          <button class="unit-detail-btn" @click="切换角色详情(u.id)">
+            {{ 展开角色.includes(u.id) ? '收起 ▴' : '详情 ▾' }}
+          </button>
+        </div>
         <div class="unit-hp">HP {{ u.HP_当前 }}/{{ u.HP_最大 }} · MP {{ u.MP_当前 }}/{{ u.MP_最大 }} · 耐力 {{ u.耐力_当前 }}/{{ u.耐力_最大 }}</div>
         <!-- 防御/闪避/属性 都要展示出来 —— 玩家要看得见面板才打得出决策（实战反馈：这些根本没显示） -->
-        <div class="unit-stats">
-          防御 {{ u.防御 }} · 闪避 {{ u.闪避值 }} · {{ u.阶位 }}
-        </div>
+        <div class="unit-stats">防御 {{ u.防御 }} · 闪避 {{ u.闪避值 }} · {{ u.阶位 }}</div>
         <div class="unit-attrs">STR {{ u.属性.实际.STR }} · AGI {{ u.属性.实际.AGI }} · CON {{ u.属性.实际.CON }} · PER {{ u.属性.实际.PER }}</div>
         <div class="unit-dist">{{ u.距离 }}米（{{ 距离带(u.距离) }}）· 额度 {{ u.额度 }}</div>
         <div class="unit-slots">主{{ u.行动槽.主要 }} 次{{ u.行动槽.次要 }} 移{{ u.行动槽.移动 }} 反{{ u.行动槽.反应 }}</div>
-        <div v-if="u.状态.length" class="unit-status">状态: {{ u.状态.map(s => s.名 + (s.层数 ? `×${s.层数}` : '')).join('，') }}</div>
+        <div v-if="u.状态.length" class="unit-status">状态: {{ u.状态.map(st => st.名 + (st.层数 ? `×${st.层数}` : '')).join('，') }}</div>
         <div v-if="u.护盾 > 0" class="unit-shield">护盾: {{ u.护盾 }}</div>
+        <div v-if="冷却中(u)" class="unit-cd">冷却中: {{ 冷却中(u) }}</div>
+
+        <!-- 完整详情 -->
+        <div v-if="展开角色.includes(u.id)" class="unit-detail">
+          <div class="ud-block">
+            <div class="ud-title">武器装备</div>
+            <div class="ud-line">主武器：{{ 武器文案(u.主武器) }}</div>
+            <div class="ud-line">副武器：{{ 武器文案(u.副武器) }}</div>
+            <div v-for="e in u.装备 ?? []" :key="e.槽 + e.名称" class="ud-line dim2">
+              {{ e.槽 }}：{{ e.名称 }}<span v-if="e.摘要">（{{ e.摘要 }}）</span>
+            </div>
+          </div>
+
+          <div class="ud-block">
+            <div class="ud-title">状态与增益（{{ u.状态.length }}）</div>
+            <div v-for="st in u.状态" :key="st.名" class="ud-line">
+              {{ st.名 }}{{ st.层数 ? ` ×${st.层数}` : '' }}（剩 {{ st.持续 }} 回合）
+              <span v-if="数值修正文案(st)">｜{{ 数值修正文案(st) }}</span>
+              <span v-if="st.词条 && st.词条.length" class="dim2">｜词条 {{ st.词条.join('、') }}</span>
+            </div>
+            <div v-if="!u.状态.length" class="ud-line dim2">（无状态）</div>
+            <div v-if="u.词条 && [...u.词条].length" class="ud-line">词条：{{ [...u.词条].join('、') }}</div>
+            <div v-if="u.护盾 > 0" class="ud-line">护盾：{{ u.护盾 }}</div>
+          </div>
+
+          <div class="ud-block">
+            <div class="ud-title">技能 / 装备效果（{{ 技能条目(u).length }}）</div>
+            <div class="detail-table">
+              <div class="dt-row dt-head">
+                <span>名称</span><span>行动</span><span>射程</span><span>目标</span><span>消耗</span><span>冷却</span><span>倍率</span><span>规则</span>
+              </div>
+              <div v-for="d in 技能条目(u)" :key="d.名" class="dt-row">
+                <span class="dt-name" :title="d.名">{{ d.名 }}</span>
+                <span>{{ d.行动消耗 || '—' }}</span>
+                <span>{{ d.射程 || '—' }}</span>
+                <span>{{ d.目标 || '—' }}</span>
+                <span>{{ d.消耗 || '—' }}</span>
+                <span>{{ d.冷却 ?? '—' }}</span>
+                <span>{{ d.倍率 }}</span>
+                <span>{{ d.规则数 ? d.规则数 + ' 条' : '—' }}</span>
+              </div>
+              <div v-if="!技能条目(u).length" class="dt-empty">（没有已翻译的效果 —— 只能用基础武器攻击）</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -70,44 +119,22 @@
           <span class="ua-meta">
             HP {{ u.HP_当前 }}/{{ u.HP_最大 }} · 距 {{ u.距离 }}米 · 额度 {{ u.额度 }} · 槽 主{{ u.行动槽.主要 }} 次{{ u.行动槽.次要 }} 移{{ u.行动槽.移动 }}
           </span>
-          <button class="ua-detail-btn" @click="切换详情(u.id)">
-            {{ 详情展开.includes(u.id) ? '收起效果' : `效果详情（${技能条目(u).length}）` }}
-          </button>
-        </div>
-
-        <!-- 效果详情表：光看名字选不了行动（实战反馈：技能/装备看不出详细效果） -->
-        <div v-if="详情展开.includes(u.id)" class="detail-table">
-          <div class="dt-row dt-head">
-            <span>名称</span><span>行动</span><span>射程</span><span>目标</span><span>消耗</span><span>冷却</span><span>倍率</span><span>规则</span>
-          </div>
-          <div v-for="d in 技能条目(u)" :key="d.名" class="dt-row">
-            <span class="dt-name" :title="d.名">{{ d.名 }}</span>
-            <span>{{ d.行动消耗 || '—' }}</span>
-            <span>{{ d.射程 || '—' }}</span>
-            <span>{{ d.目标 || '—' }}</span>
-            <span>{{ d.消耗 || '—' }}</span>
-            <span>{{ d.冷却 ?? '—' }}</span>
-            <span>{{ d.倍率 }}</span>
-            <span>{{ d.规则数 ? `${d.规则数} 条` : '—' }}</span>
-          </div>
-          <div v-if="!技能条目(u).length" class="dt-empty">
-            （这个单位没有任何已翻译的技能/装备效果 —— 只能用基础攻击）
-          </div>
         </div>
 
         <div class="slot-row">
+          <!-- 按**行动类型**匹配：主要行动只列主要行动技能 + 主武器攻击；次要行动同理（副武器攻击） -->
           <label class="slot">
             <span class="slot-label">主要</span>
             <select v-model="填写表[u.键].主要">
               <option value="">（不出手）</option>
-              <option v-for="s in 技能条目(u)" :key="s.名" :value="s.名">{{ s.摘要 }}</option>
+              <option v-for="o in 主要选项(u)" :key="o.值" :value="o.值">{{ o.标签 }}</option>
             </select>
           </label>
           <label class="slot">
             <span class="slot-label">次要</span>
             <select v-model="填写表[u.键].次要">
               <option value="">（不出手）</option>
-              <option v-for="s in 技能条目(u)" :key="s.名" :value="s.名">{{ s.摘要 }}</option>
+              <option v-for="o in 次要选项(u)" :key="o.值" :value="o.值">{{ o.标签 }}</option>
             </select>
           </label>
           <label class="slot">
@@ -137,12 +164,8 @@
       </div>
 
       <div class="action-submit">
-        <button class="execute-btn" :disabled="!可提交本轮 || 禁用" @click="执行本轮">
-          {{ 有无可行动的我方 ? '执行本轮' : '推进回合（全员倒地，等濒死检定）' }}
-        </button>
-        <span class="dim">
-          {{ 有无可行动的我方 ? '至少给一个单位下达行动（没下命令的单位本回合不出手）' : '我方全员倒地 —— 每回合会做一次濒死 CON 检定（2 成功稳定 / 3 失败死亡）' }}
-        </span>
+        <button class="execute-btn" :disabled="!可提交本轮 || 禁用" @click="执行本轮">执行本轮</button>
+        <span class="dim">至少给一个单位下达行动（没下命令的单位本回合不出手）</span>
       </div>
     </div>
 
@@ -158,7 +181,7 @@ import { computed, reactive, ref, watch } from 'vue';
 import { 距离带 } from '../engine/distance';
 import { 可提交, type 行动槽填写 } from '../engine/actionInput';
 import { 造我方条目, 造技能展示, 显示名, type 我方条目 } from '../engine/viewModel';
-import { 能行动 } from '../engine/turn';
+import { 列行动选项 } from '../engine/actionOptions';
 import type { 敌方意图 } from '../ai/enemyTactics';
 import type { 战斗状态 } from '../types';
 
@@ -265,12 +288,54 @@ watch(
 /** 反应槽可选项（空 = 不预置） */
 const 反应选项 = ['击溃', '识破', '招架', '闪避', '格挡', '闪烁'];
 
-/** 效果详情展开中的单位键 */
-const 详情展开 = ref<string[]>([]);
-function 切换详情(键: string) {
-  详情展开.value = 详情展开.value.includes(键)
-    ? 详情展开.value.filter(k => k !== 键)
-    : [...详情展开.value, 键];
+/** 展开详情的单位 id（详情在**单位卡**上，能一次看全状态/装备/技能） */
+const 展开角色 = ref<string[]>([]);
+function 切换角色详情(id: string) {
+  展开角色.value = 展开角色.value.includes(id)
+    ? 展开角色.value.filter(k => k !== id)
+    : [...展开角色.value, id];
+}
+
+/** 倒地标签：HP ≤ 0 时说明是濒死检定中 / 已稳定昏迷 / 已死亡（世界书三个阶段） */
+function 倒地标签(u: 战斗单位): string {
+  if (u.HP_当前 > 0) return '';
+  const 失败 = u.濒死?.失败 ?? 0;
+  if (失败 >= 3) return '已死亡';
+  if (!u.濒死) return '已稳定（昏迷）';
+  return `濒死（${u.濒死.成功}/2 成功，${失败}/3 失败）`;
+}
+
+/** 武器一句话（没有就是徒手） */
+function 武器文案(w: 战斗单位['主武器']): string {
+  if (!w) return '无（徒手 1d4 · ×0.5）';
+  return `${w.伤害骰} · ×${w.倍率}${w.强化等级 ? ` · 强化+${w.强化等级}` : ''}`;
+}
+
+/** 状态携带的数值修正（支援 buff / 破甲这类落成状态的效果） */
+function 数值修正文案(st: { 数值修正?: Record<string, number> }): string {
+  const 条 = Object.entries(st.数值修正 ?? {});
+  if (!条.length) return '';
+  return 条.map(([k, v]) => `${k}${v >= 0 ? '+' : ''}${v}`).join('、');
+}
+
+/** 还在冷却里的技能（空串 = 没有，模板里 v-if 直接可用） */
+function 冷却中(u: 战斗单位): string {
+  return Object.entries(u.冷却 ?? {})
+    .filter(([, 剩余]) => 剩余 > 0)
+    .map(([名, 剩余]) => `${名}(${剩余})`)
+    .join('、');
+}
+
+/**
+ * 该单位在某个行动类型下能做什么 —— 技能按**行动消耗**归类，外加该类型的基础武器攻击。
+ * 不能主动释放的（被动/光环/行动消耗「无」的装备与天赋）不会出现在这里，
+ * 它们的数值效果由引擎的 `常驻修正` 直接算（玩家反馈：防具不该算行动）。
+ */
+function 主要选项(u: 我方条目) {
+  return 列行动选项(u, '主要行动');
+}
+function 次要选项(u: 我方条目) {
+  return 列行动选项(u, '次要行动');
 }
 
 /** 技能/装备的展示条目（形状在 engine/viewModel，有测试钉死） */
@@ -278,18 +343,12 @@ function 技能条目(条目: 我方条目) {
   return 造技能展示(条目.技能);
 }
 
-/** 还有没有能行动的我方单位（HP > 0） */
-const 有无可行动的我方 = computed(() => 我方单位.value.some(x => 能行动(x)));
-
 /**
- * 能不能点「执行本轮」。
- * - 有人能动：至少要有一个单位真的出手（只预置反应不算）
- * - **全员倒地**：允许空提交 —— 否则按钮永远是灰的、回合推不动，
- *   而濒死检定是"每回合"做的，回合不推进 = 永远等不到检定结果 → 死锁
+ * 能不能点「执行本轮」：至少要有一个单位真的出手（只预置反应不算）。
+ * 我方全员倒地时不会走到这里 —— CombatView 会直接把濒死检定算到底并结束战斗
+ * （不再空转回合、也不再调 AI）。
  */
-const 可提交本轮 = computed(() =>
-  有无可行动的我方.value ? 我方单位.value.some(x => 可提交(填写表[x.键] ?? {})) : true,
-);
+const 可提交本轮 = computed(() => 我方单位.value.some(x => 可提交(填写表[x.键] ?? {})));
 
 /**
  * 「执行本轮」：交出**每个单位各自的**填写与目标。

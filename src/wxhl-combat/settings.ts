@@ -11,6 +11,13 @@ const ApiConfigSchema = z.object({
 export const Settings = z.object({
   快路: ApiConfigSchema.prefault({}),
   强路: ApiConfigSchema.prefault({}),
+  /**
+   * 敌方意图怎么产生：
+   * - 'ai'   —— 每回合 1 次 AI 调用，让模型读面板做战术决策（默认）
+   * - '随机' —— **不调 AI**：按行动类型给每个单位列选项，掷骰子抽（1dN）决定用哪个
+   *              （玩家要的省调用模式："主要行动有三个选项就 1d3"）
+   */
+  意图模式: z.enum(['ai', '随机']).prefault('ai'),
 }).prefault({});
 
 export type Settings = z.infer<typeof Settings>;

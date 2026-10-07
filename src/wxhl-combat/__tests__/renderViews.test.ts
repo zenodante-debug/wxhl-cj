@@ -130,11 +130,27 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
 
     expect(html).toContain('黑崎一护'); // 玩家真名
     expect(html).toContain('江薇芷'); // 队友自己一块
-    expect(html).toContain('效果详情');
+    expect(html).toContain('详情'); // 每个角色能展开看全套
     expect(html).toContain('支援'); // 目标下拉里的我方选项
     expect(html).toContain('防御 12');
     expect(html).toContain('执行本轮');
   });
+
+  it('行动下拉**按行动类型过滤**：主要只列主要行动技能 + 主武器攻击；次要列次要的（这里是空的）', async () => {
+    // 造战斗状态里：月牙天冲/诛仙裂空 都是「主要行动」，两个单位都没有副武器
+    const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [] });
+
+    const 主要段 = /主要<\/span><select>(.*?)<\/select>/s.exec(html)?.[1] ?? '';
+    const 次要段 = /次要<\/span><select>(.*?)<\/select>/s.exec(html)?.[1] ?? '';
+
+    // 主要：技能按行动类型匹配 + 保底的主武器攻击
+    expect(主要段).toContain('月牙天冲');
+    expect(主要段).toContain('主武器攻击');
+    // 次要：不出现主要行动技能（这就是"别把所有选项都适配所有类型"）；没有副武器就没有基础攻击
+    expect(次要段).not.toContain('月牙天冲');
+    expect(次要段).not.toContain('主武器攻击');
+  });
+
 
   it('BattleView：空战场也不炸（开战前的初始态）', async () => {
     const html = await 渲染('BattleView.vue', {
@@ -177,23 +193,34 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
   });
 });
 
-describe('BattleView · 全员倒地时不能变成死锁', () => {
-  it('我方全在 0 血 → 按钮变成「推进回合」（否则回合推不动、濒死检定永远跑不了）', async () => {
+describe('BattleView · 倒下的角色要看得出是哪个阶段', () => {
+  it('HP 归零的单位显示「濒死（n/2 成功，m/3 失败）」（世界书：归零是濒死，不是死亡）', async () => {
     const 状态 = 造战斗状态();
     状态.单位['契约者'].HP_当前 = 0;
-    状态.单位['契约者'].濒死 = { 成功: 0, 失败: 1 } as any;
-    状态.单位['江薇芷'].HP_当前 = 0;
+    状态.单位['契约者'].濒死 = { 成功: 1, 失败: 2 } as any;
 
-    const html = await 渲染('BattleView.vue', { 状态, 日志: [], 敌方意图: [], 禁用: false, 进度: '' });
+    const html = await 渲染('BattleView.vue', { 状态, 日志: [], 敌方意图: [] });
 
-    expect(html).toContain('推进回合');
-    expect(html).toContain('濒死 CON 检定');
+    expect(html).toContain('濒死（1/2 成功，2/3 失败）');
   });
 
-  it('还有人能动 → 正常显示「执行本轮」', async () => {
-    const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [], 禁用: false, 进度: '' });
+  it('濒死检定三次失败 → 显示「已死亡」', async () => {
+    const 状态 = 造战斗状态();
+    状态.单位['契约者'].HP_当前 = 0;
+    状态.单位['契约者'].濒死 = { 成功: 0, 失败: 3 } as any;
 
-    expect(html).toContain('执行本轮');
-    expect(html).not.toContain('推进回合');
+    const html = await 渲染('BattleView.vue', { 状态, 日志: [], 敌方意图: [] });
+
+    expect(html).toContain('已死亡');
+  });
+
+  it('稳定下来（脱离濒死但仍昏迷）→ 显示「已稳定（昏迷）」', async () => {
+    const 状态 = 造战斗状态();
+    状态.单位['契约者'].HP_当前 = 0;
+    状态.单位['契约者'].濒死 = null as any;
+
+    const html = await 渲染('BattleView.vue', { 状态, 日志: [], 敌方意图: [] });
+
+    expect(html).toContain('已稳定（昏迷）');
   });
 });

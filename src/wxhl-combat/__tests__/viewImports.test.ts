@@ -35,7 +35,7 @@ import { 行动槽重置 } from '../engine/actionEconomy';
 import { 距离带, 移动距离计算, 移动额度重置 } from '../engine/distance';
 import { 构造行动声明, 可提交 } from '../engine/actionInput';
 import { 造我方条目, 造技能展示, 显示名 } from '../engine/viewModel';
-import { 保底意图 } from '../ai/enemyTactics';
+import { 随机意图, 随机意图说明 } from '../ai/enemyRoll';
 
 describe('views 的 import 契约', () => {
   it('views/*.vue 引用的每个导出都真实存在', () => {
@@ -65,7 +65,8 @@ describe('views 的 import 契约', () => {
       读取单位效果源,
       整理翻译缓存,
       翻译战斗解释,
-      保底意图,
+      随机意图,
+      随机意图说明,
       // views/BattleView.vue
       距离带,
       可提交,

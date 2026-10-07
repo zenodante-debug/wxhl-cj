@@ -64,12 +64,13 @@ import BattleView from './BattleView.vue';
 import PendingModal from './PendingModal.vue';
 import { 初始化战斗状态, 开场距离随机, 开场距离选项 } from '../engine/setup';
 import { 跑一个回合 } from '../engine/loop';
-import { 阶段A资源恢复, 阶段F结算, 濒死检定一轮, 判定战局, 能行动 } from '../engine/turn';
+import { 阶段A资源恢复, 阶段F结算, 冷却递减, 濒死检定一轮, 濒死结算到底, 判定战局, 能行动 } from '../engine/turn';
 import { 行动槽重置 } from '../engine/actionEconomy';
 import { 移动距离计算, 移动额度重置 } from '../engine/distance';
 import { 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
 import type { 敌方意图, 意图行动 } from '../ai/enemyTactics';
-import { 保底意图 } from '../ai/enemyTactics';
+import { 随机意图, 随机意图说明 } from '../ai/enemyRoll';
+import { 读设置 } from '../settingsStore';
 import {
   生成敌方意图,
   读战斗状态,
@@ -310,6 +311,25 @@ async function 开始回合() {
  * 两处要用（阶段A 之后 / 一轮结算之后），判定本身在 engine/turn.判定战局（纯函数、有单测）。
  */
 async function 检查结局(): Promise<boolean> {
+  // 我方全员倒地 → 这仗已经打不下去：把濒死检定**一次算到底**（连着掷到"稳定/死亡"），
+  // 然后直接判战局收尾。**不再空转回合** —— 每空转一回合都要调一次 AI 生成敌方意图，太浪费
+  //（玩家反馈：所有友方失去行动能力就该直接结束战斗）。
+  const 我方可动 = Object.values(战斗.value.单位).some(u => u.阵营 === '我方' && 能行动(u));
+  if (!我方可动) {
+    const 新单位 = { ...战斗.value.单位 };
+    const 濒死行: string[] = [];
+    for (const [键, u] of Object.entries(新单位)) {
+      if (u.阵营 !== '我方' || u.HP_当前 > 0) continue;
+      const r = 濒死结算到底(u);
+      新单位[键] = r.单位;
+      濒死行.push(...r.日志);
+    }
+    if (濒死行.length) {
+      日志.value.push('我方全员倒地 —— 一次性结算濒死检定：', ...濒死行);
+      战斗.value = { ...战斗.value, 单位: 新单位 };
+    }
+  }
+
   const 结局 = 判定战局(战斗.value);
   if (!结局) return false;
   日志.value.push(结局 === '胜利' ? '—— 胜利 ——' : '—— 败北 ——');
@@ -330,7 +350,7 @@ async function 推进回合() {
   const 濒死日志: string[] = [];
   for (const [键, u] of Object.entries(战斗.value.单位)) {
     let 单位: 战斗单位 = {
-      ...阶段A资源恢复(u),
+      ...阶段A资源恢复(冷却递减(u)), // 冷却每回合 -1（与行动槽同为「回合开始重置」）
       行动槽: 行动槽重置(u.行动槽),
       // 移动额度 = 本回合【移动距离】（含「移动距离额外加成」）；老存档没有这个字段就按公式现算
       额度: 移动额度重置((u.移动距离 ?? 0) > 0 ? u.移动距离! : 移动距离计算(u.属性.实际.AGI, u.阶位, 0)),
@@ -350,24 +370,34 @@ async function 推进回合() {
   // 敌方意图：**每回合一次**，必须在阶段A（行动槽/额度重置、资源恢复）之后生成 ——
   // 否则提示词里给出的是上一轮的残槽，模型会按「槽已用完」决策，直接导致敌人不出招。
   // 也用回合开始时的 HP/距离/状态：这正是「意图预公开」的前提（spec §9.2 ③）。
+  // 两种意图模式（设置里选）：AI 生成 / 掷骰子抽（**不调 AI**）
+  if (读设置().意图模式 === '随机') {
+    敌方意图列表.value = 随机意图(战斗.value);
+    日志.value.push(...随机意图说明(敌方意图列表.value, 战斗.value));
+    日志.value.push('（意图模式：掷骰 —— 本回合没有调用 AI）');
+    return;
+  }
+
   战场进度.value = `正在生成敌方意图（第 ${战斗.value.回合} 回合，1 次 AI 调用）…`;
   try {
     敌方意图列表.value = await 生成敌方意图(战斗.value);
   } catch (e: any) {
-    // 意图生成失败不再让本回合"凭空消失" —— 兜底成保底战术，敌人至少会移动并出手
-    日志.value.push(`意图生成失败（${e?.message ?? e}）→ 敌人按保底战术行动`);
-    敌方意图列表.value = 保底意图(战斗.value);
+    // 意图生成失败不再让本回合"凭空消失" —— 兜底成掷骰抽行动（会真的用技能，不是只会平A）
+    日志.value.push(`意图生成失败（${e?.message ?? e}）→ 改用掷骰抽行动`);
+    敌方意图列表.value = 随机意图(战斗.value);
   } finally {
     战场进度.value = '';
   }
   if (敌方意图列表.value.length === 0) {
-    日志.value.push('模型没有给出任何敌方意图 → 敌人按保底战术行动');
-    敌方意图列表.value = 保底意图(战斗.value);
+    日志.value.push('模型没有给出任何敌方意图 → 改用掷骰抽行动');
+    敌方意图列表.value = 随机意图(战斗.value);
   }
   日志.value.push(
     ...敌方意图列表.value.flatMap(x =>
       // 没写技能 = 基础攻击：日志里也要看得见，否则「敌人只是挥了下拳头」会被当成没出招
-      x.行动.map(a => `【意图】${x.单位} → ${a.类型}${a.技能 ? `·${a.技能}` : '·基础攻击'}`),
+      x.行动.map(
+        a => `【意图】${x.单位} → ${a.类型}${a.技能 ? `·${a.技能}` : a.武器 ? `·${a.武器}攻击` : '·基础攻击'}`,
+      ),
     ),
   );
   // 面板里也能看见 AI 计数：一场战斗 = 技能翻译 1 次 + 每回合意图 1 次，超过就是有问题
@@ -392,9 +422,7 @@ async function 执行本轮(各单位: Record<string, { 填写: 行动槽填写;
       if (反应) 预置反应.push(`${键}：${反应}`);
     }
 
-    // 全员倒地时允许空提交：濒死检定是「每回合」做的，回合推不动就永远等不到检定结果（死锁）。
-    const 无人能动 = !Object.values(战斗.value.单位).some(u => u.阵营 === '我方' && 能行动(u));
-    if (Object.keys(我方行动).length === 0 && !无人能动) {
+    if (Object.keys(我方行动).length === 0) {
       日志.value.push('请至少给一个单位下达行动，再执行本轮');
       return;
     }

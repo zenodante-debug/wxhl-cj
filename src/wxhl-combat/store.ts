@@ -24,14 +24,14 @@ function 读数值(o: any, k: string, 兜底: number): number {
 }
 
 /**
- * 读主武器（`实体.装备.主武器`）。
+ * 读一把武器（`实体.装备.<槽>`，槽 = 主武器 / 副武器）。
  * 未装备 / 空槽（名称 '无'）/ 伤害骰缺失或非法 → 返回 undefined（退化为徒手），
  * **绝不让非法骰式流进 `解析伤害骰` 在结算时抛错**。
  *
  * 倍率：卡里 `倍率` 的 zod prefault 是 0 —— 0 与「没写」在存档里分不开，
  * 而一把伤害骰合法的真武器不该因此把自己归零，所以**非正数一律取中性默认 1.0**。
  */
-function 读主武器(槽: any): { 伤害骰: string; 倍率: number; 强化等级: number; 阶位: string } | undefined {
+function 读武器(槽: any): { 伤害骰: string; 倍率: number; 强化等级: number; 阶位: string } | undefined {
   if (!槽 || typeof 槽 !== 'object' || !槽.名称 || 槽.名称 === '无') return undefined;
 
   const 伤害骰 = typeof 槽.伤害骰 === 'string' ? 槽.伤害骰.trim() : '';
@@ -81,6 +81,28 @@ function 定位单位(stat_data: any, 路径: string): { 实体: any; 容器: st
   }
 
   return { 实体, 容器 };
+}
+
+/**
+ * 把实体的装备拍平成**展示用**清单（界面详情面板要看得见穿了什么）。
+ * 只做展示：引擎的判定不读它（防御/闪避已在 `衍生属性` 里算好了）。
+ */
+function 读装备清单(装备: any): Array<{ 槽: string; 名称: string; 摘要: string }> {
+  const 出: Array<{ 槽: string; 名称: string; 摘要: string }> = [];
+  for (const [槽, e] of Object.entries<any>(装备 ?? {})) {
+    if (!e || typeof e !== 'object' || !e.名称 || e.名称 === '无') continue;
+    const 段: string[] = [];
+    if (e.伤害骰 && e.伤害骰 !== '无') 段.push(`伤害骰 ${e.伤害骰}`);
+    if (Number(e.倍率) > 0) 段.push(`×${e.倍率}`);
+    if (Number(e.强化等级) > 0) 段.push(`强化+${e.强化等级}`);
+    if (Number(e.装备防御) > 0) 段.push(`防御+${e.装备防御}`);
+    if (Number(e.装备闪避) > 0) 段.push(`闪避+${e.装备闪避}`);
+    if (e.主属性 && e.主属性 !== '无') 段.push(`${e.主属性}+${Number(e.主属性加成) || 0}`);
+    if (e.副属性 && e.副属性 !== '无') 段.push(`${e.副属性}+${Number(e.副属性加成) || 0}`);
+    if (e.品质) 段.push(String(e.品质));
+    出.push({ 槽, 名称: String(e.名称), 摘要: 段.join(' · ') });
+  }
+  return 出;
 }
 
 /**
@@ -137,7 +159,9 @@ function 实体转战斗单位(实体: any, id: string, 阵营: '我方' | '敌�
     资源: {},
     词条: new Set(),
     技能: {},
-    主武器: 读主武器(实体.装备?.主武器),
+    主武器: 读武器(实体.装备?.主武器),
+    副武器: 读武器(实体.装备?.副武器),
+    装备: 读装备清单(实体.装备),
   };
 }
 
