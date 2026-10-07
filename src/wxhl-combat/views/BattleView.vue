@@ -161,6 +161,16 @@
             </select>
           </label>
         </div>
+
+        <!-- 免费行动：**不限次数**，想放几个放几个（世界书：免费行动不占次数） -->
+        <div class="free-row">
+          <span class="slot-label">免费行动（不限次，可多选）</span>
+          <label v-for="o in 免费选项(u)" :key="o.值" class="free-opt">
+            <input type="checkbox" :value="o.值" v-model="填写表[u.键].免费" />
+            {{ o.标签 }}
+          </label>
+          <span v-if="!免费选项(u).length" class="dim">（该单位没有免费行动）</span>
+        </div>
       </div>
 
       <div class="action-submit">
@@ -246,6 +256,7 @@ watch(
     const 在场上 = new Set(列表.map(x => x.键));
     for (const x of 列表) {
       if (!填写表[x.键]) 填写表[x.键] = {};
+      if (!填写表[x.键].免费) 填写表[x.键].免费 = [];
       if (目标表[x.键] === undefined) 目标表[x.键] = '';
     }
     for (const 键 of Object.keys(填写表)) if (!在场上.has(键)) delete 填写表[键];
@@ -336,6 +347,10 @@ function 主要选项(u: 我方条目) {
 }
 function 次要选项(u: 我方条目) {
   return 列行动选项(u, '次要行动');
+}
+/** 免费行动：不限次数，界面上是多选（勾几个放几个） */
+function 免费选项(u: 我方条目) {
+  return 列行动选项(u, '免费行动');
 }
 
 /** 技能/装备的展示条目（形状在 engine/viewModel，有测试钉死） */
@@ -536,6 +551,27 @@ defineExpose({ 清空填写 });
   max-width: 260px;
 }
 .slot input[type='number'] { width: 90px; }
+
+.free-row {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  flex-wrap: wrap;
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #2a2a2a;
+  font-size: 12px;
+}
+
+.free-opt {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  color: #bbb;
+  cursor: pointer;
+
+  input { accent-color: #4a7; }
+}
 
 .action-submit {
   display: flex;

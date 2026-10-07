@@ -18,7 +18,7 @@ export interface 敌方意图 {
 }
 
 export interface 意图行动 {
-  类型: '主要行动' | '次要行动' | '移动' | '反应动作';
+  类型: '主要行动' | '次要行动' | '移动' | '反应动作' | '免费行动';
   技能?: string;
   目标?: string;
   距离?: number;

@@ -63,7 +63,7 @@ import SetupView from './SetupView.vue';
 import BattleView from './BattleView.vue';
 import PendingModal from './PendingModal.vue';
 import { 初始化战斗状态, 开场距离随机, 开场距离选项 } from '../engine/setup';
-import { 跑一个回合 } from '../engine/loop';
+import { 跑一个回合, 开战常驻结算 } from '../engine/loop';
 import { 阶段A资源恢复, 阶段F结算, 冷却递减, 濒死检定一轮, 濒死结算到底, 判定战局, 能行动 } from '../engine/turn';
 import { 行动槽重置 } from '../engine/actionEconomy';
 import { 移动距离计算, 移动额度重置 } from '../engine/distance';
@@ -86,7 +86,7 @@ import {
   取AI调用计数,
 } from '../store';
 import type { 单位效果源, 翻译失败项 } from '../store';
-import type { 战斗状态, 战斗单位, 战斗解释 } from '../types';
+import type { 战斗状态, 战斗单位, 战斗解释, 结算步骤 } from '../types';
 
 const 阶段 = ref<'准备' | '战斗' | '收尾'>('准备');
 const 战斗 = ref<战斗状态>({
@@ -121,6 +121,12 @@ const 选中项数 = computed(() => 翻译失败清单.value.filter(f => f.选�
  * 没有这行字，玩家会以为坏了（和之前「点开战没反应」同一类反馈）。
  */
 const 战场进度 = ref('');
+/**
+ * **本场战斗**的意图模式：开战时从设置里读一次就定下来。
+ * 以前每回合都重新读设置 —— 一旦中途读到别的值（现场出现过"第 3 回合又变成调 AI"），
+ * 战斗行为会在半途改变，而且无从查证。现在钉死 + 写进日志，任何异常都看得见。
+ */
+const 本战意图模式 = ref<'ai' | '随机'>('ai');
 /** BattleView 实例引用（结算成功后调它的 清空填写） */
 const 战场视图 = ref<{ 清空填写: () => void } | null>(null);
 
@@ -132,7 +138,8 @@ onMounted(async () => {
   // 刷新恢复（Review Focus 2）
   const 恢复 = await 读战斗状态();
   if (恢复) {
-    战斗.value = 恢复;
+    // 幂等：同名状态"后覆盖先"，重复结算不会叠加
+    战斗.value = 开战常驻结算(恢复);
     阶段.value = '战斗';
     日志.value.push('已从持久化恢复战斗');
   }
@@ -157,6 +164,7 @@ async function 开始战斗(选择: { id: string; 阵营: '我方' | '敌方' }[
 
   开战中.value = true;
   重置AI调用计数(); // 面板会显示本战斗累计调了几次 AI —— 排查"翻译是不是还在并发"
+  本战意图模式.value = 读设置().意图模式; // 本场战斗固定用这个模式
   try {
     // ⚠️ 必须在读单位**之前**：HP_最大/防御/闪避/属性.实际 是"小手机"代算落盘的，
     // 玩家不开小手机就不会算 —— 战斗脚本自己算一遍，否则读到的是过期面板（实战反馈）。
@@ -213,10 +221,20 @@ function 应用翻译(单位列表: 战斗单位[], 表: Record<string, Record<s
 async function 落定开战(单位列表: 战斗单位[], 开场模式: string) {
   开战进度.value = '掷先攻、初始化战场…';
   const 选项 = 开场距离选项().find(o => o.名 === 开场模式) ?? 开场距离选项()[2];
-  const 战斗0 = 初始化战斗状态(单位列表, 开场距离随机(选项.范围));
+
+  // 开战常驻结算：把被动/装备/天赋/血统/职业特性的常驻增益**落成状态** ——
+  // 这样它们既真的生效（常驻修正只读状态），又能在面板与写回 MVU 的「特殊状态」里看见。
+  // 以前只认 `作用域: 自身`，"我方全体"这类光环被整条丢掉（实战反馈：增益没写进状态里）。
+  开战进度.value = '结算常驻效果（被动 / 装备 / 天赋 / 血统）…';
+  const 常驻步骤: 结算步骤[] = [];
+  const 战斗0 = 开战常驻结算(
+    初始化战斗状态(单位列表, 开场距离随机(选项.范围)),
+    常驻步骤,
+  );
   战斗.value = 战斗0;
   await 写战斗状态(战斗0);
-  日志.value.push(`开战：${开场模式}，共 ${单位列表.length} 个单位`);
+  日志.value.push(`开战：${开场模式}，共 ${单位列表.length} 个单位（意图模式：${本战意图模式.value}）`);
+  if (常驻步骤.length) 日志.value.push('常驻效果：', ...常驻步骤.map(x => x.内容));
   阶段.value = '战斗';
 
   // 进入第 1 回合：重置行动槽/额度 → 阶段A → 生成敌方意图
@@ -371,13 +389,14 @@ async function 推进回合() {
   // 否则提示词里给出的是上一轮的残槽，模型会按「槽已用完」决策，直接导致敌人不出招。
   // 也用回合开始时的 HP/距离/状态：这正是「意图预公开」的前提（spec §9.2 ③）。
   // 两种意图模式（设置里选）：AI 生成 / 掷骰子抽（**不调 AI**）
-  if (读设置().意图模式 === '随机') {
+  if (本战意图模式.value === '随机') {
     敌方意图列表.value = 随机意图(战斗.value);
     日志.value.push(...随机意图说明(敌方意图列表.value, 战斗.value));
     日志.value.push('（意图模式：掷骰 —— 本回合没有调用 AI）');
     return;
   }
 
+  日志.value.push('（意图模式：AI —— 每回合 1 次调用）');
   战场进度.value = `正在生成敌方意图（第 ${战斗.value.回合} 回合，1 次 AI 调用）…`;
   try {
     敌方意图列表.value = await 生成敌方意图(战斗.value);
