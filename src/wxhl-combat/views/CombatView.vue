@@ -63,7 +63,7 @@ import SetupView from './SetupView.vue';
 import BattleView from './BattleView.vue';
 import PendingModal from './PendingModal.vue';
 import { 初始化战斗状态, 开场距离随机, 开场距离选项 } from '../engine/setup';
-import { 跑一个回合, 开战常驻结算 } from '../engine/loop';
+import { 跑一个回合, 开战常驻结算, 阶段A规则结算 } from '../engine/loop';
 import { 阶段A资源恢复, 阶段F结算, 冷却递减, 濒死检定一轮, 濒死结算到底, 判定战局, 能行动 } from '../engine/turn';
 import { 行动槽重置 } from '../engine/actionEconomy';
 import { 移动距离计算, 移动额度重置 } from '../engine/distance';
@@ -382,8 +382,15 @@ async function 推进回合() {
     }
     新单位[键] = 单位;
   }
-  战斗.value = { ...战斗.value, 单位: 新单位 };
-  日志.value.push(`—— 第 ${战斗.value.回合} 回合 ——`, ...濒死日志);
+  // 阶段A「回合开始」的规则结算：每回合蓄能 / 护盾回复 / 回合开始的自动增益都靠它
+  //（早先没有任何东西执行这个触发点，卡面上"每回合…"的效果全是静默失效的）
+  const 回合开始步骤: 结算步骤[] = [];
+  战斗.value = 阶段A规则结算({ ...战斗.value, 单位: 新单位 }, 回合开始步骤);
+  日志.value.push(
+    `—— 第 ${战斗.value.回合} 回合 ——`,
+    ...濒死日志,
+    ...回合开始步骤.map(x => x.内容),
+  );
 
   // 敌方意图：**每回合一次**，必须在阶段A（行动槽/额度重置、资源恢复）之后生成 ——
   // 否则提示词里给出的是上一轮的残槽，模型会按「槽已用完」决策，直接导致敌人不出招。
