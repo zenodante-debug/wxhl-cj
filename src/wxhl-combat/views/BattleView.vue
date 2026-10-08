@@ -200,8 +200,9 @@
             </select>
           </label>
           <label class="slot">
-            <span class="slot-label">移动（目标距离·米）</span>
-            <input type="number" min="0" v-model.number="填写表[u.键].移动" />
+            <span class="slot-label">移动（目标距离·米，可为负）</span>
+            <!-- 不设 min：目标距离可以是负数（向后移动 / 撤到玩家身后）；0 或当前位置 = 原地不动，不扣槽 -->
+            <input type="number" step="1" placeholder="负数=向后" v-model.number="填写表[u.键].移动" />
           </label>
           <label class="slot">
             <span class="slot-label">反应（预置）</span>
