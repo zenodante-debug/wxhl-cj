@@ -93,3 +93,18 @@ describe('Task 2 · 准备页（SetupView）换皮', () => {
     expect(页()).not.toContain('#2a4a2a'); // 旧的绿按钮
   });
 });
+
+describe('Task 8 · 设置页石碑化（SettingsView）', () => {
+  const 页 = () => 读('views/SettingsView.vue');
+
+  it('面板是石碑（cb-stone），输入框是铜牌（cb-plaque）', () => {
+    expect(页()).toContain('cb-stone');
+    expect(页()).toContain('cb-plaque');
+  });
+
+  it('皮肤用 token（var(--cb-*)），不是灰工程色', () => {
+    expect(页()).toContain('var(--cb-');
+    expect(页()).not.toContain('background: #1a1a1a');
+    expect(页()).not.toContain('color: #ddd');
+  });
+});

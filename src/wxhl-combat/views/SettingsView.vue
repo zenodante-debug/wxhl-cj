@@ -198,15 +198,21 @@ async function 清缓存() {
 </script>
 
 <style scoped lang="scss">
+@use '../theme.scss' as t;
+
 .settings-view {
-  color: #ddd;
+  color: var(--cb-chalk-dim);
+  font-family: var(--cb-font-body);
 
   h3 {
     margin: 0 0 8px;
+    color: var(--cb-amber);
+    font-family: var(--cb-font-display);
+    letter-spacing: 2px;
   }
 
   .hint {
-    color: #888;
+    color: var(--cb-dim);
     font-size: 13px;
     margin-bottom: 16px;
     line-height: 1.6;
@@ -214,22 +220,22 @@ async function 清缓存() {
 }
 
 .api-block {
-  border: 1px solid #2a2a2a;
-  border-radius: 8px;
-  padding: 14px;
+  @include t.cb-stone(14px);
   margin-bottom: 14px;
 
   h4 {
     margin: 0 0 12px;
-    color: #bbb;
-    font-weight: 600;
+    color: var(--cb-amber-dim);
+    font-family: var(--cb-font-display);
+    font-weight: 700;
+    letter-spacing: 1px;
   }
 }
 
 .field {
   display: block;
   font-size: 13px;
-  color: #999;
+  color: var(--cb-dim);
   margin-bottom: 10px;
 
   &.field-inline {
@@ -239,7 +245,7 @@ async function 清缓存() {
 
     input[type='checkbox'] {
       width: auto;
-      accent-color: var(--cb-amber, #e8c078);
+      accent-color: var(--cb-amber);
     }
   }
 
@@ -250,17 +256,14 @@ async function 清缓存() {
 
   input,
   select {
+    @include t.cb-plaque;
     width: 100%;
     padding: 7px 10px;
-    background: #1a1a1a;
-    border: 1px solid #333;
-    border-radius: 6px;
-    color: #eee;
     font-size: 13px;
     outline: none;
 
     &:focus {
-      border-color: #4a6a8a;
+      border-color: var(--cb-mana);
     }
   }
 }
@@ -270,10 +273,11 @@ async function 清缓存() {
   margin-top: 4px;
   font-size: 11px;
   line-height: 1.6;
-  color: #777;
+  color: var(--cb-dim);
 }
 
-.model-row {  display: flex;
+.model-row {
+  display: flex;
   gap: 6px;
 
   input {
@@ -284,16 +288,8 @@ async function 清缓存() {
 .icon-btn {
   flex-shrink: 0;
   width: 34px;
-  background: #22303c;
-  border: 1px solid #3a5a74;
-  border-radius: 6px;
-  color: #90c0e0;
+  @include t.cb-plaque;
   font-size: 15px;
-  cursor: pointer;
-
-  &:hover {
-    background: #2b3d4c;
-  }
 
   &:disabled {
     opacity: 0.4;
@@ -306,50 +302,49 @@ async function 清缓存() {
   animation: spin 1s linear infinite;
 }
 
-@keyframes spin {
-  from { transform: rotate(0deg); }
-  to { transform: rotate(360deg); }
-}
-
+/* 测试连接 / 复制 / 缓存操作 */
 .actions {
   display: flex;
   align-items: center;
   gap: 8px;
-  flex-wrap: wrap;
-  margin-top: 12px;
+  margin-top: 8px;
 }
 
-.test-btn,
-.copy-btn {
-  padding: 7px 14px;
-  background: #242424;
-  border: 1px solid #444;
-  border-radius: 6px;
-  color: #ddd;
-  font-size: 13px;
-  cursor: pointer;
-
-  &:hover {
-    background: #333;
-  }
+.test-btn {
+  @include t.cb-plaque;
+  padding: 6px 14px;
+  border-color: rgba(90, 125, 168, 0.6);
+  color: var(--cb-mana);
 
   &:disabled {
-    opacity: 0.5;
-    cursor: default;
+    opacity: 0.4;
+  }
+}
+
+.copy-btn {
+  @include t.cb-plaque;
+  padding: 6px 12px;
+
+  &:disabled {
+    opacity: 0.4;
   }
 }
 
 .result {
   font-size: 12px;
-  color: #888;
-  line-height: 1.5;
+  color: var(--cb-dim);
 
   &.ok {
-    color: #7bc47f;
+    color: var(--cb-copper);
   }
-
   &.err {
-    color: #e08a8a;
+    color: var(--cb-blood-wet);
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
   }
 }
 </style>
