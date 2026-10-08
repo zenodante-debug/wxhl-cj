@@ -23,6 +23,9 @@
          同一距离上的多人不再互相遮挡，而是**上下堆叠**（实战反馈）。 -->
     <div class="arena-floor">
       <div class="distance-bar" :style="{ height: 距离条高度 + 'px' }">
+        <!-- 演出层（决斗场美术）：飘字/轨迹/裂纹/光环，复用同一套地砖坐标 -->
+        <ShowLayer :事件="演出事件 ?? []" :坐标="演出坐标" />
+
         <div class="axis-hint left">◀ 身后（负）</div>
         <div class="axis-hint center" :style="{ left: 原点百分比 + '%' }">玩家原点</div>
         <div class="axis-hint right">身前（正）▶</div>
@@ -282,6 +285,8 @@ import { 距离带 } from '../engine/distance';
 import { 可提交, 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
 import { 造我方条目, 造技能展示, 选中行动预览, 显示名, type 我方条目 } from '../engine/viewModel';
 import { 列行动选项 } from '../engine/actionOptions';
+import ShowLayer from './ShowLayer.vue';
+import type { 演出事件 } from '../engine/showEvents';
 import type { 敌方意图 } from '../ai/enemyTactics';
 import type { 战斗状态 } from '../types';
 
@@ -296,6 +301,8 @@ const props = defineProps<{
   进度?: string;
   /** 追加行动回合模式：只给某个单位指定行动，按钮文案与提示随之变化 */
   追加模式?: boolean;
+  /** 本轮结算产生的演出事件（决斗场美术：飘字/轨迹/变身…，由 CombatView 从结算步骤提取） */
+  演出事件?: 演出事件[];
 }>();
 
 const emit = defineEmits<{
@@ -359,6 +366,15 @@ const 分组标记 = computed(() => {
   return [...按距离.entries()]
     .sort((a, b) => a[0] - b[0])
     .map(([距离, 单位们]) => ({ 距离, 左: 距离百分比(距离), 单位们 }));
+});
+
+/** 演出层用的坐标系：单位**显示名** → 地砖横向百分比（与距离轴完全同一套） */
+const 演出坐标 = computed<Record<string, number>>(() => {
+  const 出: Record<string, number> = {};
+  for (const g of 分组标记.value) {
+    for (const u of g.单位们) 出[显示名(u)] = g.左;
+  }
+  return 出;
 });
 
 /** 同一点最多叠几个 → 决定条的高度 */

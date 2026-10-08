@@ -44,6 +44,7 @@
         :日志="日志"
         :敌方意图="有效追加待办 ? [] : 敌方意图列表"
         :追加模式="!!有效追加待办"
+        :演出事件="演出事件列表"
         :禁用="忙碌"
         :进度="战场进度"
         @执行本轮="有效追加待办 ? 提交追加行动回合($event) : 执行本轮($event)"
@@ -86,6 +87,7 @@ import {
 import { 阶段A资源恢复, 阶段F结算, 冷却递减, 濒死检定一轮, 濒死结算到底, 判定战局, 能行动 } from '../engine/turn';
 import { 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
 import { 显示名 } from '../engine/viewModel';
+import { 演出事件提取, type 演出事件 } from '../engine/showEvents';
 import type { 敌方意图, 意图行动 } from '../ai/enemyTactics';
 import { 随机意图, 随机意图说明 } from '../ai/enemyRoll';
 import { 读设置 } from '../settingsStore';
@@ -155,6 +157,9 @@ const 战场视图 = ref<{ 清空填写: () => void } | null>(null);
  */
 const 轮次快照 = ref<轮次状态 | null>(null);
 const 追加待办 = ref<{ 键: string; 名称: string } | null>(null);
+
+/** 本轮的演出事件（决斗场美术：飘字/轨迹/变身…）。下一回合开始时换掉，旧的不再重播 */
+const 演出事件列表 = ref<演出事件[]>([]);
 
 /**
  * 追加待办的生命周期（防跨战斗状态污染）：开始战斗 / 逃离 / 回准备 / 收尾 都必须清 —
@@ -416,6 +421,7 @@ async function 检查结局(): Promise<boolean> {
  * 不重置则第 2 回合起所有单位槽位/额度耗尽，整个循环死掉。
  */
 async function 推进回合() {
+  演出事件列表.value = []; // 上一回合的演出到这结束（演出层只播一轮）
   const 新单位: Record<string, 战斗单位> = {};
   const 濒死日志: string[] = [];
   for (const [键, u] of Object.entries(战斗.value.单位)) {
@@ -572,6 +578,8 @@ async function 推进轮次(
         追加日志.push(...轮.步骤.map(s => s.内容));
         日志.value.push(...追加日志);
         战斗.value = 轮.状态;
+        // 暂停时也把到目前为止的演出放出来（打断/变身可能正是追加回合的来源）
+        演出事件列表.value = 演出事件提取(轮.步骤);
         // 已写出去的步骤不再挂着（恢复时会把整份轮次交回来，重复写会刷屏）
         轮次快照.value = { ...轮, 步骤: [] };
         追加待办.value = { 键, 名称: 单位 ? 显示名(单位) : id };
@@ -594,6 +602,8 @@ async function 推进轮次(
 
   let 状态 = 轮.状态;
   追加日志.push(...轮.步骤.map(s => s.内容));
+  // 本轮的演出（决斗场美术）：从结算步骤提取 —— 下一回合开始时会被整批换掉
+  演出事件列表.value = 演出事件提取(轮.步骤);
 
   // 阶段F：持续伤害与状态递减 → 再来一遍「回合结束」规则（世界书的尾结算）
   const 新单位 = { ...状态.单位 };

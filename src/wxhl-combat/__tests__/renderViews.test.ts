@@ -30,8 +30,15 @@ async function 渲染(文件名: string, props: Record<string, any>): Promise<st
 
   // 临时文件必须写在 views/ 里 —— 组件里的相对 import（../engine/...）才解析得到；
   // 裸标识符 ref/computed/watch 由 vitest 配置里的 unplugin-auto-import 注入（与构建一致）
+  let 编译后 = compileScript(descriptor, { id: 文件名, inlineTemplate: true }).content;
+  // `.vue` 的 import 解析不了（vitest 没装 vue 插件）—— 子组件一律换成占位空组件。
+  // 子组件自己的渲染由各自的测试文件单独断言（如 arenaShow 直渲 ShowLayer）。
+  编译后 = 编译后.replace(
+    /import\s+(\w+)\s+from\s+'(\.[^']*\.vue)'/g,
+    (_m, 名) => `const ${名} = { name: '${名}', render: () => null };`,
+  );
   const 临时 = path.join(视图目录, `__render_${文件名.replace('.vue', '')}.ts`);
-  fs.writeFileSync(临时, compileScript(descriptor, { id: 文件名, inlineTemplate: true }).content);
+  fs.writeFileSync(临时, 编译后);
   try {
     const mod: any = await import(/* @vite-ignore */ 临时);
     const app = createSSRApp(mod.default, props);
