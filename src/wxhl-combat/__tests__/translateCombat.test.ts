@@ -82,9 +82,9 @@ describe('翻译战斗解释 · 整场只调 1 次 AI（实战反馈：逐个技
     (globalThis as any).getScriptId = () => 'wxhl-combat';
     (globalThis as any).getVariables = () => ({ 快路: 配置 });
     (globalThis as any).replaceVariables = () => {};
-    // 第 0 条只回编号不回字段（坏），第 1 条正常
+    // 第 0 条的规则是空对象（结构不完整 → 真正会失败的那种），第 1 条正常
     (globalThis as any).generateRaw = async () =>
-      JSON.stringify({ 解释: [{ 编号: 0 }, { 编号: 1, 行动消耗: '次要行动', 射程: '自身', 目标: '自身', 消耗: '无', 冷却: 0, 分类: '基础', 类型: '被动', 可预判: false, 规则: [], 托管: [] }] });
+      JSON.stringify({ 解释: [{ 编号: 0, 规则: [{}] }, { 编号: 1, 行动消耗: '次要行动', 射程: '自身', 目标: '自身', 消耗: '无', 冷却: 0, 分类: '基础', 类型: '被动', 可预判: false, 规则: [], 托管: [] }] });
 
     const 结果 = await 翻译战斗解释([
       { id: '契约者', 效果源: [{ 名称: '坏' }, { 名称: '好' }] as any },
