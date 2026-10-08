@@ -1,0 +1,265 @@
+/* ============================================================
+   无限回廊 · 决斗场 — 视觉语言（token + mixin + 关键帧）
+   继承 wxhl-003 长廊版的调色板/字体/颗粒纹理/铆钉，战斗页构图为决斗场。
+
+   只有 token 与 mixin —— 这个文件**不输出任何选择器**，
+   各组件 @use 之后写自己的 scoped 样式（符合 脚本.mdc 的样式隔离要求）。
+
+   CSS 自定义属性挂 `.wxhl-combat-root`（App.vue 顶层块定义），
+   天然穿透 scoped 样式 —— 组件一律 `var(--cb-*)`，不要在本文件里写选择器。
+   ============================================================ */
+
+@import url('https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@400;700;900&family=Noto+Sans+SC:wght@300;400;700&family=JetBrains+Mono:wght@400;700&display=swap');
+
+/* ---------- 调色板（里世界长廊 · 提亮版；决斗场沿用） ---------- */
+$cb-void: #080504;
+$cb-bg: #120b07;
+$cb-panel: #241812;
+$cb-panel-2: #2e1e14;
+$cb-sub: #1a100a;
+$cb-hover: #3a2418;
+$cb-border: #4a3226;
+$cb-border-soft: #33221a;
+$cb-amber: #e8c078;
+$cb-amber-dim: #c8a060;
+$cb-chalk: #e8dfd2;
+$cb-chalk-dim: #b3a390;
+$cb-dim: #7d6c58;
+$cb-blood-wet: #d05040;
+$cb-blood-bright: #8a2020;
+$cb-blood: #4a1010;
+$cb-ember: #d8914a;
+$cb-gold: #d0a850;
+$cb-copper: #6a9070;
+$cb-emerge: #f5edda;
+$cb-iron: #4a4440;
+/* 战斗专色（wxhl-003 没有：决斗场要显示 MP 与护盾釉光） */
+$cb-mana: #5a7da8;
+$cb-shield: #7fa8d8;
+
+$cb-font-display: 'Noto Serif SC', 'SimSun', serif;
+$cb-font-body: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+$cb-font-mono: 'JetBrains Mono', 'Courier New', monospace;
+
+/* SVG 颗粒纹理（feTurbulence，无图片资源、自包含 —— 与长廊版同一张底噪） */
+$cb-grain: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='140' height='140'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.85' numOctaves='2' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='140' height='140' filter='url(%23n)' opacity='0.55'/%3E%3C/svg%3E");
+
+/* ---------- 铭牌组件 ---------- */
+
+/* 四角铆钉（铭牌/石牌共用） */
+@mixin cb-rivets($offset: 7px, $color: rgba(200, 160, 110, 0.5)) {
+  background:
+    radial-gradient(circle 2px at $offset $offset, $color 50%, transparent 51%),
+    radial-gradient(circle 2px at calc(100% - #{$offset}) $offset, $color 50%, transparent 51%),
+    radial-gradient(circle 2px at $offset calc(100% - #{$offset}), $color 50%, transparent 51%),
+    radial-gradient(circle 2px at calc(100% - #{$offset}) calc(100% - #{$offset}), $color 50%, transparent 51%);
+}
+
+/* 石碑面板（军牌/行动区/设置面板的底子） */
+@mixin cb-stone($pad: 12px) {
+  position: relative;
+  padding: $pad;
+  background:
+    linear-gradient(160deg, rgba(255, 220, 170, 0.03), transparent 40%),
+    linear-gradient(180deg, $cb-panel-2 0%, $cb-panel 100%);
+  border: 1px solid $cb-border;
+  border-radius: 6px;
+  box-shadow:
+    inset 0 1px 0 rgba(220, 180, 130, 0.08),
+    0 6px 18px rgba(0, 0, 0, 0.5);
+  &::before {
+    content: '';
+    position: absolute;
+    inset: 0;
+    border-radius: 6px;
+    background: $cb-grain;
+    background-size: 140px;
+    opacity: 0.12;
+    pointer-events: none;
+  }
+}
+
+/* 铜牌（页签/下拉选项/小按钮） */
+@mixin cb-plaque {
+  padding: 5px 14px;
+  background: linear-gradient(180deg, $cb-panel-2, $cb-sub);
+  border: 1px solid $cb-border;
+  border-radius: 4px;
+  color: $cb-chalk-dim;
+  font-family: $cb-font-body;
+  cursor: pointer;
+  transition:
+    border-color 0.15s,
+    color 0.15s,
+    box-shadow 0.15s;
+
+  &:hover {
+    color: $cb-chalk;
+    border-color: $cb-amber-dim;
+  }
+
+  &.active {
+    color: $cb-amber;
+    border-color: $cb-amber-dim;
+    box-shadow:
+      0 0 0 1px rgba(232, 192, 120, 0.15),
+      0 0 12px rgba(232, 192, 120, 0.12);
+  }
+}
+
+/* 决斗场闸门（大按钮：开战 / 执行本轮） */
+@mixin cb-gate {
+  padding: 10px 26px;
+  background:
+    linear-gradient(180deg, rgba(208, 80, 64, 0.18), transparent 70%),
+    linear-gradient(180deg, #3a2018 0%, #241510 100%);
+  border: 1px solid #6a4030;
+  border-radius: 6px;
+  color: $cb-amber;
+  font-family: $cb-font-display;
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 3px;
+  cursor: pointer;
+  text-shadow: 0 0 8px rgba(232, 192, 120, 0.35);
+  box-shadow:
+    inset 0 1px 0 rgba(230, 190, 140, 0.12),
+    0 4px 14px rgba(0, 0, 0, 0.55);
+  transition:
+    border-color 0.15s,
+    box-shadow 0.15s,
+    transform 0.08s;
+
+  &:not(:disabled):hover {
+    border-color: $cb-blood-wet;
+    box-shadow:
+      inset 0 1px 0 rgba(230, 190, 140, 0.12),
+      0 4px 18px rgba(120, 30, 20, 0.45),
+      0 0 18px rgba(208, 80, 64, 0.18);
+  }
+
+  &:not(:disabled):active {
+    transform: translateY(1px);
+  }
+
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+/* 血色液面（HP 条：底下是沉血，液面微光） */
+@mixin cb-blood-gauge($color: $cb-blood-wet, $track: $cb-blood) {
+  position: relative;
+  height: 10px;
+  background: linear-gradient(180deg, darken($track, 2%), $track);
+  border: 1px solid rgba(0, 0, 0, 0.6);
+  border-radius: 3px;
+  overflow: hidden;
+
+  > .fill {
+    height: 100%;
+    background:
+      linear-gradient(180deg, rgba(255, 255, 255, 0.18), transparent 45%),
+      linear-gradient(90deg, darken($color, 12%), $color);
+    box-shadow: 0 0 8px rgba($color, 0.45);
+    transition: width 0.35s ease-out;
+  }
+}
+
+/* ---------- 关键帧 ---------- */
+
+/* 火把摇曳（决斗场两侧火把；搬自长廊灯泡闪烁，改得更慢更沉） */
+@keyframes cbTorchFlick {
+  0%,
+  22%,
+  24%,
+  26%,
+  100% {
+    opacity: 1;
+  }
+  23%,
+  25% {
+    opacity: 0.35;
+  }
+}
+
+/* 血色环境光呼吸（场地边缘） */
+@keyframes cbBloodBreathe {
+  0%,
+  100% {
+    opacity: 0.55;
+  }
+  50% {
+    opacity: 0.9;
+  }
+}
+
+/* 伤害飘字（上升淡出） */
+@keyframes cbDamageFloat {
+  0% {
+    opacity: 0;
+    transform: translateY(6px) scale(0.8);
+  }
+  12% {
+    opacity: 1;
+    transform: translateY(0) scale(1.06);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(-34px) scale(0.96);
+  }
+}
+
+/* 血珀脉动（启动球） */
+@keyframes cbGemPulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 6px rgba(208, 80, 64, 0.65),
+      0 0 10px rgba(208, 80, 64, 0.3);
+  }
+  50% {
+    box-shadow:
+      inset 0 0 10px rgba(208, 80, 64, 0.85),
+      0 0 22px rgba(208, 80, 64, 0.5);
+  }
+}
+
+/* 变身演出的血光脉冲 */
+@keyframes cbTransformPulse {
+  0% {
+    opacity: 0;
+    transform: scale(0.94);
+  }
+  18% {
+    opacity: 1;
+    transform: scale(1.02);
+  }
+  30% {
+    transform: scale(1);
+  }
+  78% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.01);
+  }
+}
+
+/* 金色裂纹闪光（打断成功） */
+@keyframes cbCrackFlash {
+  0% {
+    opacity: 0;
+    transform: scale(0.6);
+  }
+  30% {
+    opacity: 1;
+    transform: scale(1.15);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(1.5);
+  }
+}

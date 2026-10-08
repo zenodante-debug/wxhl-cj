@@ -19,9 +19,9 @@
     <!-- 全屏覆盖层 -->
     <div v-if="外壳.面板可见" class="combat-overlay">
       <div class="combat-shell">
-        <!-- 顶栏 -->
+        <!-- 石檐顶栏 -->
         <div class="shell-topbar">
-          <span class="shell-title">无限回廊 · 战斗</span>
+          <span class="shell-title">无限回廊 · 决斗场</span>
           <nav class="shell-tabs">
             <button
               v-for="tab in ['战斗', '设置'] as const"
@@ -227,6 +227,8 @@ onBeforeUnmount(() => {
 </script>
 
 <style scoped lang="scss">
+@use './theme.scss' as t;
+
 .wxhl-combat-root {
   position: fixed;
   inset: 0;
@@ -237,6 +239,33 @@ onBeforeUnmount(() => {
   // 我们只要低一位就会被盖住（实战反馈：手机端悬浮球被美化正则和楼层挡住、点不了）。
   // 拉满后同级靠 DOM 顺序决胜，而我们挂在后面。
   z-index: 2147483647;
+
+  // ---------- 决斗场 token（CSS 变量，穿透 scoped 样式；与 theme.scss 的 $cb-* 同源） ----------
+  --cb-void: #{t.$cb-void};
+  --cb-bg: #{t.$cb-bg};
+  --cb-panel: #{t.$cb-panel};
+  --cb-panel-2: #{t.$cb-panel-2};
+  --cb-sub: #{t.$cb-sub};
+  --cb-border: #{t.$cb-border};
+  --cb-border-soft: #{t.$cb-border-soft};
+  --cb-amber: #{t.$cb-amber};
+  --cb-amber-dim: #{t.$cb-amber-dim};
+  --cb-chalk: #{t.$cb-chalk};
+  --cb-chalk-dim: #{t.$cb-chalk-dim};
+  --cb-dim: #{t.$cb-dim};
+  --cb-blood-wet: #{t.$cb-blood-wet};
+  --cb-blood: #{t.$cb-blood};
+  --cb-ember: #{t.$cb-ember};
+  --cb-gold: #{t.$cb-gold};
+  --cb-copper: #{t.$cb-copper};
+  --cb-mana: #{t.$cb-mana};
+  --cb-shield: #{t.$cb-shield};
+  --cb-grain: #{t.$cb-grain};
+  --cb-font-display: #{t.$cb-font-display};
+  --cb-font-body: #{t.$cb-font-body};
+  --cb-font-mono: #{t.$cb-font-mono};
+
+  font-family: var(--cb-font-body);
 }
 
 .combat-launcher {
@@ -247,35 +276,47 @@ onBeforeUnmount(() => {
   width: 52px;
   height: 52px;
   border-radius: 50%;
-  border: 1px solid #555;
-  background: #1a1a1a;
-  color: #fff;
+  // 铜环嵌血珀：外圈铜边，中心血珀发光脉动 —— 行为（尺寸/可点区/拖拽）一个字不动
+  border: 2px solid var(--cb-border);
+  background:
+    radial-gradient(circle at 50% 42%, rgba(208, 80, 64, 0.5), rgba(74, 16, 16, 0.9) 62%),
+    radial-gradient(circle at 50% 50%, t.$cb-panel-2, t.$cb-sub);
+  color: var(--cb-amber);
+  font-family: var(--cb-font-display);
   font-size: 24px;
   line-height: 1;
   display: flex;
   align-items: center;
   justify-content: center;
   box-shadow: 0 4px 18px #000a;
+  animation: cbGemPulse 4.2s ease-in-out infinite;
   pointer-events: auto;
   cursor: grab;
   touch-action: none; // 触摸拖动必需：否则浏览器会当成滚动手势
   user-select: none;
 
   &:hover {
-    background: #2a2a2a;
+    border-color: var(--cb-amber-dim);
+    animation-play-state: paused;
+    box-shadow:
+      0 4px 18px #000a,
+      0 0 16px rgba(208, 80, 64, 0.45);
   }
 
   &.dragging {
     cursor: grabbing;
     // 拖动中不做过渡，避免跟手迟滞
     transition: none;
+    animation-play-state: paused;
   }
 }
 
 .combat-overlay {
   position: absolute;
   inset: 0;
-  background: rgba(0, 0, 0, 0.82);
+  background:
+    radial-gradient(ellipse at 50% 110%, rgba(60, 15, 10, 0.3) 0%, transparent 55%),
+    rgba(4, 2, 1, 0.86);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -287,10 +328,15 @@ onBeforeUnmount(() => {
   max-height: 92vh;
   display: flex;
   flex-direction: column;
-  background: #141414;
-  border: 1px solid #333;
+  background:
+    linear-gradient(180deg, rgba(255, 220, 170, 0.02), transparent 30%),
+    var(--cb-bg);
+  border: 1px solid var(--cb-border);
   border-radius: 10px;
   overflow: hidden;
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.6),
+    0 24px 70px rgba(0, 0, 0, 0.7);
 }
 
 .shell-topbar {
@@ -298,14 +344,18 @@ onBeforeUnmount(() => {
   align-items: center;
   gap: 16px;
   padding: 10px 16px;
-  border-bottom: 1px solid #2a2a2a;
-  background: #1a1a1a;
+  // 石檐：暗棕渐变 + 底部铜线 + 上缘微光（搬长廊顶檐的做法）
+  background: linear-gradient(180deg, #050302 0%, #0a0705 60%, #120c08 100%);
+  border-bottom: 1px solid var(--cb-border-soft);
+  box-shadow: 0 1px 0 rgba(100, 60, 30, 0.25);
 }
 
 .shell-title {
-  color: #e8e8e8;
-  font-weight: 700;
-  letter-spacing: 2px;
+  color: var(--cb-amber);
+  font-family: var(--cb-font-display);
+  font-weight: 900;
+  letter-spacing: 4px;
+  text-shadow: 0 0 10px rgba(232, 192, 120, 0.3);
 }
 
 .shell-tabs {
@@ -315,32 +365,18 @@ onBeforeUnmount(() => {
 }
 
 .tab-btn {
-  padding: 6px 14px;
-  background: transparent;
-  border: 1px solid transparent;
-  border-radius: 6px;
-  color: #999;
-  cursor: pointer;
-
-  &.active {
-    color: #fff;
-    border-color: #555;
-    background: #242424;
-  }
+  @include t.cb-plaque;
+  border-radius: 4px;
 }
 
 .shell-close {
+  @include t.cb-plaque;
   padding: 4px 10px;
-  background: transparent;
-  border: 1px solid #444;
-  border-radius: 6px;
-  color: #bbb;
-  cursor: pointer;
 
   &:hover {
     color: #fff;
-    border-color: #a33;
-    background: #3a1a1a;
+    border-color: var(--cb-blood-wet);
+    background: rgba(74, 16, 16, 0.4);
   }
 }
 
@@ -348,5 +384,6 @@ onBeforeUnmount(() => {
   flex: 1;
   overflow-y: auto;
   padding: 16px;
+  color: var(--cb-chalk-dim);
 }
 </style>

@@ -1,0 +1,74 @@
+import { describe, expect, it } from 'vitest';
+import fs from 'node:fs';
+import path from 'node:path';
+
+// ================================================================
+// 决斗场美术 · Task 1：theme.scss + 外壳换皮（源码守卫）
+//
+// 美术在本仓库没有运行时测试（.vue 无 vue-tsc、vitest 不装 vue 插件），
+// 所以"决斗场皮肤真的接上了"用**源码守卫**钉住 —— 一旦有人把皮肤改回灰工程界面，
+// 这里会红。真正的构图在 renderViews 里另有断言。
+// ================================================================
+
+const 根 = path.resolve(import.meta.dirname, '..');
+const 读 = (f: string) => fs.readFileSync(path.join(根, f), 'utf8');
+
+describe('决斗场主题（theme.scss）', () => {
+  const 主题 = () => 读('theme.scss');
+
+  it('存在，且调色板是长廊版（暗棕血色，不是灰工程色）', () => {
+    const s = 主题();
+    // SCSS token（--cb-* 的 CSS 变量由 App.vue 挂在 .wxhl-combat-root 上，另有一条断言）
+    for (const 变量 of ['$cb-void', '$cb-bg', '$cb-panel', '$cb-border', '$cb-amber', '$cb-blood-wet', '$cb-blood', '$cb-ember', '$cb-gold', '$cb-copper']) {
+      expect(s, `缺 ${变量}`).toContain(变量);
+    }
+    // 战斗专色：MP 蓝（wxhl-003 没有，决斗场要显示 MP/护盾）
+    expect(s).toContain('$cb-mana');
+    // 长廊版的底色：暗棕虚空，不是灰工程界面的 #1a1a1a
+    expect(s).toContain('#080504');
+  });
+
+  it('颗粒纹理自包含（SVG feTurbulence data URI，无图片资源）', () => {
+    expect(主题()).toContain('feTurbulence');
+    expect(主题()).toContain('data:image/svg+xml');
+  });
+
+  it('铆钉 mixin（铭牌四角，与 wxhl-003 同源）', () => {
+    expect(主题()).toMatch(/@mixin\s+cb-rivets/);
+  });
+
+  it('火光摇曳关键帧（决斗场的火把，搬自长廊灯泡）', () => {
+    expect(主题()).toMatch(/@keyframes\s+cbTorchFlick/);
+  });
+});
+
+describe('外壳换皮（App.vue）', () => {
+  const 外壳 = () => 读('App.vue');
+
+  it('根节点引入决斗场主题（token 挂 .wxhl-combat-root）', () => {
+    expect(外壳()).toContain('theme.scss');
+    expect(外壳()).toContain('--cb-void');
+  });
+
+  it('标题换成「决斗场」，用长廊的衬线字体（字体声明在 theme.scss，App.vue 引用变量）', () => {
+    expect(外壳()).toContain('决斗场');
+    expect(外壳()).toContain('--cb-font-display'); // 衬线标题字体挂上了
+    expect(读('theme.scss')).toContain('Noto Serif SC'); // 与长廊同源的字
+  });
+
+  it('顶栏是石檐（不是灰色平板），页签是铜牌', () => {
+    expect(外壳()).toMatch(/shell-topbar[\s\S]*cb-border/);
+  });
+
+  it('启动球还是原来那颗（class/字形/尺寸不动 —— 只换皮）', () => {
+    expect(外壳()).toContain('combat-launcher');
+    expect(外壳()).toContain('⚔');
+    expect(外壳()).toMatch(/width:\s*52px/);
+  });
+
+  it('JS 行为逻辑不动（摆放/归位/夹取 还在，位置由 JS 覆盖）', () => {
+    expect(外壳()).toContain('function 摆放');
+    expect(外壳()).toContain('function 归位');
+    expect(外壳()).toContain('setProperty');
+  });
+});
