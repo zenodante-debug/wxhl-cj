@@ -24,10 +24,11 @@ describe('persistence · 战斗状态持久化', () => {
     const 读回 = await 读战斗状态();
 
     expect(读回).not.toBe(null);
-    expect(读回!.回合).toBe(3);
-    expect(读回!.单位['契约者'].资源['保存']).toBe(12);
-    expect(读回!.单位['契约者'].词条 instanceof Set).toBe(true);
-    expect(读回!.单位['契约者'].词条.has('不可被常规攻击命中')).toBe(true);
+    // 现在读回来的是**快照**（状态 + 意图模式 + 日志）——状态在 .状态 里
+    expect(读回!.状态.回合).toBe(3);
+    expect(读回!.状态.单位['契约者'].资源['保存']).toBe(12);
+    expect(读回!.状态.单位['契约者'].词条 instanceof Set).toBe(true);
+    expect(读回!.状态.单位['契约者'].词条.has('不可被常规攻击命中')).toBe(true);
     // 落盘的是数组，不是 Set（Set 经 JSON 会变 {}）
     expect(Array.isArray(存的.单位['契约者'].词条)).toBe(true);
   });

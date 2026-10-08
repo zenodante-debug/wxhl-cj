@@ -81,7 +81,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
 import SetupView from './SetupView.vue';
 import BattleView from './BattleView.vue';
 import PendingModal from './PendingModal.vue';
@@ -235,14 +235,26 @@ function 空战斗(): 战斗状态 {
   return { 进行中: false, 回合: 0, 先攻: [], 单位: {}, 待决: null, 领域: [] };
 }
 
+/**
+ * 组件卸载（切到设置页 / 关面板）时**立刻存一次**：
+ * 战斗日志原来只在组件内存里，切个页签就没了（玩家反馈）。
+ * 这里 fire-and-forget，不挡卸载。
+ */
+onBeforeUnmount(() => {
+  if (阶段.value === '战斗' && !战斗结束.value) void 写战斗状态(战斗.value, 持久化附加());
+});
+
 onMounted(async () => {
   // 刷新恢复（Review Focus 2）
   const 恢复 = await 读战斗状态();
   if (恢复) {
     // 幂等：同名状态"后覆盖先"，重复结算不会叠加
-    战斗.value = 开战常驻结算(恢复);
+    战斗.value = 开战常驻结算(恢复.状态);
+    // **意图模式与日志一起恢复**：以前只恢复状态 ——
+    // 于是"选了掷骰却还在调 AI"（模式被重置成默认 ai）、"切页签回来日志没了"（日志没存）。
+    本战意图模式.value = 恢复.意图模式;
+    日志.value = [...恢复.日志, `已从持久化恢复战斗（意图模式：${恢复.意图模式 === '随机' ? '掷骰' : 'AI'}）`];
     阶段.value = '战斗';
-    日志.value.push('已从持久化恢复战斗');
   }
 });
 
@@ -356,7 +368,7 @@ async function 落定开战(单位列表: 战斗单位[], 开场模式: string) 
     常驻步骤,
   );
   战斗.value = 战斗0;
-  await 写战斗状态(战斗0);
+  await 写战斗状态(战斗0, 持久化附加());
   日志.value.push(`开战：${开场模式}，共 ${单位列表.length} 个单位（意图模式：${本战意图模式.value}）`);
   if (常驻步骤.length) 日志.value.push('常驻效果：', ...常驻步骤.map(x => x.内容));
   阶段.value = '战斗';
@@ -440,7 +452,7 @@ async function 开始回合() {
       日志.value.push(`回合开始失败：${e?.message ?? e}`);
     }
     // 收尾 已经把持久化清掉了，别再把战斗状态写回去
-    if (!已收尾) await 写战斗状态(战斗.value);
+    if (!已收尾) await 写战斗状态(战斗.value, 持久化附加());
   } catch (e: any) {
     日志.value.push(`保存战斗状态失败：${e?.message ?? e}`);
   } finally {
@@ -653,7 +665,7 @@ async function 推进轮次(
         战场视图.value?.清空填写();
         // 暂停时也持久化一次：不然刷新页面会从回合开始态恢复，刚结算的半轮凭空消失
         try {
-          await 写战斗状态(战斗.value);
+          await 写战斗状态(战斗.value, 持久化附加());
         } catch {
           // 持久化失败不挡流程（下回合开始时还会再写）
         }
@@ -692,7 +704,7 @@ async function 推进轮次(
   // 判定在 engine/turn.判定战局（纯函数、有单测）—— 别在 view 里手搓胜负条件。
   if (await 检查结局()) return { 本轮已结算: true, 进下一回合: false };
 
-  await 写战斗状态(战斗.value);
+  await 写战斗状态(战斗.value, 持久化附加());
   return { 本轮已结算: true, 进下一回合: true };
 }
 

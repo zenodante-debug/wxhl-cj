@@ -16,6 +16,7 @@ import { 解析伤害骰 } from './engine/damage';
 import { 移动距离计算 } from './engine/distance';
 import { 重算全部实体 } from './engine/derived';
 import { 读设置 } from './settingsStore';
+import { 构建战斗状态快照, 恢复战斗状态, type 战斗快照, type 意图模式 } from './engine/persist';
 
 /** 数值兜底：只接受有限数（合法的 0 与负数照收），其余（undefined/NaN/字符串）退回兜底值。 */
 function 读数值(o: any, k: string, 兜底: number): number {
@@ -819,38 +820,24 @@ export async function 写收尾楼层(步骤: 结算步骤[], 状态: 战斗状�
   await createChatMessages([{ role: 'assistant', message: 正文 }]);
 }
 
-/** 战斗状态 → 可 JSON 序列化的纯对象（词条 Set → 数组） */
-function 战斗状态转纯对象(状态: 战斗状态): any {
-  return {
-    ...状态,
-    单位: Object.fromEntries(
-      Object.entries(状态.单位).map(([k, u]) => [k, { ...u, 词条: [...(u.词条 ?? [])] }]),
-    ),
-  };
-}
-
-/** 纯对象 → 战斗状态（词条数组 → Set） */
-function 纯对象转战斗状态(obj: any): 战斗状态 {
-  return {
-    ...obj,
-    单位: Object.fromEntries(
-      Object.entries(obj.单位 || {}).map(([k, u]: [string, any]) => [k, { ...u, 词条: new Set(u.词条 || []) }]),
-    ),
-  };
-}
-
-/** 读战斗状态（脚本变量）。没有则返回 null。 */
-export async function 读战斗状态(): Promise<战斗状态 | null> {
+/**
+ * 读战斗快照（脚本变量）。没有则返回 null。
+ * 快照除了战斗状态，还带**意图模式与战斗日志** —— 切页签/重开面板恢复后仍是当初的模式、日志还在
+ * （玩家反馈：切到设置再切回来日志就没了；选了掷骰却还在调 AI）。
+ */
+export async function 读战斗状态(): Promise<战斗快照 | null> {
   const v = getVariables({ type: 'script', script_id: getScriptId() }) as any;
-  if (!v?.战斗 || !v.战斗.进行中) return null;
-  return 纯对象转战斗状态(v.战斗);
+  return 恢复战斗状态(v?.战斗);
 }
 
-/** 写战斗状态（脚本变量）。null = 清除。 */
-export async function 写战斗状态(状态: 战斗状态 | null): Promise<void> {
+/** 写战斗快照（脚本变量）。null = 清除。 */
+export async function 写战斗状态(
+  状态: 战斗状态 | null,
+  额外: { 意图模式?: 意图模式; 日志?: string[] } = {},
+): Promise<void> {
   const scriptId = getScriptId();
   const v = getVariables({ type: 'script', script_id: scriptId }) as any;
-  const 新变量 = { ...v, 战斗: 状态 ? 战斗状态转纯对象(状态) : undefined };
+  const 新变量 = { ...v, 战斗: 状态 ? 构建战斗状态快照(状态, 额外) : undefined };
   if (!状态) delete 新变量.战斗;
   replaceVariables(新变量, { type: 'script', script_id: scriptId });
 }

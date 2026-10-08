@@ -28,6 +28,21 @@ export const 已知触发点: 触发点[] = [
   '转阶段', // BOSS 阶段血条：越过 70/40/20 或被打到 0
 ];
 
+/** 引擎认识的七个规则系效果（`规则系判定` 动作的效果名白名单） */
+export const 已知规则系效果: string[] = ['穿透', '必中', '必暴', '即死', '无敌', '锁血', '无视'];
+
+/**
+ * 一个动作**结构完好**吗。
+ * 目前只管一种：`规则系判定` 的 `效果` 必须是认识的七个之一 ——
+ * 没有效果名 / 瞎编的效果会被防火墙当成 `undefined` 判定，日志里刷一屏
+ * `规则系「undefined」：判定 … → 未通过`（玩家实测：完全看不懂）。
+ */
+export function 动作结构完好(动作: any): boolean {
+  if (!动作 || typeof 动作 !== 'object') return false;
+  if (动作.类 === '规则系判定') return 已知规则系效果.includes(动作.效果);
+  return true;
+}
+
 /**
  * 一条规则**结构完好**吗 —— 三条都要满足：
  * - `触发` 是引擎认识的触发点（不认识的写了也不会被执行 → 当没有）
@@ -41,17 +56,48 @@ export function 规则结构完好(规则: any): boolean {
   if (!已知触发点.includes(规则.触发)) return false;
   const 动作 = 规则.动作;
   if (!Array.isArray(动作) || 动作.length === 0) return false;
-  return 动作.every((a: any) => !!a && typeof a === 'object');
+  return 动作.some(动作结构完好); // 至少得留下一个能执行的动作
 }
 
-/** 归一化一组规则：留下结构完好的，并报出丢了几条（供翻译校验与日志用） */
-export function 归一化规则(原始: any): { 规则: 规则[]; 丢弃: number } {
-  if (!Array.isArray(原始)) return { 规则: [], 丢弃: 0 };
+/**
+ * **净化数值修正**：只留有限的量（NaN / Infinity 会顺着 终伤倍率/减伤/护盾 传染到 HP，
+ * 而 `NaN <= 0` 恒为 false —— 单位就永远打不死，玩家实测「赖着不死」就是这么来的）。
+ * 返回净化后的表与被丢弃的条目说明（供日志）。
+ */
+export function 净化数值修正(原始: Record<string, number> | undefined): {
+  数值: Record<string, number>;
+  丢弃: string[];
+} {
+  const 数值: Record<string, number> = {};
+  const 丢弃: string[] = [];
+  for (const [名, 量] of Object.entries(原始 ?? {})) {
+    if (Number.isFinite(量)) 数值[名] = 量;
+    else 丢弃.push(`${名}=${量}`);
+  }
+  return { 数值, 丢弃 };
+}
+
+/**
+ * 归一化一组规则：留下结构完好的（顺带**修剪掉坏动作**），并报出丢了几条/几个动作。
+ * 返回 规则 / 丢弃（整条丢掉）/ 丢弃动作（条留下但其中某个动作被剪掉）。
+ */
+export function 归一化规则(原始: any): { 规则: 规则[]; 丢弃: number; 丢弃动作: number } {
+  if (!Array.isArray(原始)) return { 规则: [], 丢弃: 0, 丢弃动作: 0 };
   const 规则: 规则[] = [];
   let 丢弃 = 0;
+  let 丢弃动作 = 0;
   for (const r of 原始) {
-    if (规则结构完好(r)) 规则.push(r as 规则);
-    else 丢弃++;
+    if (!规则结构完好(r)) {
+      丢弃++;
+      continue;
+    }
+    const 留下的 = (r.动作 as any[]).filter(动作结构完好);
+    丢弃动作 += r.动作.length - 留下的.length;
+    if (!留下的.length) {
+      丢弃++; // 动作被剪光了 = 这条规则没有意义
+      continue;
+    }
+    规则.push({ ...(r as 规则), 动作: 留下的 });
   }
-  return { 规则, 丢弃 };
+  return { 规则, 丢弃, 丢弃动作 };
 }

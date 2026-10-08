@@ -43,14 +43,16 @@ describe('规则结构判定（engine/ruleShape）', () => {
     const { 规则, 丢弃 } = 归一化规则([合法规则, {} as any, null as any, { 触发: '常驻', 动作: [] } as any]);
 
     expect(规则).toHaveLength(1);
-    expect(规则[0]).toBe(合法规则);
+    // 那三条没有触发动不了的都算整条丢弃（动作全空/没触发点）
+    expect(规则[0]).toEqual(合法规则); // 归一化会顺带剪动作，所以是**副本**（值相等即可）
     expect(丢弃).toBe(3);
   });
 
   it('不是数组 / 空 → 空结果、丢弃 0（合法的"没有效果"）', () => {
-    expect(归一化规则(undefined)).toEqual({ 规则: [], 丢弃: 0 });
-    expect(归一化规则([])).toEqual({ 规则: [], 丢弃: 0 });
-    expect(归一化规则('常驻' as any)).toEqual({ 规则: [], 丢弃: 0 });
+    // 归一化还会顺带剪掉坏动作，所以返回里多一个 丢弃动作 计数
+    for (const 输入 of [undefined, [], '常驻']) {
+      expect(归一化规则(输入 as any)).toEqual({ 规则: [], 丢弃: 0, 丢弃动作: 0 });
+    }
   });
 });
 
