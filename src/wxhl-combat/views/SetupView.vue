@@ -6,20 +6,23 @@
     </div>
 
     <template v-else>
-      <div class="row header">
-        <span>参战</span><span>名称</span><span>类型</span><span>阶位</span><span>HP</span><span>阵营</span>
-      </div>
-      <div v-for="u in 名单" :key="u.id" class="row">
-        <input type="checkbox" v-model="选中[u.id]" />
-        <span>{{ u.名称 }}</span>
-        <span class="dim">{{ u.类型 }}</span>
-        <span class="dim">{{ u.阶位 }}</span>
-        <span class="dim">{{ u.HP_当前 }}/{{ u.HP_最大 }}</span>
-        <select v-model="阵营[u.id]" :disabled="!选中[u.id]">
-          <option value="我方">我方</option>
-          <option value="敌方">敌方</option>
-          <option value="待定">不参战</option>
-        </select>
+      <!-- 参战名单：一排石质铭牌，名字用衬线大字（决斗场点将台） -->
+      <div class="setup-roster">
+        <div class="roster-head">
+          <span>参战</span><span>名称</span><span>类型</span><span>阶位</span><span>HP</span><span>阵营</span>
+        </div>
+        <div v-for="u in 名单" :key="u.id" class="plate-row" :class="{ off: !选中[u.id] }">
+          <input type="checkbox" v-model="选中[u.id]" />
+          <span class="plate-name">{{ u.名称 }}</span>
+          <span class="dim">{{ u.类型 }}</span>
+          <span class="dim">{{ u.阶位 }}</span>
+          <span class="dim mono">{{ u.HP_当前 }}/{{ u.HP_最大 }}</span>
+          <select v-model="阵营[u.id]" :disabled="!选中[u.id]">
+            <option value="我方">我方</option>
+            <option value="敌方">敌方</option>
+            <option value="待定">不参战</option>
+          </select>
+        </div>
       </div>
 
       <div class="distance-row">
@@ -98,32 +101,97 @@ function 开战() {
 </script>
 
 <style scoped lang="scss">
-.setup-view { color: #ddd; }
-.hint { color: #888; padding: 24px; text-align: center; }
-.row {
+@use '../theme.scss' as t;
+
+.setup-view {
+  color: var(--cb-chalk-dim);
+  font-family: var(--cb-font-body);
+}
+
+.hint {
+  color: var(--cb-dim);
+  padding: 24px;
+  text-align: center;
+  font-family: var(--cb-font-display);
+  letter-spacing: 2px;
+}
+
+/* ---------- 点将台：一排石质铭牌 ---------- */
+.setup-roster {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.roster-head {
+  display: grid;
+  grid-template-columns: 40px 1.5fr 1fr 0.8fr 0.8fr 0.9fr;
+  gap: 8px;
+  padding: 4px 12px;
+  color: var(--cb-dim);
+  font-size: 12px;
+  letter-spacing: 2px;
+  border-bottom: 1px solid var(--cb-border-soft);
+}
+
+.plate-row {
+  @include t.cb-stone(8px 12px);
   display: grid;
   grid-template-columns: 40px 1.5fr 1fr 0.8fr 0.8fr 0.9fr;
   gap: 8px;
   align-items: center;
-  padding: 6px 8px;
-  border-bottom: 1px solid #222;
-}
-.row.header { color: #888; font-size: 12px; border-bottom-color: #333; }
-.dim { color: #999; font-size: 13px; }
-.distance-row { margin: 16px 0; display: flex; align-items: center; gap: 12px; }
-.start-btn {
-  padding: 10px 20px;
-  background: #2a4a2a;
-  border: 1px solid #3a6a3a;
-  border-radius: 8px;
-  color: #dfd;
-  cursor: pointer;
-  font-size: 15px;
+  transition: opacity 0.15s;
 
-  &:disabled { opacity: 0.4; cursor: not-allowed; }
+  &.off {
+    opacity: 0.45;
+  }
 }
-.no-enemy-hint { margin-top: 8px; font-size: 12px; color: #e0a0a0; }
-select, input[type='checkbox'] { accent-color: #4a7; }
+
+.plate-name {
+  color: var(--cb-chalk);
+  font-family: var(--cb-font-display);
+  font-size: 15px;
+  font-weight: 700;
+  letter-spacing: 1px;
+}
+
+.mono {
+  font-family: var(--cb-font-mono);
+  font-size: 12px;
+}
+
+.dim {
+  color: var(--cb-dim);
+  font-size: 13px;
+}
+
+.distance-row {
+  @include t.cb-stone(10px 14px);
+  margin: 14px 0;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+}
+
+/* 决斗场闸门（开战） */
+.start-btn {
+  @include t.cb-gate;
+}
+
+.no-enemy-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: var(--cb-blood-wet);
+}
+
+select {
+  @include t.cb-plaque;
+  padding: 3px 8px;
+}
+
+input[type='checkbox'] {
+  accent-color: var(--cb-amber);
+}
 
 .progress {
   display: flex;
@@ -131,23 +199,27 @@ select, input[type='checkbox'] { accent-color: #4a7; }
   gap: 8px;
   margin-top: 12px;
   font-size: 13px;
-  color: #9cc;
+  color: var(--cb-amber-dim);
   line-height: 1.5;
 
-  &.done { color: #7bc47f; }
+  &.done {
+    color: var(--cb-copper);
+  }
 }
 
 .spinner {
   flex-shrink: 0;
   width: 12px;
   height: 12px;
-  border: 2px solid #3a5a5a;
-  border-top-color: #9cc;
+  border: 2px solid var(--cb-border);
+  border-top-color: var(--cb-amber);
   border-radius: 50%;
   animation: progress-spin 0.8s linear infinite;
 }
 
 @keyframes progress-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 </style>

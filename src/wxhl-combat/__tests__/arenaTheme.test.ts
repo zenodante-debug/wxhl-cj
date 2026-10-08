@@ -72,3 +72,24 @@ describe('外壳换皮（App.vue）', () => {
     expect(外壳()).toContain('setProperty');
   });
 });
+
+describe('Task 2 · 准备页（SetupView）换皮', () => {
+  const 页 = () => 读('views/SetupView.vue');
+
+  it('名单是铭牌列表（setup-roster + plate-row），不是灰色表格', () => {
+    expect(页()).toContain('setup-roster');
+    expect(页()).toContain('plate-row');
+    expect(页()).toContain('plate-name'); // 名字用衬线大字
+  });
+
+  it('开战按钮是决斗场闸门（cb-gate），文案不动', () => {
+    expect(页()).toContain('start-btn');
+    expect(页()).toMatch(/cb-gate/);
+  });
+
+  it('皮肤用 token（var(--cb-*)），不是灰工程色', () => {
+    expect(页()).toContain('var(--cb-');
+    expect(页()).not.toContain('#ddd');
+    expect(页()).not.toContain('#2a4a2a'); // 旧的绿按钮
+  });
+});
