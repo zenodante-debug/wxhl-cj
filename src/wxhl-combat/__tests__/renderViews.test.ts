@@ -173,6 +173,30 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
     expect(源码).toContain('d.预览.行'); // 渲染的是预览的人话行
   });
 
+  it('决斗场皮肤：横幅是先攻火把链，地面是地砖轴，军牌是铭牌', async () => {
+    const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [] });
+
+    expect(html).toContain('initiative-chain'); // 先攻火把链（当前行动者点亮）
+    expect(html).toContain('torch');
+    expect(html).toContain('arena-floor'); // 决斗场地面（地砖延伸线）
+    expect(html).toContain('war-plate'); // 军牌 = 石质铭牌
+    expect(html).toContain('gauge'); // HP/MP/耐力 液面条
+  });
+
+  it('军牌的 HP 是血色液面（gauge-hp + fill），不是一行灰字', async () => {
+    const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [] });
+
+    expect(html).toMatch(/gauge-hp[^>]*>\s*<div class="fill"/);
+    expect(html).toContain('gauge-mp');
+  });
+
+  it('战斗页样式走决斗场 token（var(--cb-*)），不是灰工程色', () => {
+    const 源码 = fs.readFileSync(path.join(视图目录, 'BattleView.vue'), 'utf8');
+
+    expect(源码).toContain('var(--cb-');
+    expect(源码).not.toContain('color: #ddd');
+  });
+
   it('BattleView：追加行动回合模式 → 按钮变成「提交追加行动」并说明这是额外一轮', async () => {
     const html = await 渲染('BattleView.vue', {
       状态: 造战斗状态(),

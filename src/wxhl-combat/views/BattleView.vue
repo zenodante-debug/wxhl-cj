@@ -1,40 +1,52 @@
 <template>
   <div class="battle-view">
+    <!-- 决斗场石檐横幅：回合数（衬线大字）+ 先攻火把链（站着的点亮、倒下的熄灭） -->
     <div class="battle-header">
-      <h3>第 {{ 状态.回合 }} 回合</h3>
-      <div class="order">先攻：{{ 状态.先攻.join(' → ') }}</div>
+      <h3 class="round-title">第 {{ 状态.回合 }} 回合</h3>
+      <div class="initiative-chain">
+        <span
+          v-for="id in 状态.先攻"
+          :key="id"
+          class="torch"
+          :class="{ on: 火把亮(id), enemy: 火把阵营(id) === '敌方' }"
+        >
+          <span class="flame"></span>{{ 先攻名(id) }}
+        </span>
+      </div>
       <!-- 逃离：界面逃生口（卡在战斗里时的出路）。要再点一次确认，防误触 -->
       <button class="flee-btn" :disabled="禁用" @click="逃离点击">
         {{ 逃离确认 ? '再点一次确认逃离' : '逃离战斗' }}
       </button>
     </div>
 
-    <!-- 一维距离条：**以玩家为原点**，向左（身后/负）向右（身前/正）双向延伸。
+    <!-- 决斗场地面：一维距离轴画成**地砖透视延伸线**，以玩家为原点双向延伸。
          同一距离上的多人不再互相遮挡，而是**上下堆叠**（实战反馈）。 -->
-    <div class="distance-bar" :style="{ height: 距离条高度 + 'px' }">
-      <div class="axis-hint left">◀ 身后（负）</div>
-      <div class="axis-hint center" :style="{ left: 原点百分比 + '%' }">玩家原点</div>
-      <div class="axis-hint right">身前（正）▶</div>
+    <div class="arena-floor">
+      <div class="distance-bar" :style="{ height: 距离条高度 + 'px' }">
+        <div class="axis-hint left">◀ 身后（负）</div>
+        <div class="axis-hint center" :style="{ left: 原点百分比 + '%' }">玩家原点</div>
+        <div class="axis-hint right">身前（正）▶</div>
 
-      <div
-        v-for="g in 分组标记"
-        :key="g.距离"
-        class="marker-group"
-        :style="{ left: g.左 + '%' }"
-      >
         <div
-          v-for="(u, i) in g.单位们"
-          :key="u.id"
-          class="distance-marker"
-          :class="{ ally: u.阵营 === '我方', enemy: u.阵营 === '敌方', self: u.类型 === '玩家' }"
-          :style="{ bottom: i * 20 + 'px' }"
-          :title="`${u.id} · ${u.距离}米（${距离带(u.距离)}）`"
+          v-for="g in 分组标记"
+          :key="g.距离"
+          class="marker-group"
+          :style="{ left: g.左 + '%' }"
         >
-          {{ u.名称 }} {{ u.距离 }}m
+          <div
+            v-for="(u, i) in g.单位们"
+            :key="u.id"
+            class="distance-marker"
+            :class="{ ally: u.阵营 === '我方', enemy: u.阵营 === '敌方', self: u.类型 === '玩家', down: u.HP_当前 <= 0 }"
+            :style="{ bottom: i * 20 + 'px' }"
+            :title="`${u.id} · ${u.距离}米（${距离带(u.距离)}）`"
+          >
+            {{ u.名称 }} {{ u.距离 }}m
+          </div>
         </div>
-      </div>
 
-      <div v-if="!分组标记.length" class="axis-empty">（战场上没有单位）</div>
+        <div v-if="!分组标记.length" class="axis-empty">（战场上没有单位）</div>
+      </div>
     </div>
 
     <!-- 单位卡：每个角色都能展开看全套（状态/buff/装备/技能）—— 实战反馈：战斗界面看不到状态 -->
@@ -42,7 +54,7 @@
       <div
         v-for="u in 排序单位"
         :key="u.id"
-        class="unit-card"
+        class="unit-card war-plate"
         :class="{ enemy: u.阵营 === '敌方', ally: u.阵营 === '我方', down: u.HP_当前 <= 0 }"
       >
         <div class="unit-name">
@@ -52,7 +64,19 @@
             {{ 展开角色.includes(u.id) ? '收起 ▴' : '详情 ▾' }}
           </button>
         </div>
-        <div class="unit-hp">HP {{ u.HP_当前 }}/{{ u.HP_最大 }} · MP {{ u.MP_当前 }}/{{ u.MP_最大 }} · 耐力 {{ u.耐力_当前 }}/{{ u.耐力_最大 }}</div>
+        <!-- 血/蓝/铜三条液面：血条是**血色液面**（决斗场军牌），不是一行灰字 -->
+        <div class="gauges">
+          <div class="gauge gauge-hp" :title="`HP ${u.HP_当前}/${u.HP_最大}`">
+            <div class="fill" :style="{ width: 条宽(u.HP_当前, u.HP_最大) }"></div>
+          </div>
+          <div class="gauge gauge-mp" :title="`MP ${u.MP_当前}/${u.MP_最大}`">
+            <div class="fill" :style="{ width: 条宽(u.MP_当前, u.MP_最大) }"></div>
+          </div>
+          <div class="gauge gauge-sp" :title="`耐力 ${u.耐力_当前}/${u.耐力_最大}`">
+            <div class="fill" :style="{ width: 条宽(u.耐力_当前, u.耐力_最大) }"></div>
+          </div>
+        </div>
+        <div class="unit-hp mono">HP {{ u.HP_当前 }}/{{ u.HP_最大 }} · MP {{ u.MP_当前 }}/{{ u.MP_最大 }} · 耐力 {{ u.耐力_当前 }}/{{ u.耐力_最大 }}</div>
         <!-- 防御/闪避/属性 都要展示出来 —— 玩家要看得见面板才打得出决策（实战反馈：这些根本没显示） -->
         <div class="unit-stats">防御 {{ u.防御 }} · 闪避 {{ u.闪避值 }} · {{ u.阶位 }}</div>
         <div class="unit-attrs">STR {{ u.属性.实际.STR }} · AGI {{ u.属性.实际.AGI }} · CON {{ u.属性.实际.CON }} · PER {{ u.属性.实际.PER }}</div>
@@ -441,6 +465,28 @@ function 数值修正文案(st: { 数值修正?: Record<string, number> }): stri
   return 条.map(([k, v]) => `${k}${v >= 0 ? '+' : ''}${v}`).join('、');
 }
 
+/** 液面条宽度（0~100%，上限/当前都是脏数据时给 0） */
+function 条宽(当前: number, 上限: number): string {
+  if (!Number.isFinite(当前) || !Number.isFinite(上限) || 上限 <= 0) return '0%';
+  return `${Math.max(0, Math.min(100, Math.round((当前 / 上限) * 100)))}%`;
+}
+
+/** 先攻火把链：id → 显示名（先攻里是单位 id，单位表的键是短名，按 id 找） */
+function 先攻单位(id: string) {
+  return Object.values(props.状态.单位).find(u => u.id === id);
+}
+function 先攻名(id: string): string {
+  const u = 先攻单位(id);
+  return u ? 显示名(u) : id;
+}
+/** 火把亮 = 还站着（HP > 0）；倒下（濒死/倒地）熄灭 */
+function 火把亮(id: string): boolean {
+  return (先攻单位(id)?.HP_当前 ?? 0) > 0;
+}
+function 火把阵营(id: string): string {
+  return 先攻单位(id)?.阵营 ?? '';
+}
+
 /** 还在冷却里的技能（空串 = 没有，模板里 v-if 直接可用） */
 function 冷却中(u: 战斗单位): string {
   return Object.entries(u.冷却 ?? {})
@@ -531,44 +577,143 @@ defineExpose({ 清空填写 });
 </script>
 
 <style scoped lang="scss">
-.battle-view { color: #ddd; }
-.battle-header { margin-bottom: 12px; position: relative; }
-.battle-header h3 { margin: 0 0 4px; }
-.order { color: #999; font-size: 13px; padding-right: 96px; }
+@use '../theme.scss' as t;
+
+.battle-view {
+  color: var(--cb-chalk-dim);
+  font-family: var(--cb-font-body);
+}
+
+/* ============ 决斗场石檐横幅：回合数 + 先攻火把链 ============ */
+.battle-header {
+  position: relative;
+  margin-bottom: 12px;
+  padding: 10px 14px 8px;
+  background: linear-gradient(180deg, #050302 0%, #0a0705 60%, #120c08 100%);
+  border: 1px solid var(--cb-border-soft);
+  border-radius: 6px;
+  box-shadow: 0 1px 0 rgba(100, 60, 30, 0.25);
+}
+
+.round-title {
+  margin: 0 0 6px;
+  color: var(--cb-amber);
+  font-family: var(--cb-font-display);
+  font-size: 20px;
+  font-weight: 900;
+  letter-spacing: 4px;
+  text-shadow: 0 0 10px rgba(232, 192, 120, 0.3);
+}
+
+/* 先攻火把链：站着的点亮（火焰摇曳），倒下的熄灭 */
+.initiative-chain {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  padding-right: 96px;
+}
+
+.torch {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 12px;
+  color: var(--cb-dim);
+
+  .flame {
+    width: 8px;
+    height: 8px;
+    border-radius: 50% 50% 50% 0;
+    transform: rotate(-45deg);
+    background: radial-gradient(circle at 60% 40%, var(--cb-ember), rgba(138, 32, 32, 0.8));
+    box-shadow: 0 0 8px rgba(216, 145, 74, 0.7);
+    animation: cbTorchFlick 5s ease-in-out infinite;
+  }
+
+  &.on {
+    color: var(--cb-chalk);
+  }
+
+  &.on.enemy .flame {
+    background: radial-gradient(circle at 60% 40%, var(--cb-blood-wet), rgba(74, 16, 16, 0.9));
+    box-shadow: 0 0 8px rgba(208, 80, 64, 0.7);
+  }
+
+  &:not(.on) .flame {
+    background: var(--cb-border);
+    box-shadow: none;
+    animation: none;
+  }
+}
 
 .flee-btn {
   position: absolute;
-  top: 0;
-  right: 0;
+  top: 8px;
+  right: 10px;
   padding: 5px 12px;
-  background: #2a1d1d;
-  border: 1px solid #6a3a3a;
+  background: rgba(74, 16, 16, 0.35);
+  border: 1px solid var(--cb-blood-wet);
   border-radius: 6px;
-  color: #d99;
+  color: var(--cb-blood-wet);
   font-size: 12px;
   cursor: pointer;
 
-  &:hover { background: #3a2424; }
-  &:disabled { opacity: 0.4; cursor: not-allowed; }
+  &:hover {
+    background: rgba(74, 16, 16, 0.6);
+  }
+  &:disabled {
+    opacity: 0.4;
+    cursor: not-allowed;
+  }
+}
+
+/* ============ 决斗场地面：地砖透视延伸线 ============ */
+.arena-floor {
+  position: relative;
+  margin: 14px 0 20px;
+  padding: 4px 0 0;
+  /* 地砖：双向渐变的格线（以玩家原点为中心向两侧透视延伸的错觉） */
+  background:
+    repeating-linear-gradient(90deg, transparent 0 46px, rgba(74, 50, 38, 0.35) 46px 47px),
+    linear-gradient(180deg, rgba(36, 24, 18, 0.6), rgba(18, 11, 7, 0.9));
+  border: 1px solid var(--cb-border-soft);
+  border-radius: 6px;
+  overflow: hidden;
+
+  &::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: radial-gradient(ellipse at 50% 120%, rgba(74, 16, 16, 0.25) 0%, transparent 60%);
+    animation: cbBloodBreathe 6s ease-in-out infinite;
+    pointer-events: none;
+  }
 }
 
 .distance-bar {
   position: relative;
   height: 46px; /* 由 距离条高度 动态覆盖（同一距离人多时变高） */
-  margin: 16px 0 22px;
-  border-bottom: 2px solid #444;
+  margin: 8px 10px 14px;
+  border-bottom: 2px solid var(--cb-border);
 }
 
 .axis-hint {
   position: absolute;
   bottom: 2px;
   font-size: 10px;
-  color: #666;
+  color: var(--cb-dim);
   pointer-events: none;
 
-  &.left { left: 0; }
-  &.center { transform: translateX(-50%); color: #6a8a6a; }
-  &.right { right: 0; }
+  &.left {
+    left: 0;
+  }
+  &.center {
+    transform: translateX(-50%);
+    color: var(--cb-copper);
+  }
+  &.right {
+    right: 0;
+  }
 }
 
 .axis-empty {
@@ -577,7 +722,7 @@ defineExpose({ 清空填写 });
   left: 50%;
   transform: translateX(-50%);
   font-size: 12px;
-  color: #666;
+  color: var(--cb-dim);
 }
 
 /* 同一距离的一组：整个组在横向定位，组内上下堆叠 */
@@ -590,43 +735,124 @@ defineExpose({ 清空填写 });
   align-items: center;
 }
 
+/* 棋子铭牌（决斗场上的角色标记） */
 .distance-marker {
   position: relative;
   padding: 2px 8px;
   margin-top: 2px;
   border-radius: 10px;
   font-size: 12px;
+  font-family: var(--cb-font-mono);
   white-space: nowrap;
 
-  &.ally { background: #1d3a1d; border: 1px solid #3a6a3a; color: #9d9; }
-  &.enemy { background: #3a1d1d; border: 1px solid #6a3a3a; color: #d99; }
-  &.self { border-color: #8ab; color: #cef; }
+  &.ally {
+    background: rgba(106, 144, 112, 0.18);
+    border: 1px solid var(--cb-copper);
+    color: #b8d8c0;
+  }
+  &.enemy {
+    background: rgba(74, 16, 16, 0.4);
+    border: 1px solid var(--cb-blood-wet);
+    color: #e0a090;
+  }
+  &.self {
+    border-color: var(--cb-amber-dim);
+    color: var(--cb-amber);
+  }
+  &.down {
+    opacity: 0.45;
+    transform: rotate(-8deg);
+  }
 }
 
-.unit-cards { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 14px; }
-.unit-card {
-  padding: 10px 12px;
-  border: 1px solid #333;
-  border-radius: 8px;
-  min-width: 150px;
-  &.enemy { border-color: #6a3a3a; }
-  &.ally { border-color: #3a6a3a; }
-  &.dead { opacity: 0.5; }
-  .unit-name { font-weight: 700; }
-  .unit-hp { color: #f88; font-size: 13px; }
-  .unit-stats { color: #9db2d0; font-size: 12px; }
-  .unit-attrs { color: #8a8a8a; font-size: 11px; }
-  .unit-dist, .unit-slots { color: #999; font-size: 12px; }
-  .unit-status { color: #fa0; font-size: 12px; }
-  .unit-shield { color: #8af; font-size: 12px; }
-}
-
-.action-zone {
+/* ============ 军牌铭牌 ============ */
+.unit-cards {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
   margin-bottom: 14px;
-  padding: 10px 12px;
-  border: 1px solid #333;
-  border-radius: 8px;
-  background: #1a1a1a;
+}
+
+.war-plate {
+  @include t.cb-stone(10px 12px);
+  @include t.cb-rivets(6px, rgba(200, 160, 110, 0.4));
+  min-width: 170px;
+  flex: 1 1 170px;
+
+  &.enemy {
+    border-color: #6a3a30;
+  }
+  &.ally {
+    border-color: #3a5a44;
+  }
+  &.down {
+    opacity: 0.55;
+    filter: saturate(0.4);
+  }
+
+  .unit-name {
+    color: var(--cb-chalk);
+    font-family: var(--cb-font-display);
+    font-size: 15px;
+    font-weight: 700;
+    letter-spacing: 1px;
+  }
+  .mono {
+    color: var(--cb-blood-wet);
+    font-family: var(--cb-font-mono);
+    font-size: 11px;
+  }
+  .unit-stats {
+    color: var(--cb-mana);
+    font-size: 12px;
+  }
+  .unit-attrs {
+    color: var(--cb-dim);
+    font-size: 11px;
+  }
+  .unit-dist,
+  .unit-slots {
+    color: var(--cb-chalk-dim);
+    font-size: 12px;
+  }
+  .unit-status {
+    color: var(--cb-gold);
+    font-size: 12px;
+  }
+  .unit-shield {
+    color: var(--cb-shield);
+    font-size: 12px;
+  }
+  .unit-cd {
+    color: var(--cb-dim);
+    font-size: 12px;
+  }
+}
+
+/* 血/蓝/铜 三条液面 */
+.gauges {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  margin: 6px 0 4px;
+}
+
+.gauge {
+  @include t.cb-blood-gauge(t.$cb-blood-wet, t.$cb-blood);
+  height: 8px;
+
+  &.gauge-mp {
+    @include t.cb-blood-gauge(t.$cb-mana, #1c2836);
+  }
+  &.gauge-sp {
+    @include t.cb-blood-gauge(t.$cb-ember, #2e2014);
+  }
+}
+
+/* ============ 行动石碑 ============ */
+.action-zone {
+  @include t.cb-stone(12px 14px);
+  margin-bottom: 14px;
 }
 
 .progress {
@@ -635,9 +861,9 @@ defineExpose({ 清空填写 });
   gap: 8px;
   margin-bottom: 10px;
   padding-bottom: 8px;
-  border-bottom: 1px dashed #333;
+  border-bottom: 1px dashed var(--cb-border-soft);
   font-size: 13px;
-  color: #9cc;
+  color: var(--cb-amber-dim);
   line-height: 1.5;
 }
 
@@ -645,28 +871,49 @@ defineExpose({ 清空填写 });
   flex-shrink: 0;
   width: 12px;
   height: 12px;
-  border: 2px solid #3a5a5a;
-  border-top-color: #9cc;
+  border: 2px solid var(--cb-border);
+  border-top-color: var(--cb-amber);
   border-radius: 50%;
   animation: progress-spin 0.8s linear infinite;
 }
 
 @keyframes progress-spin {
-  to { transform: rotate(360deg); }
+  to {
+    transform: rotate(360deg);
+  }
 }
 
-.intent-block { margin-bottom: 10px; padding-bottom: 8px; border-bottom: 1px dashed #333; }
-.intent-title { color: #d99; font-size: 13px; font-weight: 700; margin-bottom: 4px; }
-.intent-row { font-size: 12px; color: #bbb; }
-.intent-unit { color: #d99; margin-right: 8px; }
+/* 敌方意图（羊皮纸条） */
+.intent-block {
+  margin-bottom: 10px;
+  padding: 8px 10px;
+  padding-bottom: 8px;
+  border: 1px solid rgba(200, 160, 110, 0.25);
+  border-radius: 4px;
+  background: linear-gradient(180deg, rgba(46, 30, 20, 0.5), rgba(26, 16, 10, 0.7));
+}
+.intent-title {
+  color: var(--cb-blood-wet);
+  font-size: 13px;
+  font-weight: 700;
+  margin-bottom: 4px;
+}
+.intent-row {
+  font-size: 12px;
+  color: var(--cb-chalk-dim);
+}
+.intent-unit {
+  color: var(--cb-blood-wet);
+  margin-right: 8px;
+}
 
 /* 一个我方单位一块行动区 */
 .unit-action {
   margin-bottom: 10px;
   padding: 8px 10px;
-  border: 1px solid #2f3a2f;
-  border-radius: 8px;
-  background: #171c17;
+  border: 1px solid #3a5a44;
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(36, 26, 18, 0.6), rgba(26, 16, 10, 0.8));
 }
 
 .ua-head {
@@ -676,28 +923,30 @@ defineExpose({ 清空填写 });
   flex-wrap: wrap;
   margin-bottom: 8px;
 }
-.ua-name { color: #9d9; font-weight: 700; font-size: 13px; }
-.ua-meta { color: #8a9a8a; font-size: 12px; }
+.ua-name {
+  color: #b8d8c0;
+  font-family: var(--cb-font-display);
+  font-weight: 700;
+  font-size: 13px;
+}
+.ua-meta {
+  color: var(--cb-dim);
+  font-size: 12px;
+}
 .ua-detail-btn {
   margin-left: auto;
+  @include t.cb-plaque;
   padding: 3px 10px;
-  background: #22303c;
-  border: 1px solid #3a5a74;
-  border-radius: 6px;
-  color: #90c0e0;
   font-size: 12px;
-  cursor: pointer;
-
-  &:hover { background: #2b3d4c; }
 }
 
 /* 效果详情表 */
 .detail-table {
   margin: 0 0 10px;
-  border: 1px solid #2a2a2a;
+  border: 1px solid var(--cb-border-soft);
   border-radius: 6px;
   overflow-x: auto;
-  background: #131313;
+  background: rgba(18, 11, 7, 0.6);
 }
 .dt-row {
   display: grid;
@@ -705,27 +954,52 @@ defineExpose({ 清空填写 });
   gap: 6px;
   padding: 4px 8px;
   font-size: 12px;
-  color: #bbb;
-  border-top: 1px solid #232323;
+  color: var(--cb-chalk-dim);
+  border-top: 1px solid var(--cb-border-soft);
 
-  &.dt-head { color: #888; border-top: none; background: #191919; }
+  &.dt-head {
+    color: var(--cb-dim);
+    border-top: none;
+    background: rgba(36, 24, 18, 0.6);
+  }
 }
-.dt-name { color: #ddd; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.dt-empty { padding: 8px; font-size: 12px; color: #777; }
+.dt-name {
+  color: var(--cb-chalk);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.dt-empty {
+  padding: 8px;
+  font-size: 12px;
+  color: var(--cb-dim);
+}
 
-.slot-row { display: flex; gap: 10px; flex-wrap: wrap; }
-.slot { display: flex; flex-direction: column; gap: 3px; font-size: 12px; color: #999; }
-.slot-label { color: #999; }
-.slot select, .slot input {
-  background: #101010;
-  color: #ddd;
-  border: 1px solid #444;
-  border-radius: 4px;
+.slot-row {
+  display: flex;
+  gap: 10px;
+  flex-wrap: wrap;
+}
+.slot {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  font-size: 12px;
+  color: var(--cb-dim);
+}
+.slot-label {
+  color: var(--cb-dim);
+}
+.slot select,
+.slot input {
+  @include t.cb-plaque;
   padding: 4px 6px;
   font-size: 13px;
   max-width: 260px;
 }
-.slot input[type='number'] { width: 90px; }
+.slot input[type='number'] {
+  width: 90px;
+}
 
 .free-row {
   display: flex;
@@ -734,7 +1008,7 @@ defineExpose({ 清空填写 });
   flex-wrap: wrap;
   margin-top: 8px;
   padding-top: 8px;
-  border-top: 1px dashed #2a2a2a;
+  border-top: 1px dashed var(--cb-border-soft);
   font-size: 12px;
 }
 
@@ -742,10 +1016,12 @@ defineExpose({ 清空填写 });
   display: inline-flex;
   align-items: center;
   gap: 4px;
-  color: #bbb;
+  color: var(--cb-chalk-dim);
   cursor: pointer;
 
-  input { accent-color: #4a7; }
+  input {
+    accent-color: var(--cb-amber);
+  }
 }
 
 .action-submit {
@@ -754,39 +1030,53 @@ defineExpose({ 清空填写 });
   align-items: center;
   margin-top: 10px;
   padding-top: 10px;
-  border-top: 1px dashed #333;
+  border-top: 1px dashed var(--cb-border-soft);
 }
-.dim { color: #777; font-size: 12px; }
+.dim {
+  color: var(--cb-dim);
+  font-size: 12px;
+}
 
+/* 决斗场闸门（执行本轮 / 提交追加行动） */
 .execute-btn {
-  background: #1d3a1d;
-  color: #9d9;
-  border: 1px solid #3a6a3a;
-  border-radius: 6px;
-  padding: 6px 16px;
+  @include t.cb-gate;
+  padding: 8px 20px;
   font-size: 13px;
-  cursor: pointer;
-
-  &:disabled { opacity: 0.4; cursor: not-allowed; }
-  &:not(:disabled):hover { background: #254a25; }
+  letter-spacing: 2px;
 }
 
 .ghost-btn {
-  background: transparent;
-  color: #a99;
-  border: 1px solid #4a3a3a;
-  border-radius: 6px;
+  @include t.cb-plaque;
   padding: 6px 12px;
   font-size: 13px;
-  cursor: pointer;
   margin-left: 6px;
+  border-color: #5a3a34;
+  color: #c8a090;
 
-  &:disabled { opacity: 0.4; cursor: not-allowed; }
-  &:not(:disabled):hover { background: #2a2020; }
+  &:not(:disabled):hover {
+    background: rgba(74, 16, 16, 0.35);
+    border-color: var(--cb-blood-wet);
+  }
 }
 
-.battle-log { border-top: 1px solid #2a2a2a; padding-top: 10px; max-height: 30vh; overflow-y: auto; }
-.log-entry { padding: 3px 0; font-size: 13px; color: #bbb; }
+/* ============ 羊皮纸卷轴日志 ============ */
+.battle-log {
+  @include t.cb-stone(10px 12px);
+  max-height: 30vh;
+  overflow-y: auto;
+  background: linear-gradient(180deg, rgba(46, 30, 20, 0.45), rgba(26, 16, 10, 0.65));
+}
+.log-entry {
+  padding: 3px 0;
+  font-size: 13px;
+  color: var(--cb-chalk-dim);
+  font-family: var(--cb-font-mono);
+  border-bottom: 1px dotted rgba(74, 50, 38, 0.3);
+
+  &:last-child {
+    border-bottom: none;
+  }
+}
 
 /* 行动顺序（↑↓） */
 .order-row {
@@ -800,45 +1090,103 @@ defineExpose({ 清空填写 });
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  background: #1e1e24;
-  border: 1px solid #33334a;
+  background: linear-gradient(180deg, t.$cb-panel-2, t.$cb-sub);
+  border: 1px solid var(--cb-border);
   border-radius: 5px;
   padding: 1px 4px;
 }
-.ord-name { font-size: 12px; color: #cdd; }
+.ord-name {
+  font-size: 12px;
+  color: var(--cb-chalk-dim);
+}
 .ord-btn {
   background: transparent;
-  color: #99a;
+  color: var(--cb-dim);
   border: none;
   cursor: pointer;
   font-size: 12px;
   padding: 0 3px;
-  &:disabled { opacity: 0.25; cursor: default; }
-  &:not(:disabled):hover { color: #fff; }
+  &:disabled {
+    opacity: 0.25;
+    cursor: default;
+  }
+  &:not(:disabled):hover {
+    color: var(--cb-amber);
+  }
 }
 
 /* 选中项的效果预览 */
 .preview-block {
   margin: 6px 0 2px;
   padding: 6px 8px;
-  background: #17171c;
-  border: 1px solid #2c2c38;
+  background: rgba(18, 11, 7, 0.6);
+  border: 1px solid var(--cb-border-soft);
   border-radius: 6px;
 }
-.pv-item { margin-bottom: 4px; }
-.pv-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+.pv-item {
+  margin-bottom: 4px;
+}
+.pv-head {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: baseline;
+}
 .pv-slot {
   font-size: 11px;
-  color: #8ab;
-  border: 1px solid #33475a;
+  color: var(--cb-mana);
+  border: 1px solid rgba(90, 125, 168, 0.5);
   border-radius: 4px;
   padding: 0 4px;
 }
-.pv-name { font-size: 13px; color: #e0e6ee; }
-.pv-meta { font-size: 11px; color: #778; }
-.pv-line { font-size: 12px; color: #a8b4c0; padding-left: 8px; }
+.pv-name {
+  font-size: 13px;
+  color: var(--cb-chalk);
+  font-family: var(--cb-font-display);
+}
+.pv-meta {
+  font-size: 11px;
+  color: var(--cb-dim);
+}
+.pv-line {
+  font-size: 12px;
+  color: var(--cb-chalk-dim);
+  padding-left: 8px;
+}
 
 /* 效果详情（详情面板里的人话区） */
-.ud-eff { margin-bottom: 6px; }
-.ud-eff-head { font-size: 13px; color: #dde; }
+.ud-eff {
+  margin-bottom: 6px;
+}
+.ud-eff-head {
+  font-size: 13px;
+  color: var(--cb-chalk);
+  font-family: var(--cb-font-display);
+}
+.ud-title {
+  color: var(--cb-amber-dim);
+  font-size: 12px;
+  letter-spacing: 2px;
+  margin: 6px 0 4px;
+}
+.ud-line {
+  font-size: 12px;
+  color: var(--cb-chalk-dim);
+}
+.dim2 {
+  color: var(--cb-dim);
+}
+
+.unit-down-tag {
+  color: var(--cb-blood-wet);
+  font-size: 11px;
+  margin-left: 6px;
+}
+
+.unit-detail-btn {
+  @include t.cb-plaque;
+  margin-left: 8px;
+  padding: 2px 8px;
+  font-size: 11px;
+}
 </style>
