@@ -226,6 +226,51 @@ onBeforeUnmount(() => {
 });
 </script>
 
+<style lang="scss">
+/* ============================================================
+   主题免疫 + 手机排版（**非 scoped**：scoped 样式打不到子组件内部，
+   而锁色/换行恰恰要作用在子组件的元素上）。
+   选择器全部带 .wxhl-combat-root 前缀 —— 不会泄漏到酒馆页面。
+   ============================================================ */
+
+/* 玩家反馈 3：酒馆主题会改字体颜色 → 根上的底色与字体用 !important 锁死。
+   （子元素的具体颜色由各组件的 scoped 规则继续细分 —— scoped 的特异度更高。） */
+.wxhl-combat-root {
+  color: var(--cb-chalk-dim) !important;
+  font-family: var(--cb-font-body) !important;
+}
+
+/* 原生表单控件是酒馆主题最爱改的地方（input/select/option 直接套主题色） */
+.wxhl-combat-root input,
+.wxhl-combat-root textarea,
+.wxhl-combat-root select,
+.wxhl-combat-root option {
+  background: var(--cb-panel) !important;
+  color: var(--cb-chalk) !important;
+  border-color: var(--cb-border) !important;
+}
+
+/* 玩家反馈 4：手机端长字段/报错直接挤出屏幕 → 允许在任意字符处断行。 */
+.wxhl-combat-root {
+  overflow-wrap: anywhere;
+}
+
+.wxhl-combat-root .log-entry,
+.wxhl-combat-root .ua-meta,
+.wxhl-combat-root .pv-line,
+.wxhl-combat-root .intent-row,
+.wxhl-combat-root .prep-log-entry,
+.wxhl-combat-root .settle-log-entry,
+.wxhl-combat-root .ud-line,
+.wxhl-combat-root .dt-row span,
+.wxhl-combat-root .hint,
+.wxhl-combat-root .sub-hint {
+  overflow-wrap: anywhere;
+  word-break: break-word;
+  min-width: 0; /* flex 子元素允许收缩，长内容才不会把整行顶出去 */
+}
+</style>
+
 <style scoped lang="scss">
 @use './theme.scss' as t;
 

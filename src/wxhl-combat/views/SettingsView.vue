@@ -8,7 +8,7 @@
     <section class="api-block">
       <h4>战斗演出（决斗场美术）</h4>
       <label class="field field-inline">
-        <input v-model="store.settings.演出" type="checkbox" />
+        <input v-model="store.settings.演出" type="checkbox" @change="保存()" />
         <span>开启演出（飘字 / 攻击轨迹 / 变身全屏 / 打断裂纹 / 环境火光）</span>
       </label>
       <span class="sub-hint">
@@ -20,7 +20,7 @@
       <h4>敌方意图怎么产生</h4>
       <label class="field">
         <span>模式</span>
-        <select v-model="store.settings.意图模式">
+        <select v-model="store.settings.意图模式" @change="保存()">
           <option value="ai">AI 生成（每回合 1 次调用，会读面板做战术决策）</option>
           <option value="随机">掷骰子抽（**不调 AI**：按行动类型列选项，1dN 抽一个）</option>
         </select>
@@ -31,25 +31,24 @@
       </label>
     </section>
 
-    <section class="api-block">
-      <h4>诊断</h4>
-      <div class="actions">
-        <button class="copy-btn" @click="诊断">诊断设置变量读写</button>
-        <span class="result">把控制台输出发我 —— 它对比「带 script_id 读」与「不带 script_id 读」</span>
-      </div>
-    </section>
+    <!-- 保存状态：设置改动会**立即写入脚本变量并回读对账**（开战读的就是那份）。
+         没存进去必须让人看见 —— 以前失败只在 console 里，界面照旧显示已配置。 -->
+    <div v-if="store.保存状态 && !store.保存状态.成功" class="save-alert">
+      设置**没有存进脚本变量**：{{ store.保存状态.原因 }} —— 开战会读不到，请再改一次或重载酒馆
+    </div>
+    <div v-else-if="已保存提示" class="save-ok">设置已保存</div>
 
     <section v-for="路 in 路列表" :key="路" class="api-block">
       <h4>{{ 路 === '快路' ? '快路（意图 / 翻译，高频）' : '强路（收尾正文，文笔）' }}</h4>
 
       <label class="field">
         <span>API URL</span>
-        <input v-model="store.settings[路].url" type="text" placeholder="如 https://api.openai.com/v1/chat/completions" />
+        <input v-model="store.settings[路].url" type="text" placeholder="如 https://api.openai.com/v1/chat/completions" @change="保存()" />
       </label>
 
       <label class="field">
         <span>API Key</span>
-        <input v-model="store.settings[路].apiKey" type="password" placeholder="sk-…" />
+        <input v-model="store.settings[路].apiKey" type="password" placeholder="sk-…" @change="保存()" />
       </label>
 
       <div class="field">
@@ -60,6 +59,7 @@
             type="text"
             placeholder="模型名（可点右侧按钮拉取后选）"
             :list="`模型候选-${路}`"
+            @change="保存()"
           />
           <datalist :id="`模型候选-${路}`">
             <option v-for="m in 界面[路].模型" :key="m" :value="m" />
@@ -72,7 +72,7 @@
 
       <label class="field">
         <span>超时（毫秒）</span>
-        <input v-model.number="store.settings[路].timeout" type="number" min="0" step="1000" />
+        <input v-model.number="store.settings[路].timeout" type="number" min="0" step="1000" @change="保存()" />
         <span class="sub-hint">
           单次请求的上限。酒馆的 generateRaw 自己不提供超时，这里是脚本兜的 ——
           超时算一次失败并重试，避免一个卡住的请求让界面永远没反应。填 0 表示不限时。
@@ -107,7 +107,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
-import { useSettingsStore, 诊断设置读写 } from '../settingsStore';
+import { useSettingsStore } from '../settingsStore';
 import { 拉取模型, 测试连接, 翻译缓存条目数, 清空翻译缓存 } from '../store';
 
 const store = useSettingsStore();
@@ -144,7 +144,10 @@ async function 拉取(路: 路名) {
       态.结果 = `拉取到 ${list.length} 个模型，点模型输入框可选`;
       态.结果类别 = 'ok';
       // 还没填模型时，顺手选中第一个，省一步
-      if (!cfg.model) cfg.model = list[0];
+      if (!cfg.model) {
+        cfg.model = list[0];
+        保存(); // 顺手选的模型也要落盘
+      }
     }
   } catch (e: any) {
     态.结果 = `拉取失败：${e?.message ?? e}`;
@@ -154,9 +157,14 @@ async function 拉取(路: 路名) {
   }
 }
 
-/** 诊断：把脚本变量这条链路的现状打到控制台（详见 settingsStore.诊断设置读写 的注释） */
-function 诊断(): void {
-  诊断设置读写();
+/** 「设置已保存」的一闪提示（成功时不打扰，但失败必须显眼 —— 见模板里的 save-alert） */
+const 已保存提示 = ref(false);
+let 提示计时: ReturnType<typeof setTimeout> | undefined;
+function 保存(): void {
+  const r = store.保存();
+  已保存提示.value = r.成功;
+  clearTimeout(提示计时);
+  提示计时 = setTimeout(() => (已保存提示.value = false), 2000);
 }
 
 async function 测试(路: 路名) {  const 态 = 界面[路];
@@ -278,6 +286,22 @@ async function 清缓存() {
       border-color: var(--cb-mana);
     }
   }
+}
+
+.save-alert {
+  @include t.cb-stone(10px 14px);
+  margin-bottom: 12px;
+  border-color: var(--cb-blood-wet);
+  color: var(--cb-blood-wet);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.save-ok {
+  margin-bottom: 12px;
+  color: var(--cb-copper);
+  font-size: 12px;
+  letter-spacing: 1px;
 }
 
 .sub-hint {

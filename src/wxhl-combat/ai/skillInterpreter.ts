@@ -9,6 +9,7 @@
 
 import type { 战斗解释 } from '../types';
 import { 提取JSON } from './jsonExtract';
+import { 归一化规则 } from '../engine/ruleShape';
 
 /** 一条待翻译的效果 */
 export interface 待翻译条目 {
@@ -238,8 +239,17 @@ export function 校验战斗解释(对象: any): 战斗解释 {
   if (对象.可预判 === undefined) throw new Error('缺少必填字段: 可预判');
   // 规则 / 托管是**可空的列表**：模型对「没有要托管的」常会直接省略这个键。
   // 把它当必填，会让一整批明明翻对了的条目被判失败（实战：乌尔奇奥拉 15 项全因缺托管被丢）。
-  if (!Array.isArray(对象.规则)) 对象.规则 = [];
+  const 原始规则 = Array.isArray(对象.规则) ? 对象.规则 : [];
   if (!Array.isArray(对象.托管)) 对象.托管 = [];
+
+  // **规则结构校验**（玩家实测：详情面板一整屏 `undefined → undefined：（无动作）`）：
+  // 没触发点 / 空动作 / 动作不是对象的条目，引擎执行了也是空结果 —— 留着只会让人以为"翻了"。
+  const { 规则, 丢弃 } = 归一化规则(原始规则);
+  if (原始规则.length > 0 && 规则.length === 0) {
+    throw new Error(`规则字段结构不完整（${原始规则.length} 条都没有触发点或动作），需要重翻`);
+  }
+  对象.规则 = 规则;
+  对象.忽略的规则 = 丢弃;
   return 对象 as 战斗解释;
 }
 

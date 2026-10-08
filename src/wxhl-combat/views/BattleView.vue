@@ -31,18 +31,26 @@
         <div class="axis-hint center" :style="{ left: 原点百分比 + '%' }">玩家原点</div>
         <div class="axis-hint right">身前（正）▶</div>
 
+        <!-- 车道格线：纵轴看得见的横线（玩家反馈：一维地图要加纵轴） -->
         <div
-          v-for="g in 分组标记"
-          :key="g.距离"
+          v-for="i in 车道数"
+          :key="'lane' + i"
+          class="lane-grid"
+          :style="{ bottom: i * 车道高 + 'px' }"
+        ></div>
+
+        <div
+          v-for="g in 分布组"
+          :key="g.左 + '-' + g.车道"
           class="marker-group"
-          :style="{ left: g.左 + '%' }"
+          :style="{ left: g.左 + '%', bottom: g.车道 * 车道高 + 'px' }"
         >
           <div
             v-for="(u, i) in g.单位们"
             :key="u.id"
             class="distance-marker"
             :class="{ ally: u.阵营 === '我方', enemy: u.阵营 === '敌方', self: u.类型 === '玩家', down: u.HP_当前 <= 0 }"
-            :style="{ bottom: i * 20 + 'px' }"
+            :style="{ bottom: i * 层高 + 'px' }"
             :title="`${u.id} · ${u.距离}米（${距离带(u.距离)}）`"
           >
             {{ u.名称 }} {{ u.距离 }}m
@@ -284,7 +292,7 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { 距离带 } from '../engine/distance';
 import { 可提交, 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
-import { 造我方条目, 造技能展示, 选中行动预览, 显示名, type 我方条目 } from '../engine/viewModel';
+import { 造我方条目, 造技能展示, 布局分布, 选中行动预览, 显示名, type 我方条目 } from '../engine/viewModel';
 import { 列行动选项 } from '../engine/actionOptions';
 import ShowLayer from './ShowLayer.vue';
 import { 演出开启 } from '../engine/showToggle';
@@ -390,10 +398,44 @@ const 演出坐标 = computed<Record<string, number>>(() => {
 /** 演出该不该渲染：设置「战斗演出」开 + 系统没要求减弱动效（engine/showToggle） */
 const 演出开 = computed(演出开启);
 
-/** 同一点最多叠几个 → 决定条的高度 */
-const 距离条高度 = computed(() =>
-  Math.max(46, 52 + (Math.max(0, ...分组标记.value.map(g => g.单位们.length)) - 1) * 20),
-);
+/**
+ * **纵轴布局**（玩家反馈：「一维地图增加一个向上的纵轴，就不会所有角色都挤在一起了」）。
+ * 相邻组的横向间距小于棋子宽度 → 后者错开一条车道；同距离的多人仍在同一车道内按层叠。
+ * 布局算法在 `engine/viewModel.布局分布`（纯函数、有测试钉死）。
+ */
+const 车道高 = 26; // 两条车道之间的纵向距离（px）
+const 层高 = 20; // 同一车道内、同一距离上下两人的间距（px）
+
+interface 分布组信息 {
+  左: number;
+  车道: number;
+  单位们: typeof 排序单位.value;
+}
+
+const 分布组 = computed<分布组信息[]>(() => {
+  const 布局 = 布局分布(
+    排序单位.value.map(u => ({ 键: u.id, id: u.id, 距离: u.距离 ?? 0 })),
+    距离百分比,
+  );
+  const 单位表 = new Map(排序单位.value.map(u => [u.id, u]));
+  const 组 = new Map<string, 分布组信息>();
+  for (const p of 布局.点) {
+    const 键 = `${p.左}-${p.车道}`;
+    const g = 组.get(键) ?? { 左: p.左, 车道: p.车道, 单位们: [] as typeof 排序单位.value };
+    const 单位 = 单位表.get(p.id);
+    if (单位) g.单位们.push(单位);
+    组.set(键, g);
+  }
+  return [...组.values()].sort((a, b) => a.车道 - b.车道 || a.左 - b.左);
+});
+
+const 车道数 = computed(() => Math.max(1, ...分布组.value.map(g => g.车道 + 1)));
+
+/** 纵轴加进来后，高度按「车道 × 车道高 + 最多层 × 层高」算 */
+const 距离条高度 = computed(() => {
+  const 最大层数 = Math.max(1, ...分布组.value.map(g => g.单位们.length));
+  return Math.max(46, 20 + 车道数.value * 车道高 + (最大层数 - 1) * 层高);
+});
 
 // ==================== 我方行动区 ====================
 
@@ -754,7 +796,16 @@ defineExpose({ 清空填写 });
   color: var(--cb-dim);
 }
 
-/* 同一距离的一组：整个组在横向定位，组内上下堆叠 */
+/* 车道格线：纵轴的横线（决斗场地面上的"层"） */
+.lane-grid {
+  position: absolute;
+  left: 0;
+  right: 0;
+  border-top: 1px dashed rgba(74, 50, 38, 0.45);
+  pointer-events: none;
+}
+
+/* 同一距离的一组：整个组在横向定位（+ 纵向车道抬升），组内上下堆叠 */
 .marker-group {
   position: absolute;
   bottom: 6px;

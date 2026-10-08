@@ -108,3 +108,40 @@ describe('Task 8 · 设置页石碑化（SettingsView）', () => {
     expect(页()).not.toContain('color: #ddd');
   });
 });
+
+// ================================================================
+// 玩家反馈 3：「字体方面，应该强制锁字体颜色，免得不同酒馆主题影响了字体颜色，导致看不清」
+// 玩家反馈 4：「手机端的排版有点问题，很多字段或者报错没有自动换行功能，直接挤出去」
+// 两条都在 App.vue 的**非 scoped**样式块里解决（scoped 样式打不到子组件内部）。
+// ================================================================
+describe('主题免疫 · 字体颜色锁死（玩家反馈 3）', () => {
+  const 外壳 = () => 读('App.vue');
+
+  it('有一个**非 scoped**的样式块（scoped 打不到子组件内部，锁色必须非 scoped）', () => {
+    expect(外壳()).toMatch(/<style lang="scss">(?!\s*scoped)/);
+  });
+
+  it('根上的底色与字体用 !important 锁死（酒馆主题的 color 改不动我们）', () => {
+    expect(外壳()).toMatch(/\.wxhl-combat-root\s*\{[^}]*color:[^;}]*!important/);
+    expect(外壳()).toMatch(/\.wxhl-combat-root\s*\{[^}]*font-family:[^;}]*!important/);
+  });
+
+  it('原生表单控件（主题最爱改的地方）锁色 + 锁背景', () => {
+    const 非scoped块 = /<style lang="scss">[\s\S]*?<\/style>/.exec(外壳())?.[0] ?? '';
+    expect(非scoped块).toMatch(/\.wxhl-combat-root\s+(input|select)[^}]*!important/);
+  });
+});
+
+describe('手机排版 · 自动换行（玩家反馈 4）', () => {
+  const 外壳 = () => 读('App.vue');
+
+  it('文本内容能换行（overflow-wrap）—— 长字段/报错不会直接挤出屏幕', () => {
+    expect(外壳()).toContain('overflow-wrap');
+  });
+
+  it('重灾区（日志/单位元信息/预览行/意图行）都有换行规则', () => {
+    for (const 类 of ['log-entry', 'ua-meta', 'pv-line', 'intent-row']) {
+      expect(外壳(), `缺 ${类}`).toMatch(new RegExp(`${类}[\\s\\S]{0,420}overflow-wrap`));
+    }
+  });
+});

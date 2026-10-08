@@ -347,6 +347,6 @@ describe('距离条 · 以玩家为原点双向延伸 + 同一距离上下堆叠
 
     const html = await 渲染('BattleView.vue', { 状态, 日志: [], 敌方意图: [] });
 
-    expect(html).toMatch(/height:\s*9[0-9]px/); // 52 + (3-1)*20 = 92
+    expect(html).toMatch(/height:\s*8[0-9]px/); // 纵轴版：20 + 车道26 + (3-1)*20 = 86
   });
 });

@@ -11,6 +11,7 @@
 
 import type { 动作, 战斗解释, 条件, 取值 } from '../types';
 import { 冷却回合数, 规范行动消耗 } from './actionOptions';
+import { 归一化规则 } from './ruleShape';
 
 export interface 效果预览 {
   /** 一行元信息：行动类型 / 射程 / 目标 / 消耗 / 倍率 / 冷却 */
@@ -190,7 +191,9 @@ export function 效果预览(解释: 战斗解释 | undefined): 效果预览 {
   ].filter((s): s is string => !!s);
 
   const 行: string[] = [];
-  const 规则列表 = (解释.规则 ?? []).filter(Boolean);
+  // 只渲染**结构完好**的规则：旧缓存里可能有 `{}` / 空动作的垃圾条目，
+  // 直接渲染会打出 `undefined → undefined：（无动作）`（玩家实测一整屏）。
+  const 规则列表 = 归一化规则(解释.规则).规则;
   if (规则列表.length) {
     for (const 规则 of 规则列表) {
       const 作用域 = 作用域人话[String(规则.作用域)] ?? String(规则.作用域);
@@ -202,11 +205,20 @@ export function 效果预览(解释: 战斗解释 | undefined): 效果预览 {
     行.push(`${解释.关联属性 ?? ''}伤害 ×${解释.伤害倍率}（一次普通攻击，无额外效果）`);
   }
 
+  // 被丢掉的规则要说出来 —— 静默少几条效果比报错更糟（丢过整件装备的被动）
+  const 忽略 = Math.floor(解释.忽略的规则 ?? Math.max(0, (解释.规则 ?? []).length - 规则列表.length));
+  if (忽略 > 0) 行.push(`（另有 ${忽略} 条效果字段不完整已被忽略 —— 可在翻译复核里重翻这条）`);
+
   for (const t of 解释.托管 ?? []) {
     if (t?.原文) 行.push(`托管（${(t.触发点 ?? []).join('/')}）：${t.原文}`);
   }
 
-  if (!行.length) 行.push('（没有额外效果：纯粹的伤害/无效技能）');
+  // 没有**可用规则**（哪怕有"被忽略"提示）→ 也要明说"没有额外效果"，
+  // 免得玩家只看到"忽略 2 条"却不知道这条技能到底还剩什么。
+  const 有规则行 = 规则列表.length > 0;
+  if (!有规则行 && !倍率 && !(解释.托管 ?? []).some(t => t?.原文)) {
+    行.push('（没有额外效果：纯粹的伤害/无效技能）');
+  }
 
   return { 头部, 行 };
 }

@@ -33,6 +33,7 @@ import { 冷却回合数, 解析消耗, 连击词条, 免冷却词条, 规范行
 import { 行动槽重置 } from './actionEconomy';
 import { 移动距离计算, 移动额度重置 } from './distance';
 import { 标记濒死, 冷却递减 } from './turn';
+import { 归一化规则 } from './ruleShape';
 import {
   混合伤害,
   武器伤害,
@@ -294,8 +295,9 @@ function 技能参数(解释: 战斗解释): 技能参数 {
  * 这里统一过滤掉不可用的条目。
  */
 function 有效规则(解释: 战斗解释 | undefined): 规则[] {
-  const 列表 = Array.isArray(解释?.规则) ? 解释!.规则 : [];
-  return 列表.filter(r => r && typeof r === 'object');
+  // 结构不完好的规则**不算有效**：`{}` / 空动作的规则执行了也是空结果，
+  // 放过去只会让"技能效果没写进状态"变成一个无从解释的现象（玩家实测踩过）。
+  return 归一化规则(解释?.规则).规则;
 }
 
 /**
@@ -614,6 +616,16 @@ export function 开战规则结算(状态: 战斗状态, 步骤: 结算步骤[] 
     const 累积表 = new Map<string, { 技能名: string; 目标键: string; 数值: Record<string, number>; 词条: Set<string> }>();
 
     for (const [技能名, 解释] of Object.entries(单位.技能 ?? {})) {
+      // 规则字段不完整（旧缓存里的 `{}` / 空动作）→ 说清楚。否则玩家只会看到
+      // 「这个被动/血统怎么什么都没生效」而没有任何线索（实测丢过整件装备的被动）。
+      const 原始条数 = Array.isArray(解释?.规则) ? 解释!.规则!.length : 0;
+      if (原始条数 > 0 && 有效规则(解释).length === 0) {
+        步骤.push({
+          类: '跳过',
+          内容: `忽略：「${显示名(单位)}」的「${技能名}」有 ${原始条数} 条效果字段不完整（缺触发点或动作为空），本场不生效 —— 建议在翻译复核里重翻`,
+          单位: 显示名(单位),
+        });
+      }
       for (const 规则 of 有效规则(解释)) {
         if (规则.触发 !== '常驻' && 规则.触发 !== '进入战斗') continue;
 

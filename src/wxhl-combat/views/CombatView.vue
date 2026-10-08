@@ -106,7 +106,7 @@ import { 演出事件提取, type 演出事件 } from '../engine/showEvents';
 import { 击杀明细 } from '../ai/aftermath';
 import type { 敌方意图, 意图行动 } from '../ai/enemyTactics';
 import { 随机意图, 随机意图说明 } from '../ai/enemyRoll';
-import { 读设置 } from '../settingsStore';
+import { 读设置, useSettingsStore } from '../settingsStore';
 import {
   生成敌方意图,
   读战斗状态,
@@ -248,8 +248,16 @@ onMounted(async () => {
 
 async function 开始战斗(选择: { id: string; 阵营: '我方' | '敌方' }[], 开场模式: string) {
   if (开战中.value) return; // 按钮已禁用，这里再挡一层重入
-  // 诊断：开战这一刻**从脚本变量里**读到的设置是什么（设置页显示的是 pinia 内存值，两条路）。
-  // 「设置里填了、测试通过、开战却说未配置」时，这一行直接给出答案。
+  // 开战前**强制把设置存一次**：面板内存里看到的 = 真正写进脚本变量的（开战读的就是它）。
+  // 玩家实测过「设置完却没写进脚本变量」——这条兜底让那种情况不可能再发生；
+  // 真写不进去时 保存() 会返回失败，设置页也会显示红字提醒。
+  try {
+    const r = useSettingsStore().保存();
+    if (!r.成功) 日志.value.push(`⚠ 设置没存进脚本变量：${r.原因} —— 本次开战可能读不到 API 配置`);
+  } catch (e: any) {
+    console.log('[wxhl-combat] 开战前保存设置失败', e?.message ?? e);
+  }
+  // 读出来的是什么，也留一条（出现「未配置」时报错旁边就有对照）
   try {
     const s = 读设置();
     console.log('[wxhl-combat][诊断] 开战读到的设置', {
