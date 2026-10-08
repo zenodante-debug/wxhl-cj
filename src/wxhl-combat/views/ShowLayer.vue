@@ -9,7 +9,7 @@
     <svg v-if="播放.轨迹.length" class="traj-svg" viewBox="0 0 100 100" preserveAspectRatio="none">
       <line
         v-for="(t, i) in 播放.轨迹"
-        :key="'t' + i"
+        :key="'t' + 批次 + '-' + i"
         :x1="t.x1"
         y1="50"
         :x2="t.x2"
@@ -24,7 +24,7 @@
     <!-- 伤害/提示飘字 -->
     <div
       v-for="(f, i) in 播放.飘字"
-      :key="'f' + i"
+      :key="'f' + 批次 + '-' + i"
       class="floater"
       :class="f.类名"
       :style="{ left: f.左 + '%', animationDelay: f.延迟 + 's' }"
@@ -35,7 +35,7 @@
     <!-- 打断金色裂纹 -->
     <div
       v-for="(c, i) in 播放.裂纹"
-      :key="'c' + i"
+      :key="'c' + 批次 + '-' + i"
       class="crack"
       :style="{ left: c.左 + '%', animationDelay: c.延迟 + 's' }"
     ></div>
@@ -43,7 +43,7 @@
     <!-- 规则系光环 -->
     <div
       v-for="(h, i) in 播放.光环"
-      :key="'h' + i"
+      :key="'h' + 批次 + '-' + i"
       class="halo"
       :class="h.色"
       :style="{ left: h.左 + '%', animationDelay: h.延迟 + 's' }"
@@ -53,7 +53,7 @@
   <!-- 变身全屏演出（挂在视口上，压暗全场 → 铭牌亮出） -->
   <div
     v-for="(m, i) in 播放.变身"
-    :key="'m' + i"
+    :key="'m' + 批次 + '-' + i"
     class="transform-show"
     :style="{ animationDelay: m.延迟 + 's' }"
   >
@@ -76,8 +76,10 @@ import type { 演出事件 } from '../engine/showEvents';
 
 const props = defineProps<{
   事件: 演出事件[];
-  /** 单位显示名 → 地砖横向百分比（与距离轴同一套坐标） */
+  /** 单位键/显示名 → 地砖横向百分比（与距离轴同一套坐标） */
   坐标?: Record<string, number>;
+  /** 批次号：每批 +1 —— 当 key 前缀用，新批次整批重建节点，CSS 动画自然重播 */
+  批次: number;
 }>();
 
 /** 演出元素总数上限（手机端防掉帧；变身全屏单独算，最多 2 个） */
@@ -112,7 +114,9 @@ const 播放 = computed<{ 飘字: 飘字[]; 轨迹: 轨迹[]; 裂纹: 裂纹[]; 
   const 光环: 光环[] = [];
   const 变身: 变身[] = [];
 
-  const 查 = (名?: string): number => (名 && props.坐标?.[名]) ?? 50;
+  // 先键后名：同名单位（一波两只「骨卫兵」）按名会锚错棋子（最终评审实锤），最后兜底场心 50%
+  const 查 = (键?: string, 名?: string): number =>
+    (键 && props.坐标?.[键]) ?? (名 && props.坐标?.[名]) ?? 50;
 
   let 序号 = 0;
   for (const e of props.事件 ?? []) {
@@ -122,27 +126,27 @@ const 播放 = computed<{ 飘字: 飘字[]; 轨迹: 轨迹[]; 裂纹: 裂纹[]; 
 
     switch (e.类) {
       case '命中':
-        飘字.push({ 文本: `-${e.伤害 ?? 0}`, 左: 查(e.守方), 延迟, 类名: 'dmg' });
-        if (e.攻方 && e.守方) 轨迹.push({ x1: 查(e.攻方), x2: 查(e.守方), 延迟, 未命中: false });
+        飘字.push({ 文本: `-${e.伤害 ?? 0}`, 左: 查(e.守方键, e.守方), 延迟, 类名: 'dmg' });
+        if (e.攻方 && e.守方) 轨迹.push({ x1: 查(e.攻方键, e.攻方), x2: 查(e.守方键, e.守方), 延迟, 未命中: false });
         break;
       case '未命中':
-        飘字.push({ 文本: '未命中', 左: 查(e.守方), 延迟, 类名: 'miss' });
-        if (e.攻方 && e.守方) 轨迹.push({ x1: 查(e.攻方), x2: 查(e.守方), 延迟, 未命中: true });
+        飘字.push({ 文本: '未命中', 左: 查(e.守方键, e.守方), 延迟, 类名: 'miss' });
+        if (e.攻方 && e.守方) 轨迹.push({ x1: 查(e.攻方键, e.攻方), x2: 查(e.守方键, e.守方), 延迟, 未命中: true });
         break;
       case '打断成功':
-        裂纹.push({ 左: 查(e.单位), 延迟 });
+        裂纹.push({ 左: 查(e.单位键, e.单位), 延迟 });
         break;
       case '打断失败':
-        飘字.push({ 文本: '打断失败', 左: 查(e.单位), 延迟, 类名: 'miss' });
+        飘字.push({ 文本: '打断失败', 左: 查(e.单位键, e.单位), 延迟, 类名: 'miss' });
         break;
       case '反应防御':
-        飘字.push({ 文本: '格挡', 左: 查(e.单位), 延迟, 类名: 'guard' });
+        飘字.push({ 文本: '格挡', 左: 查(e.单位键, e.单位), 延迟, 类名: 'guard' });
         break;
       case '濒死':
-        飘字.push({ 文本: '濒死！', 左: 查(e.守方), 延迟, 类名: 'dying' });
+        飘字.push({ 文本: '濒死！', 左: 查(e.守方键, e.守方), 延迟, 类名: 'dying' });
         break;
       case '规则系':
-        光环.push({ 左: 查(e.单位), 延迟, 色: 光环色(e.效果) });
+        光环.push({ 左: 查(e.单位键, e.单位), 延迟, 色: 光环色(e.效果) });
         break;
       case '变身':
         if (变身.length < 2) 变身.push({ 形态: e.形态 ?? '觉醒', 延迟 });

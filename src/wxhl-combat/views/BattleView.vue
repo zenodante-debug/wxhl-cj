@@ -25,7 +25,7 @@
       <div class="distance-bar" :style="{ height: 距离条高度 + 'px' }">
         <!-- 演出层（决斗场美术）：飘字/轨迹/裂纹/光环，复用同一套地砖坐标。
              「战斗演出」关掉 / 系统减弱动效 → 连 DOM 都不渲染（零成本） -->
-        <ShowLayer v-if="演出开" :事件="演出事件 ?? []" :坐标="演出坐标" />
+        <ShowLayer v-if="演出开" :事件="演出事件 ?? []" :坐标="演出坐标" :批次="演出批次 ?? 0" />
 
         <div class="axis-hint left">◀ 身后（负）</div>
         <div class="axis-hint center" :style="{ left: 原点百分比 + '%' }">玩家原点</div>
@@ -305,6 +305,8 @@ const props = defineProps<{
   追加模式?: boolean;
   /** 本轮结算产生的演出事件（决斗场美术：飘字/轨迹/变身…，由 CombatView 从结算步骤提取） */
   演出事件?: 演出事件[];
+  /** 演出批次号：每批 +1，ShowLayer 用它当 key 前缀整批重建节点（动画重播） */
+  演出批次?: number;
 }>();
 
 const emit = defineEmits<{
@@ -370,11 +372,17 @@ const 分组标记 = computed(() => {
     .map(([距离, 单位们]) => ({ 距离, 左: 距离百分比(距离), 单位们 }));
 });
 
-/** 演出层用的坐标系：单位**显示名** → 地砖横向百分比（与距离轴完全同一套） */
+/** 演出层用的坐标系：地砖横向百分比（与距离轴完全同一套）。
+ *  **按状态.单位的键建**（一波两只「骨卫兵」时按显示名建会互相覆盖、锚错棋子，
+ *  最终评审实锤）；显示名也写一份做回退（演出事件里两样都带）。 */
 const 演出坐标 = computed<Record<string, number>>(() => {
   const 出: Record<string, number> = {};
   for (const g of 分组标记.value) {
-    for (const u of g.单位们) 出[显示名(u)] = g.左;
+    for (const u of g.单位们) {
+      const 键 = Object.entries(props.状态.单位).find(([, x]) => x.id === u.id)?.[0];
+      if (键) 出[键] = g.左;
+      出[显示名(u)] = g.左;
+    }
   }
   return 出;
 });

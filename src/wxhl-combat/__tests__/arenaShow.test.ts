@@ -156,4 +156,138 @@ describe('演出层 · 接线（源码守卫）', () => {
     expect(驾驶舱).toContain('演出事件提取');
     expect(驾驶舱).toContain(':演出事件=');
   });
+
+  it('BattleView → ShowLayer 的 props 接线（占位组件会吞掉写错的 prop 名，必须钉死）', () => {
+    const 战斗页 = 读('views/BattleView.vue');
+
+    expect(战斗页).toContain(':事件="演出事件');
+    expect(战斗页).toContain(':坐标="演出坐标"');
+  });
+});
+
+// ================================================================
+// 最终评审 Critical #1：演出在首次 paint 前被清空
+// 推进轮次 set → 开始回合 → 推进回合 第一行 clear，之间只有微任务 ——
+// 演出 DOM 还没画出来就没了，「打一拳出飘字」在主路径上不可见。
+// 修法：回合开始**不清**，给每批事件一个批次号强制换 DOM（旧批次动画 opacity:0 收尾，零成本）。
+// ================================================================
+describe('演出生命周期（评审 Critical #1）', () => {
+  const 驾驶舱 = () => fs.readFileSync(path.resolve(import.meta.dirname, '../views/CombatView.vue'), 'utf8');
+
+  it('推进回合**不再**清空演出事件（清空会赶在首次 paint 之前）', () => {
+    const s = 驾驶舱();
+    const 推进回合体 = /async function 推进回合\(\) \{[\s\S]*?\n\}/.exec(s)?.[0] ?? '';
+
+    expect(推进回合体).not.toContain('演出事件列表.value = []');
+  });
+
+  it('每批事件带递增批次号（新批次整批重建节点，CSS 动画自然重播）', () => {
+    const s = 驾驶舱();
+
+    expect(s).toContain('演出批次');
+    expect(s).toMatch(/演出批次\.value\+\+/);
+    expect(s).toContain(':演出批次=');
+  });
+
+  it('战斗边界（开始战斗/逃离/回准备/收尾）才清演出（防新战开局看到上一场残批）', () => {
+    const s = 驾驶舱();
+
+    for (const 函数名 of ['开始战斗', '逃离战斗', '回准备', '收尾']) {
+      const 体 = new RegExp(`(async )?function ${函数名}\\([\\s\\S]*?\\n\\}`).exec(s)?.[0] ?? '';
+      expect(体, `${函数名} 必须清演出`).toContain('演出事件列表.value = []');
+    }
+  });
+
+  it('ShowLayer 的 v-for key 带批次（旧批次节点被整批替换而不是复用）', () => {
+    const s = fs.readFileSync(path.resolve(import.meta.dirname, '../views/ShowLayer.vue'), 'utf8');
+
+    expect(s).toContain('批次');
+    expect(s).toMatch(/:key="[^"]*批次/);
+  });
+});
+
+// ================================================================
+// 最终评审 Important #2：同名单位的演出坐标互相覆盖
+// 一波两只「骨卫兵」时，按显示名建的坐标表只剩最远那只 ——
+// 两只的飘字/轨迹都锚错。修法：演出相关步骤带**单位键**，坐标表按键建（显示名回退）。
+// ================================================================
+describe('演出坐标按键（评审 Important #2）', () => {
+  it('「命中」事件带守方键（不只是显示名）', async () => {
+    const { 开战规则结算, 结算行动 } = await import('../engine/loop');
+    const { 演出事件提取 } = await import('../engine/showEvents');
+    const 造解释 = (覆盖: any = {}): any => ({
+      行动消耗: '主要行动',
+      射程: '近战',
+      目标: '单体',
+      消耗: '无',
+      冷却: 0,
+      分类: '基础',
+      类型: '主动',
+      可预判: true,
+      关联属性: 'STR',
+      技能阶位: 1,
+      伤害倍率: 1,
+      规则: [],
+      托管: [],
+      ...覆盖,
+    });
+    const 造单位 = (覆盖: any): any => ({
+      名称: '同名怪',
+      类型: '杂兵',
+      属性: { 实际: { STR: 20, AGI: 10, CON: 20, PER: 10 } },
+      阶位: '一阶',
+      HP_当前: 1000,
+      HP_最大: 1000,
+      MP_当前: 50,
+      MP_最大: 50,
+      耐力_当前: 100,
+      耐力_最大: 100,
+      防御: 0,
+      闪避值: 0,
+      距离: 0,
+      行动槽: { 主要: 1, 次要: 1, 移动: 1, 反应: 1, 免费: 999 },
+      额度: 30,
+      冷却: {},
+      护盾: 0,
+      架势: null,
+      状态: [],
+      濒死: null,
+      资源: {},
+      词条: new Set(),
+      技能: {},
+      ...覆盖,
+    });
+    // 两只同名怪（不同的键）
+    const 攻 = 造单位({ id: '契约者', 阵营: '我方', 名称: '玩家', 技能: { 斩击: 造解释() } });
+    const 甲 = 造单位({ id: '副本角色.骨卫兵', 阵营: '敌方', 距离: 15 });
+    const 乙 = 造单位({ id: '副本角色.骨卫兵2', 阵营: '敌方', 距离: 1 }); // 近战打得着的这只
+    const 状态: any = {
+      进行中: true,
+      回合: 1,
+      先攻: ['契约者', '副本角色.骨卫兵'],
+      单位: { 契约者: 攻, 骨卫兵: 甲, 骨卫兵2: 乙 },
+      待决: null,
+      领域: [],
+    };
+    const r = 结算行动(开战规则结算(状态), 状态.单位.契约者, { 类型: '主要行动', 技能: '斩击', 目标: '骨卫兵2' }, { 命中: 18, 伤害骰: [6] });
+    const 事件 = 演出事件提取(r.步骤);
+    const 命中 = 事件.find((e: any) => e.类 === '命中');
+
+    expect(命中).toBeDefined();
+    expect((命中 as any).守方键).toBe('骨卫兵2'); // 是键，不是「同名怪」
+  });
+
+  it('BattleView 的坐标表按**键**建（显示名回退），同名单位各自有坐标', () => {
+    const s = fs.readFileSync(path.resolve(import.meta.dirname, '../views/BattleView.vue'), 'utf8');
+
+    // 坐标表按状态.单位 的键建（不只是显示名）
+    expect(s).toMatch(/演出坐标[\s\S]*?Object\.entries/);
+  });
+
+  it('ShowLayer 查坐标：先键后名，最后兜底 50%', () => {
+    const s = fs.readFileSync(path.resolve(import.meta.dirname, '../views/ShowLayer.vue'), 'utf8');
+
+    expect(s).toContain('守方键');
+    expect(s).toMatch(/坐标\?\.\[键\]/);
+  });
 });
