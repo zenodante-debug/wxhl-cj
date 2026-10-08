@@ -53,9 +53,23 @@
       />
       <PendingModal :待决="战斗.待决" @决策="处理决策" />
     </template>
-    <div v-else class="settle-stage">
-      <h3>{{ 结局文案 === '逃离' ? '已逃离战斗' : 结局文案 === '败北' ? '战斗失败' : '战斗结束' }}</h3>
+    <div v-else class="settle-stage" :class="结局文案">
+      <!-- 三态横幅：金漆凯旋 / 血字陨落 / 灰字撤退 -->
+      <div class="settle-banner" :class="结局文案">
+        <h3 class="sb-title">{{ 结局横幅.标题 }}</h3>
+      </div>
       <p v-if="结局文案 !== '逃离'" class="dim">正在生成收尾正文…</p>
+
+      <!-- 战利品：按击杀发放钥匙（杂兵白 / 精英白银 / BOSS黄金 / 隐藏BOSS钻石 / 契约者血腥） -->
+      <div v-if="结局文案 === '胜利' && 战利品.length" class="loot-list">
+        <div class="loot-title">战利品</div>
+        <div v-for="(k, i) in 战利品" :key="i" class="loot-row">
+          <span class="loot-key" :class="钥匙类名(k.钥匙)">⚿</span>
+          <span class="loot-name">{{ k.名 }}</span>
+          <span class="loot-tier" :class="钥匙类名(k.钥匙)">{{ k.钥匙 }}</span>
+        </div>
+      </div>
+
       <!-- 收尾期间还要写回变量 / 落楼，失败只记在 日志 里：这里也要渲染，否则错误被吞掉 -->
       <div v-if="日志.length" class="settle-log">
         <div v-for="(s, i) in 日志" :key="i" class="settle-log-entry">{{ s }}</div>
@@ -88,6 +102,7 @@ import { 阶段A资源恢复, 阶段F结算, 冷却递减, 濒死检定一轮, �
 import { 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
 import { 显示名 } from '../engine/viewModel';
 import { 演出事件提取, type 演出事件 } from '../engine/showEvents';
+import { 击杀明细 } from '../ai/aftermath';
 import type { 敌方意图, 意图行动 } from '../ai/enemyTactics';
 import { 随机意图, 随机意图说明 } from '../ai/enemyRoll';
 import { 读设置 } from '../settingsStore';
@@ -120,6 +135,30 @@ const 忙碌 = ref(false);
 const 战斗结束 = ref(false);
 /** 收尾界面标题（胜利/败北/逃离）—— 逃离没有收尾正文，标题和副标要分开写 */
 const 结局文案 = ref<'胜利' | '败北' | '逃离'>('胜利');
+
+/** 三态收尾横幅：金漆凯旋 / 血字陨落 / 灰字撤退 */
+const 结局横幅 = computed(() => {
+  switch (结局文案.value) {
+    case '败北':
+      return { 标题: '陨落' };
+    case '逃离':
+      return { 标题: '撤退' };
+    default:
+      return { 标题: '凯旋' };
+  }
+});
+
+/** 战利品：胜利时按击杀列出钥匙（五档配色）；败北/逃离没有 */
+const 战利品 = computed(() => (结局文案.value === '胜利' ? 击杀明细(战斗.value) : []));
+
+/** 钥匙档位 → 配色 class（杂兵白 / 精英白银 / BOSS黄金 / 隐藏BOSS钻石 / 契约者血腥） */
+function 钥匙类名(钥匙: string): string {
+  if (钥匙.includes('钻石')) return 'k-diamond';
+  if (钥匙.includes('黄金')) return 'k-gold';
+  if (钥匙.includes('白银')) return 'k-silver';
+  if (钥匙.includes('血腥')) return 'k-blood';
+  return 'k-white';
+}
 /**
  * 开战进度。
  * 开战要连发几十个 AI 请求（每个效果翻一次 + 一次敌方意图），
@@ -786,6 +825,8 @@ async function 回准备() {
 </script>
 
 <style scoped lang="scss">
+@use '../theme.scss' as t;
+
 .review-panel {
   margin-top: 16px;
   padding: 14px;
@@ -868,27 +909,126 @@ async function 回准备() {
   h3 { margin-bottom: 8px; }
   .dim { color: #999; font-size: 13px; }
 
+  /* ============ 三态横幅：金漆凯旋 / 血字陨落 / 灰字撤退 ============ */
+  .settle-banner {
+    @include t.cb-stone(18px 24px);
+    @include t.cb-rivets(8px);
+    text-align: center;
+    margin-bottom: 14px;
+
+    .sb-title {
+      margin: 0;
+      font-family: var(--cb-font-display);
+      font-size: 34px;
+      font-weight: 900;
+      letter-spacing: 10px;
+    }
+
+    &.胜利 {
+      border-color: rgba(208, 168, 80, 0.6);
+      .sb-title {
+        color: var(--cb-gold);
+        text-shadow:
+          0 0 16px rgba(208, 168, 80, 0.6),
+          0 0 44px rgba(208, 168, 80, 0.3);
+      }
+    }
+
+    &.败北 {
+      border-color: var(--cb-blood-wet);
+      background:
+        linear-gradient(180deg, rgba(74, 16, 16, 0.35), rgba(18, 6, 4, 0.9));
+      .sb-title {
+        color: var(--cb-blood-wet);
+        text-shadow:
+          0 0 16px rgba(208, 80, 64, 0.6),
+          0 2px 0 rgba(0, 0, 0, 0.8);
+      }
+    }
+
+    &.逃离 {
+      .sb-title {
+        color: var(--cb-dim);
+        letter-spacing: 6px;
+      }
+    }
+  }
+
+  /* ============ 战利品（钥匙五档配色） ============ */
+  .loot-list {
+    @include t.cb-stone(10px 14px);
+    margin-bottom: 14px;
+
+    .loot-title {
+      color: var(--cb-amber-dim);
+      font-size: 12px;
+      letter-spacing: 3px;
+      margin-bottom: 6px;
+    }
+
+    .loot-row {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 3px 0;
+      font-size: 13px;
+      border-bottom: 1px dotted rgba(74, 50, 38, 0.3);
+
+      &:last-child {
+        border-bottom: none;
+      }
+    }
+
+    .loot-name {
+      flex: 1;
+      color: var(--cb-chalk-dim);
+    }
+
+    .loot-key {
+      font-size: 15px;
+    }
+
+    .k-white {
+      color: #d8d8d0;
+    }
+    .k-silver {
+      color: #c8d0e0;
+      text-shadow: 0 0 8px rgba(200, 208, 224, 0.5);
+    }
+    .k-gold {
+      color: var(--cb-gold);
+      text-shadow: 0 0 10px rgba(208, 168, 80, 0.6);
+    }
+    .k-diamond {
+      color: #a8d8f0;
+      text-shadow: 0 0 10px rgba(140, 210, 240, 0.7);
+    }
+    .k-blood {
+      color: var(--cb-blood-wet);
+      text-shadow: 0 0 10px rgba(208, 80, 64, 0.7);
+    }
+  }
+
   .settle-log {
     margin: 14px 0;
     padding-top: 10px;
-    border-top: 1px solid #2a2a2a;
+    border-top: 1px solid var(--cb-border-soft);
     max-height: 40vh;
     overflow-y: auto;
 
-    .settle-log-entry { padding: 3px 0; font-size: 13px; color: #bbb; }
+    .settle-log-entry {
+      padding: 3px 0;
+      font-size: 13px;
+      color: var(--cb-chalk-dim);
+      font-family: var(--cb-font-mono);
+    }
   }
 
   button {
-    background: #1d3a1d;
-    color: #9d9;
-    border: 1px solid #3a6a3a;
-    border-radius: 6px;
-    padding: 6px 16px;
+    @include t.cb-gate;
+    padding: 8px 20px;
     font-size: 13px;
-    cursor: pointer;
-
-    &:disabled { opacity: 0.4; cursor: not-allowed; }
-    &:not(:disabled):hover { background: #254a25; }
+    letter-spacing: 2px;
   }
 }
 </style>
