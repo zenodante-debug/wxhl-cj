@@ -24,7 +24,7 @@ import {
   type 候选组,
 } from './nameMatch';
 import { 行动槽消耗 } from './actionEconomy';
-import { 属性修正值 } from './rules';
+import { 属性修正值, 阶位序数, 阶位序数表, 归一阶位 } from './rules';
 import { rollDie } from './dice';
 import { 执行规则, 判定条件 } from './combatInterpreter';
 import { 规则系判定, 规则系对抗 } from './ruleSystemJudge';
@@ -184,14 +184,12 @@ export function 基础攻击解释(有主武器: boolean): 战斗解释 {
 // ==================== 射程 / 属性 / 技能参数 ====================
 
 /** 位阶序数：一阶=1 … 五阶=5，超脱=6（用于 `(阶位−1)/2` 与「×敌人位阶」的 DC/伤害公式） */
-const 位阶序数表: Record<string, number> = { 一阶: 1, 二阶: 2, 三阶: 3, 四阶: 4, 五阶: 5, 超脱: 6 };
-function 位阶序数(阶位: string): number {
-  return 位阶序数表[阶位] ?? 1;
-}
+// 阶位表与归一化统一在 engine/rules（超脱三写法 / 序数 1~6 只有那一份口径）
+const 位阶序数 = 阶位序数;
 
 /** 武器的阶位序数；武器没写阶位 / 阶位非法 → 退回兜底（通常是行动者阶位）。 */
 function 武器位阶序数(武器: { 阶位?: string } | undefined, 兜底: number): number {
-  const 序数 = 武器?.阶位 ? 位阶序数表[武器.阶位] : undefined;
+  const 序数 = 武器?.阶位 ? 阶位序数表[归一阶位(武器.阶位)] : undefined;
   return 序数 ?? 兜底;
 }
 
