@@ -187,6 +187,14 @@ describe('skillInterpreter · 提示词必须教模型用上引擎真正执行�
     expect(提示词).toContain('按卡面文本分流');
   });
 
+  it('变身/阶段切换类有完整配方（一次性 + 回满血 + 全属性翻倍 + 整场持续）', () => {
+    expect(提示词).toContain('变身 / 阶段切换类技能怎么写');
+    expect(提示词).toContain('已二阶段'); // 一次性靠词条 + 条件分支
+    expect(提示词).toContain('当前HP');
+    expect(提示词).toContain('最大HP'); // 回满血
+    expect(提示词).toContain('持续必须写 999'); // 变身是整场，不是默认 2 回合
+  });
+
   it('「该次攻击最终伤害×N」→ 用「最终乘区」（不是「伤害」那种递减乘区）', () => {
     expect(提示词).toContain('最终乘区');
     expect(提示词).toMatch(/填 4 = ×5|填 N−1/);
