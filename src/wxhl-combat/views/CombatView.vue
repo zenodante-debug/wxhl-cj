@@ -248,6 +248,18 @@ onMounted(async () => {
 
 async function 开始战斗(选择: { id: string; 阵营: '我方' | '敌方' }[], 开场模式: string) {
   if (开战中.value) return; // 按钮已禁用，这里再挡一层重入
+  // 诊断：开战这一刻**从脚本变量里**读到的设置是什么（设置页显示的是 pinia 内存值，两条路）。
+  // 「设置里填了、测试通过、开战却说未配置」时，这一行直接给出答案。
+  try {
+    const s = 读设置();
+    console.log('[wxhl-combat][诊断] 开战读到的设置', {
+      快路: { URL: s.快路?.url ? '已填' : '空', Key: s.快路?.apiKey ? '已填' : '空', 模型: s.快路?.model || '空' },
+      强路: { URL: s.强路?.url ? '已填' : '空', Key: s.强路?.apiKey ? '已填' : '空' },
+      意图模式: s.意图模式,
+    });
+  } catch (e: any) {
+    console.log('[wxhl-combat][诊断] 开战读设置抛错', e?.message ?? e);
+  }
   清追加待办(); // 上一场暂停中留下的追加待办绝不能带进新战斗
   演出事件列表.value = []; // 上一场的演出残批也不能带进新战斗
   演出批次.value++;

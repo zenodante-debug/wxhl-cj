@@ -9,7 +9,7 @@ import type { ApiConfig } from './settings';
 import { 构建批量翻译提示词, 解析批量翻译结果, 批量战斗解释_SCHEMA, type 条目解析结果 } from './ai/skillInterpreter';
 import { 效果指纹, 翻译缓存版本 } from './ai/translationCache';
 import { 构建敌方意图提示词, 解析敌方意图, 敌方意图_SCHEMA, type 敌方意图 } from './ai/enemyTactics';
-import { 提取JSON } from './ai/jsonExtract';
+import { 提取JSON宽容 } from './ai/jsonExtract';
 import { 构建收尾提示词 } from './ai/aftermath';
 import { buff转字符串 } from './engine/buffMapper';
 import { 解析伤害骰 } from './engine/damage';
@@ -470,7 +470,12 @@ export async function aiGenerate(
       if (!jsonSchema) return text;
 
       try {
-        提取JSON(text);
+        // 截断也算「能用」：抢救出来的部分照样有价值（缺的条目会进复核），
+        // 只留一条日志说明为什么少了几条 —— 以前截断会触发 3 次重试、每次都再截断。
+        const 宽容 = 提取JSON宽容(text);
+        if (宽容.截断) {
+          console.warn(`[wxhl-combat] 「${用途}」的 AI 回复被截断，已抢救出可用部分（缺的条目会进复核）`);
+        }
         return text;
       } catch (_) {
         if (attempt < 2) {

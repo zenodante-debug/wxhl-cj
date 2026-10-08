@@ -8,6 +8,7 @@
 // ================================================================
 
 import type { 战斗解释 } from '../types';
+import { 提取JSON } from './jsonExtract';
 
 /** 一条待翻译的效果 */
 export interface 待翻译条目 {
@@ -242,9 +243,9 @@ export function 校验战斗解释(对象: any): 战斗解释 {
   return 对象 as 战斗解释;
 }
 
-/** 解析单条（保留给测试与单条兜底） */
+/** 解析单条（保留给测试与单条兜底）。走**宽容提取**：截断/围栏/散文包裹都能救。 */
 export function 解析翻译结果(json: string): 战斗解释 {
-  return 校验战斗解释(JSON.parse(json));
+  return 校验战斗解释(提取JSON(json));
 }
 
 /** 单条解析结果 —— 失败时必须带**原因**，否则玩家只能看到「不可用」却不知道该怎么办 */
@@ -256,7 +257,9 @@ export type 条目解析结果 = { 成功: true; 解释: 战斗解释 } | { 成�
  * **不因为一条坏而丢掉整批**。
  */
 export function 解析批量翻译结果(json: string, 条目数: number): 条目解析结果[] {
-  const 解析出的 = JSON.parse(json);
+  // 宽容提取（含**截断抢救**）：被 max_tokens 切掉尾巴时，捞回已经完整的条目，
+  // 缺的那几条按「模型未返回该条」进复核 —— 以前这里裸 JSON.parse，一炸就是整批全丢。
+  const 解析出的 = 提取JSON(json);
   const 数组 = Array.isArray(解析出的) ? 解析出的 : 解析出的?.解释;
   if (!Array.isArray(数组)) throw new Error('批量翻译结果里没有 "解释" 数组');
 

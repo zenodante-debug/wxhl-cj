@@ -22,6 +22,12 @@ import type { 战斗状态 } from '../types';
 
 const 视图目录 = path.resolve(import.meta.dirname, '../views');
 
+/**
+ * 这些用例要现场编译 SFC 再动态 import —— 并行跑全量、机器吃紧时 5 秒不够，
+ * 会假红（排查过一次：报的是「Test timed out in 5000ms」，不是渲染坏了）。
+ */
+const 编译超时 = 30000;
+
 /** 编译一个 SFC 并 SSR 渲染，返回 HTML */
 async function 渲染(文件名: string, props: Record<string, any>): Promise<string> {
   const 源 = fs.readFileSync(path.join(视图目录, 文件名), 'utf8');
@@ -37,7 +43,7 @@ async function 渲染(文件名: string, props: Record<string, any>): Promise<st
     /import\s+(\w+)\s+from\s+'(\.[^']*\.vue)'/g,
     (_m, 名) => `const ${名} = { name: '${名}', render: () => null };`,
   );
-  const 临时 = path.join(视图目录, `__render_${文件名.replace('.vue', '')}.ts`);
+  const 临时 = path.join(视图目录, `__render_${Math.random().toString(36).slice(2)}_${文件名.replace('.vue', '')}.ts`);
   fs.writeFileSync(临时, 编译后);
   try {
     const mod: any = await import(/* @vite-ignore */ 临时);
@@ -126,7 +132,7 @@ function 造战斗状态(): 战斗状态 {
 }
 
 describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
-  it('BattleView：每个我方单位一块行动区 + 效果详情 + 目标可支援', async () => {
+  it('BattleView：每个我方单位一块行动区 + 效果详情 + 目标可支援', { timeout: 编译超时 }, async () => {
     const html = await 渲染('BattleView.vue', {
       状态: 造战斗状态(),
       日志: ['—— 第 1 回合 ——'],
@@ -143,7 +149,7 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
     expect(html).toContain('执行本轮');
   });
 
-  it('行动下拉**按行动类型过滤**：主要只列主要行动技能 + 基础攻击；次要列次要的（这里是空的）', async () => {
+  it('行动下拉**按行动类型过滤**：主要只列主要行动技能 + 基础攻击；次要列次要的（这里是空的）', { timeout: 编译超时 }, async () => {
     // 造战斗状态里：月牙天冲/诛仙裂空 都是「主要行动」，两个单位都没有副武器
     const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [] });
 
@@ -160,7 +166,7 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
     expect(次要段).toContain('徒手攻击');
   });
 
-  it('反应下拉里**没有预设的招架/识破**（没学过就只有"不预置"）', async () => {
+  it('反应下拉里**没有预设的招架/识破**（没学过就只有"不预置"）', { timeout: 编译超时 }, async () => {
     const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [] });
 
     // 注释也会被渲进 HTML（模板里的历史说明），所以只取真正的 option 标签
@@ -180,7 +186,7 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
     expect(源码).toContain('d.预览.行'); // 渲染的是预览的人话行
   });
 
-  it('决斗场皮肤：横幅是先攻火把链，地面是地砖轴，军牌是铭牌', async () => {
+  it('决斗场皮肤：横幅是先攻火把链，地面是地砖轴，军牌是铭牌', { timeout: 编译超时 }, async () => {
     const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [] });
 
     expect(html).toContain('initiative-chain'); // 先攻火把链（当前行动者点亮）
@@ -190,7 +196,7 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
     expect(html).toContain('gauge'); // HP/MP/耐力 液面条
   });
 
-  it('军牌的 HP 是血色液面（gauge-hp + fill），不是一行灰字', async () => {
+  it('军牌的 HP 是血色液面（gauge-hp + fill），不是一行灰字', { timeout: 编译超时 }, async () => {
     const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [] });
 
     expect(html).toMatch(/gauge-hp[^>]*>\s*<div class="fill"/);
@@ -204,7 +210,7 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
     expect(源码).not.toContain('color: #ddd');
   });
 
-  it('BattleView：追加行动回合模式 → 按钮变成「提交追加行动」并说明这是额外一轮', async () => {
+  it('BattleView：追加行动回合模式 → 按钮变成「提交追加行动」并说明这是额外一轮', { timeout: 编译超时 }, async () => {
     const html = await 渲染('BattleView.vue', {
       状态: 造战斗状态(),
       日志: [],
@@ -220,7 +226,7 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
   });
 
 
-  it('BattleView：空战场也不炸（开战前的初始态）', async () => {
+  it('BattleView：空战场也不炸（开战前的初始态）', { timeout: 编译超时 }, async () => {
     const html = await 渲染('BattleView.vue', {
       状态: { 进行中: false, 回合: 0, 先攻: [], 单位: {}, 待决: null, 领域: [] },
       日志: [],
@@ -230,12 +236,12 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
     expect(html).toContain('第 0 回合');
   });
 
-  it('SetupView：名单未加载时显示读取提示', async () => {
+  it('SetupView：名单未加载时显示读取提示', { timeout: 编译超时 }, async () => {
     const html = await 渲染('SetupView.vue', {});
     expect(html).toContain('读取实体名单中');
   });
 
-  it('PendingModal：待决点为空时不渲染内容', async () => {
+  it('PendingModal：待决点为空时不渲染内容', { timeout: 编译超时 }, async () => {
     const html = await 渲染('PendingModal.vue', { 待决: null });
     expect(html).not.toContain('打断');
   });
@@ -244,7 +250,7 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
   // 解析不了 `.vue` 的 import（本文件只能编译"不 import 别的 .vue"的组件）。
   // 它的准备态由 SetupView 那条覆盖，真正的逻辑在 CombatView 里的部分都已经抽成纯函数测过了。
 
-  it('SettingsView：API 配置表单 + 翻译缓存区块', async () => {
+  it('SettingsView：API 配置表单 + 翻译缓存区块', { timeout: 编译超时 }, async () => {
     (globalThis as any).getScriptId = () => 'wxhl-combat';
     (globalThis as any).getVariables = () => ({
       快路: { url: 'https://a.b', apiKey: 'k', model: 'm', timeout: 60000 },

@@ -14,12 +14,14 @@ import type { 演出事件 } from '../engine/showEvents';
 // ================================================================
 
 const 视图目录 = path.resolve(import.meta.dirname, '../views');
+/** 现场编译 SFC + 动态 import：并行跑全量时 5 秒不够（排查过：假红报超时） */
+const 编译超时 = 30000;
 
 async function 渲染(props: Record<string, any>): Promise<string> {
   const 源 = fs.readFileSync(path.join(视图目录, 'ShowLayer.vue'), 'utf8');
   const { descriptor, errors } = parse(源, { filename: 'ShowLayer.vue' });
   if (errors.length) throw new Error(`SFC 解析失败：${errors.map(e => e.message).join('; ')}`);
-  const 临时 = path.join(视图目录, '__render_ShowLayer.ts');
+  const 临时 = path.join(视图目录, `__render_${Math.random().toString(36).slice(2)}_ShowLayer.ts`);
   fs.writeFileSync(临时, compileScript(descriptor, { id: 'ShowLayer.vue', inlineTemplate: true }).content);
   try {
     const mod: any = await import(/* @vite-ignore */ 临时);
@@ -32,7 +34,7 @@ async function 渲染(props: Record<string, any>): Promise<string> {
 const 坐标 = { 契约者: 20, 骨卫兵: 80 };
 
 describe('演出层 · 飘字与轨迹', () => {
-  it('命中 → 守方位置冒伤害飘字（带延迟、带数值）', async () => {
+  it('命中 → 守方位置冒伤害飘字（带延迟、带数值）', { timeout: 编译超时 }, async () => {
     const html = await 渲染({
       事件: [{ 类: '命中', 攻方: '契约者', 守方: '骨卫兵', 伤害: 42 } as 演出事件],
       坐标,
@@ -43,7 +45,7 @@ describe('演出层 · 飘字与轨迹', () => {
     expect(html).toMatch(/left:\s*80%/); // 落在守方的地砖上
   });
 
-  it('未命中 → 灰字「未命中」，且轨迹画成 miss', async () => {
+  it('未命中 → 灰字「未命中」，且轨迹画成 miss', { timeout: 编译超时 }, async () => {
     const html = await 渲染({
       事件: [{ 类: '未命中', 攻方: '契约者', 守方: '骨卫兵' } as 演出事件],
       坐标,
@@ -53,7 +55,7 @@ describe('演出层 · 飘字与轨迹', () => {
     expect(html).toContain('miss');
   });
 
-  it('攻击轨迹：攻方 → 守方的一条线（两端坐标都在才画）', async () => {
+  it('攻击轨迹：攻方 → 守方的一条线（两端坐标都在才画）', { timeout: 编译超时 }, async () => {
     const html = await 渲染({
       事件: [{ 类: '命中', 攻方: '契约者', 守方: '骨卫兵', 伤害: 10 } as 演出事件],
       坐标,
@@ -64,7 +66,7 @@ describe('演出层 · 飘字与轨迹', () => {
     expect(html).toContain('x2="80"');
   });
 
-  it('事件按发生顺序错峰播放（animation-delay 递增）', async () => {
+  it('事件按发生顺序错峰播放（animation-delay 递增）', { timeout: 编译超时 }, async () => {
     const html = await 渲染({
       事件: [
         { 类: '命中', 攻方: '契约者', 守方: '骨卫兵', 伤害: 10 } as 演出事件,
@@ -83,21 +85,21 @@ describe('演出层 · 飘字与轨迹', () => {
 });
 
 describe('演出层 · 特殊事件', () => {
-  it('变身 → 全屏演出牌（形态名亮出）', async () => {
+  it('变身 → 全屏演出牌（形态名亮出）', { timeout: 编译超时 }, async () => {
     const html = await 渲染({ 事件: [{ 类: '变身', 单位: '契约者', 形态: '二阶段·觉醒' } as 演出事件], 坐标 });
 
     expect(html).toContain('transform-show');
     expect(html).toContain('二阶段·觉醒');
   });
 
-  it('打断成功 → 金色裂纹闪光', async () => {
+  it('打断成功 → 金色裂纹闪光', { timeout: 编译超时 }, async () => {
     const html = await 渲染({ 事件: [{ 类: '打断成功', 单位: '骨卫兵' } as 演出事件], 坐标 });
 
     expect(html).toContain('crack');
     expect(html).toMatch(/left:\s*80%/);
   });
 
-  it('濒死 → 「濒死！」提示 + 规则系 → 光环', async () => {
+  it('濒死 → 「濒死！」提示 + 规则系 → 光环', { timeout: 编译超时 }, async () => {
     const html = await 渲染({
       事件: [
         { 类: '濒死', 守方: '骨卫兵' } as 演出事件,
@@ -110,7 +112,7 @@ describe('演出层 · 特殊事件', () => {
     expect(html).toContain('halo');
   });
 
-  it('环境火把永远在场（决斗场两侧）', async () => {
+  it('环境火把永远在场（决斗场两侧）', { timeout: 编译超时 }, async () => {
     const html = await 渲染({ 事件: [], 坐标 });
 
     expect((html.match(/env-torch/g) ?? []).length).toBeGreaterThanOrEqual(2);
@@ -118,7 +120,7 @@ describe('演出层 · 特殊事件', () => {
 });
 
 describe('演出层 · DOM 上限（手机端防掉帧）', () => {
-  it('30 个事件最多渲染 24 个演出元素（超出即弃，不排队）', async () => {
+  it('30 个事件最多渲染 24 个演出元素（超出即弃，不排队）', { timeout: 编译超时 }, async () => {
     const 事件: 演出事件[] = Array.from({ length: 30 }, (_, i) => ({
       类: '命中',
       攻方: '契约者',
@@ -133,7 +135,7 @@ describe('演出层 · DOM 上限（手机端防掉帧）', () => {
     expect(飘字数).toBeGreaterThan(0);
   });
 
-  it('空事件 → 只有环境元素，不报错', async () => {
+  it('空事件 → 只有环境元素，不报错', { timeout: 编译超时 }, async () => {
     const html = await 渲染({ 事件: [], 坐标: {} });
 
     expect(html).toContain('show-layer');
@@ -212,7 +214,7 @@ describe('演出生命周期（评审 Critical #1）', () => {
 // 两只的飘字/轨迹都锚错。修法：演出相关步骤带**单位键**，坐标表按键建（显示名回退）。
 // ================================================================
 describe('演出坐标按键（评审 Important #2）', () => {
-  it('「命中」事件带守方键（不只是显示名）', async () => {
+  it('「命中」事件带守方键（不只是显示名）', { timeout: 编译超时 }, async () => {
     const { 开战规则结算, 结算行动 } = await import('../engine/loop');
     const { 演出事件提取 } = await import('../engine/showEvents');
     const 造解释 = (覆盖: any = {}): any => ({
