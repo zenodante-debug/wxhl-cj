@@ -50,7 +50,6 @@
             :key="u.id"
             class="distance-marker"
             :class="{ ally: u.阵营 === '我方', enemy: u.阵营 === '敌方', self: u.类型 === '玩家', down: u.HP_当前 <= 0 }"
-            :style="{ bottom: i * 层高 + 'px' }"
             :title="`${u.id} · ${u.距离}米（${距离带(u.距离)}）`"
           >
             {{ u.名称 }} {{ u.距离 }}m
@@ -805,13 +804,16 @@ defineExpose({ 清空填写 });
   pointer-events: none;
 }
 
-/* 同一距离的一组：整个组在横向定位（+ 纵向车道抬升），组内上下堆叠 */
+/* 同一距离的一组：整个组在横向定位（+ 纵向车道抬升）。
+ * 组内用 **column-reverse** 排列：第一个人**贴着轴线**（x 坐标 = 距离），
+ * 其余的人在他上方依次排开 —— 同 x 不重叠（玩家反馈：名字全部叠在一起）。
+ * （不要再给棋子加按索引的 bottom 位移：flex 已经排开了，位移会让全部落回同一点。） */
 .marker-group {
   position: absolute;
   bottom: 6px;
   transform: translateX(-50%);
   display: flex;
-  flex-direction: column;
+  flex-direction: column-reverse;
   align-items: center;
 }
 

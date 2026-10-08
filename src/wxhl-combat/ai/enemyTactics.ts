@@ -93,7 +93,9 @@ export const 敌方意图_SCHEMA = {
  * 3. **目标写我方 id 或「玩家」** —— 目标找不到同样会被跳过。
  */
 export function 构建敌方意图提示词(状态: 战斗状态): string {
-  const 敌方单位 = Object.values(状态.单位).filter(u => u.阵营 === '敌方');
+  // 只给**还活着**的敌人出意图：倒地（HP ≤ 0）的单位不能行动 ——
+  // 以前把尸体也列进去，模型会给它写一堆行动，白烧 token 还容易看出破绽。
+  const 敌方单位 = Object.values(状态.单位).filter(u => u.阵营 === '敌方' && u.HP_当前 > 0);
   const 我方单位 = Object.values(状态.单位).filter(u => u.阵营 === '我方');
 
   const 敌方块 = 敌方单位.length
