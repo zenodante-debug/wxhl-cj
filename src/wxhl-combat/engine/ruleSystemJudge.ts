@@ -6,7 +6,6 @@
 
 import { rollDie } from './dice';
 import { 属性修正值 } from './rules';
-import type { 规则系效果 } from '../types';
 
 /** 基础DC表（世界书原文） */
 const 基础DC表: Record<string, number> = {
@@ -38,7 +37,7 @@ interface 单位 {
  *   判定值 = 1d20 + 关联属性修正 + 技能等额外修正
  *   对抗目标 =（基础DC + 目标对应属性修正）× 类型系数 + 目标对应属性修正
  *
- * @param 效果 规则系效果（穿透/必中/必暴/即死/无敌/锁血/无视）
+ * @param 效果 规则系效果名（**开放集合**：世界书写的是「…等」，引擎认不得的也照旧判定）
  * @param 攻击方 攻击方单位
  * @param 防御方 防御方单位
  * @param 攻击属性 攻击方用的属性（默认 STR）
@@ -46,7 +45,7 @@ interface 单位 {
  * @param 掷骰 本次 d20 的点数（测试注入；缺省现场掷）
  */
 export function 规则系判定(
-  _效果: 规则系效果,
+  _效果: string, // 只用来说明这是哪个能力的判定 —— 规则系是开放集合，不限于已知那几个
   攻击方: 单位,
   防御方: 单位,
   攻击属性: 'STR' | 'AGI' | 'CON' | 'PER' = 'STR',
