@@ -23,8 +23,9 @@
          同一距离上的多人不再互相遮挡，而是**上下堆叠**（实战反馈）。 -->
     <div class="arena-floor">
       <div class="distance-bar" :style="{ height: 距离条高度 + 'px' }">
-        <!-- 演出层（决斗场美术）：飘字/轨迹/裂纹/光环，复用同一套地砖坐标 -->
-        <ShowLayer :事件="演出事件 ?? []" :坐标="演出坐标" />
+        <!-- 演出层（决斗场美术）：飘字/轨迹/裂纹/光环，复用同一套地砖坐标。
+             「战斗演出」关掉 / 系统减弱动效 → 连 DOM 都不渲染（零成本） -->
+        <ShowLayer v-if="演出开" :事件="演出事件 ?? []" :坐标="演出坐标" />
 
         <div class="axis-hint left">◀ 身后（负）</div>
         <div class="axis-hint center" :style="{ left: 原点百分比 + '%' }">玩家原点</div>
@@ -286,6 +287,7 @@ import { 可提交, 构造行动声明, type 行动槽填写 } from '../engine/a
 import { 造我方条目, 造技能展示, 选中行动预览, 显示名, type 我方条目 } from '../engine/viewModel';
 import { 列行动选项 } from '../engine/actionOptions';
 import ShowLayer from './ShowLayer.vue';
+import { 演出开启 } from '../engine/showToggle';
 import type { 演出事件 } from '../engine/showEvents';
 import type { 敌方意图 } from '../ai/enemyTactics';
 import type { 战斗状态 } from '../types';
@@ -376,6 +378,9 @@ const 演出坐标 = computed<Record<string, number>>(() => {
   }
   return 出;
 });
+
+/** 演出该不该渲染：设置「战斗演出」开 + 系统没要求减弱动效（engine/showToggle） */
+const 演出开 = computed(演出开启);
 
 /** 同一点最多叠几个 → 决定条的高度 */
 const 距离条高度 = computed(() =>

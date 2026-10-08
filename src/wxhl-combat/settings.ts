@@ -18,6 +18,12 @@ export const Settings = z.object({
    *              （玩家要的省调用模式："主要行动有三个选项就 1d3"）
    */
   意图模式: z.enum(['ai', '随机']).prefault('ai'),
+  /**
+   * 战斗演出（决斗场美术）：飘字 / 攻击轨迹 / 变身全屏 / 打断裂纹 / 环境火光。
+   * 玩家裁决：「重演出，加可关闭」—— 默认开；关掉时演出层**不渲染**（零成本）。
+   * 系统 prefers-reduced-motion 时一律等同关闭（engine/showToggle）。
+   */
+  演出: z.boolean().prefault(true),
 }).prefault({});
 
 export type Settings = z.infer<typeof Settings>;

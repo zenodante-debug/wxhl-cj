@@ -6,6 +6,17 @@
     </p>
 
     <section class="api-block">
+      <h4>战斗演出（决斗场美术）</h4>
+      <label class="field field-inline">
+        <input v-model="store.settings.演出" type="checkbox" />
+        <span>开启演出（飘字 / 攻击轨迹 / 变身全屏 / 打断裂纹 / 环境火光）</span>
+      </label>
+      <span class="sub-hint">
+        关掉时演出层**完全不渲染**（零成本，最省性能）；系统开启「减弱动态效果」时一律等同关闭。
+      </span>
+    </section>
+
+    <section class="api-block">
       <h4>敌方意图怎么产生</h4>
       <label class="field">
         <span>模式</span>
@@ -220,6 +231,17 @@ async function 清缓存() {
   font-size: 13px;
   color: #999;
   margin-bottom: 10px;
+
+  &.field-inline {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+
+    input[type='checkbox'] {
+      width: auto;
+      accent-color: var(--cb-amber, #e8c078);
+    }
+  }
 
   > span {
     display: block;
