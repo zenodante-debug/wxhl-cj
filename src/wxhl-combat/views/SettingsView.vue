@@ -31,6 +31,14 @@
       </label>
     </section>
 
+    <section class="api-block">
+      <h4>诊断</h4>
+      <div class="actions">
+        <button class="copy-btn" @click="诊断">诊断设置变量读写</button>
+        <span class="result">把控制台输出发我 —— 它对比「带 script_id 读」与「不带 script_id 读」</span>
+      </div>
+    </section>
+
     <section v-for="路 in 路列表" :key="路" class="api-block">
       <h4>{{ 路 === '快路' ? '快路（意图 / 翻译，高频）' : '强路（收尾正文，文笔）' }}</h4>
 
@@ -99,7 +107,7 @@
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue';
-import { useSettingsStore } from '../settingsStore';
+import { useSettingsStore, 诊断设置读写 } from '../settingsStore';
 import { 拉取模型, 测试连接, 翻译缓存条目数, 清空翻译缓存 } from '../store';
 
 const store = useSettingsStore();
@@ -146,8 +154,12 @@ async function 拉取(路: 路名) {
   }
 }
 
-async function 测试(路: 路名) {
-  const 态 = 界面[路];
+/** 诊断：把脚本变量这条链路的现状打到控制台（详见 settingsStore.诊断设置读写 的注释） */
+function 诊断(): void {
+  诊断设置读写();
+}
+
+async function 测试(路: 路名) {  const 态 = 界面[路];
   const cfg = store.settings[路];
   态.测试中 = true;
   态.结果 = '';
