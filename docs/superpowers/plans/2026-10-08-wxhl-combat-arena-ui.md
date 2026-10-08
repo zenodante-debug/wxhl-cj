@@ -177,3 +177,31 @@ src/wxhl-combat/
 | 手机端演出掉帧 | 只 transform/opacity；飘字 DOM 上限；火把动效 `animation-play-state` 随开关停 |
 | Google Fonts @import 在酒馆页面 | wxhl-003 已验证同法可行；失败时回退系统字（serif/sans 栈已写） |
 | 演出事件解析把日志格式当 API | 解析只认 `步骤.类` + 结构化字段，**不解析内容文本**（文本会变，类名是契约） |
+
+---
+
+## 8. 实施状态（2026-10-08 完成）
+
+9 步全部落地，**1793 测试通过**（新增 `arenaTheme` / `arenaShow` / `arenaToggle` / `arenaSettle` / `showEvents` 五个测试文件），`npx tsc --noEmit` 维持基线 44，dist 已重建并推送 wxhl-combat。
+
+| 步 | 落地位置 |
+| :--- | :--- |
+| 1 theme + 外壳 | `theme.scss`（调色板/颗粒/铆钉/石碑/铜牌/闸门/血条 mixin/火把·血光·飘字·变身·裂纹关键帧）+ App.vue 石檐/铜牌/血珀启动球（行为一字未动） |
+| 2 准备页 | 点将台铭牌列表 + 石碑开场距离 + 闸门开战键 |
+| 3 战斗页静态皮 | 先攻火把链 + 地砖决斗场地面 + 军牌铭牌（HP/MP/耐力三条液面）+ 石碑行动区 + 卷轴日志 |
+| 4 演出事件 | `engine/showEvents.ts` + `结算步骤` 结构化标记（**不解析日志文本**） |
+| 5 演出层 | `views/ShowLayer.vue`：飘字/轨迹/裂纹/光环/变身全屏/环境火把，animation-delay 错峰，DOM 上限 24 |
+| 6 演出开关 | `settings.演出`（默认开）+ `engine/showToggle.ts`（reduced-motion 短路）+ 设置页开关 + `v-if="演出开"` |
+| 7 收尾页 | 三态横幅（金漆凯旋/血字陨落/灰字撤退）+ 钥匙战利品列表（五档配色） |
+| 8 设置页 | 石碑化 |
+| 9 回归 | 全量测试 / tsc / build / push |
+
+### 最终评审（whole-branch）与修复
+
+评审结论「不可合并，带修复条件」，三项已修：
+
+1. **Critical：演出在首次 paint 前被清空**（`推进轮次` 赋值与 `推进回合` 清空之间只有微任务）→ 回合开始**不再清空**，改为**批次号 + key 前缀**整批重建节点；战斗边界（开始战斗/逃离/回准备/收尾）才清。
+2. **Important：同名单位演出坐标互相覆盖** → `结算步骤` 增加 `攻方键/守方键/单位键`，坐标表**按键建**（显示名回退）。
+3. **Important：ShowLayer props 接线无测试**（renderViews 的占位组件会吞掉写错的 prop）→ 源码守卫钉死 `:事件="演出事件…"` / `:坐标="演出坐标"`。
+
+延迟的 Minor（记录在账本，未做）：环境动画不受开关/reduced-motion 约束；飘字上升段被地砖 overflow 裁掉大半；先攻火把链点亮语义（=站着点亮，状态里没有"当前行动者"字段）；`演出开` 非响应式读；Google Fonts @import 被 7 个组件各复制一份。
