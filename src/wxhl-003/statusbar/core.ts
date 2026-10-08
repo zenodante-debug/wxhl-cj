@@ -13,6 +13,7 @@ import imgAgi from './assets/agi.webp?url';
 import imgCon from './assets/cons.webp?url';
 import imgPer from './assets/per.webp?url';
 import { deposit, loadStorage, saveStorage, withdraw, type StorageRoom } from './storage';
+import { 位阶修正值系数, 位阶属性软上限, 位阶档位, 位阶等级上限 } from './tier';
 import { canUseHubFacility, HUB_GATE_HINT } from '../hubGate';
 
 /** 挂载状态栏到 root 元素，返回卸载函数 */
@@ -92,14 +93,9 @@ export function mountStatusbar(root: HTMLElement): () => void {
     return 15;
   }
 
+  /* ==================== 位阶（关键词筛选，判定在 statusbar/tier.ts） ==================== */
   function getRankMultiplier(rankStr: string) {
-    if (rankStr === '一阶') return 1;
-    if (rankStr === '二阶') return 2;
-    if (rankStr === '三阶') return 4;
-    if (rankStr === '四阶') return 7;
-    if (rankStr === '五阶') return 11;
-    if (rankStr === '超脱者' || rankStr === '超脱') return 16;
-    return 1;
+    return 位阶修正值系数[位阶档位(rankStr) ?? 0];
   }
 
   /* ==================== 装备物品判定（字段特征法） ==================== */
@@ -209,24 +205,10 @@ export function mountStatusbar(root: HTMLElement): () => void {
     let changed = false;
 
     if (isPlayerMode) {
-      let maxLv = 20,
-        softCap = 25;
-      if (rankStr === '二阶') {
-        maxLv = 40;
-        softCap = 40;
-      } else if (rankStr === '三阶') {
-        maxLv = 60;
-        softCap = 55;
-      } else if (rankStr === '四阶') {
-        maxLv = 80;
-        softCap = 70;
-      } else if (rankStr === '五阶') {
-        maxLv = 100;
-        softCap = 9999;
-      } else if (rankStr === '超脱者' || rankStr === '超脱') {
-        maxLv = 9999;
-        softCap = 9999;
-      }
+      // 位阶档位统一走关键词判定（见 位阶档位）——超脱与各种写法都在那里归一，这里只查表
+      const 档 = 位阶档位(rankStr) ?? 0;
+      const maxLv = 位阶等级上限[档];
+      const softCap = 位阶属性软上限[档];
 
       _.set(entity, '头部.属性软上限', softCap);
 
@@ -466,11 +448,8 @@ export function mountStatusbar(root: HTMLElement): () => void {
   }
 
   function softCapOf(rankStr: string) {
-    if (rankStr === '二阶') return 40;
-    if (rankStr === '三阶') return 55;
-    if (rankStr === '四阶') return 70;
-    if (rankStr === '五阶' || rankStr === '超脱者' || rankStr === '超脱') return 9999;
-    return 25;
+    // 与属性派生同一张表（超脱与各种写法由 位阶档位 归一）
+    return 位阶属性软上限[位阶档位(rankStr) ?? 0];
   }
 
   async function saveVariable(path: string, currentVal: number, newVal: number) {
@@ -523,10 +502,12 @@ export function mountStatusbar(root: HTMLElement): () => void {
 
       if (path.endsWith('.头部.阶位') && isPlayerMode) {
         let free = Number(_.get(data.stat_data, basePath + '.属性.未分配属性点', 0)) || 0;
-        if (currentVal === '一阶' && newVal === '二阶') free += 3;
-        else if (currentVal === '二阶' && newVal === '三阶') free += 5;
-        else if (currentVal === '三阶' && newVal === '四阶') free += 5;
-        else if (currentVal === '四阶' && newVal === '五阶') free += 8;
+        // 按**档位差**送点（写法无关：`二阶` / `2阶` / `二阶·觉醒` 都认）——只认「恰好升一档」，
+        // 跨档/降档不送。表按**新档**索引（1=二阶 … 4=五阶）；「五阶 → 超脱」暂无送点规则，故不上表。
+        const 旧档 = 位阶档位(currentVal);
+        const 新档 = 位阶档位(newVal);
+        const 升级送点: Record<number, number> = { 1: 3, 2: 5, 3: 5, 4: 8 };
+        if (旧档 !== undefined && 新档 === 旧档 + 1) free += 升级送点[新档] ?? 0;
         _.set(data.stat_data, basePath + '.属性.未分配属性点', free);
       }
       _.set(data.stat_data, path, newVal);
