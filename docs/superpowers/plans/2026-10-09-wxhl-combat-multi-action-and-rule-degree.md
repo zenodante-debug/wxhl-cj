@@ -196,9 +196,9 @@
 > `bdc0d94` 技能级作用动作族/连携（`skillLinkage.test.ts` 19 例）、
 > `6f8800e` 领域真正执行（`domainField.test.ts` 12 例）、
 > `acdb85f` 每行动各自选目标 + 选择目标技能下拉（`perActionTarget.test.ts` 17 例）、
-> 本段 **AoE**（`aoeAttack.test.ts` 11 例）。
-> 当前全量 **1007 测试全绿**、`tsc` 仍 44、`npm run build` 通过。
-> 战斗脚本仓库已推 **`73b1c8a`**（`bash scripts/push-combat.sh`，需要代理 127.0.0.1:7892）。
+> 本段 **AoE**（`aoeAttack.test.ts` 12 例）。
+> 当前全量 **1008 测试全绿**、`tsc` 仍 44、`npm run build` 通过。
+> 战斗脚本仓库已推 **`dad5ed5`**（`bash scripts/push-combat.sh`，需要代理 127.0.0.1:7892）。
 > **剩下的两项**：第 5 项（翻译一格多招 —— 要改**缓存形状**「指纹→解释」改成「指纹→解释列表」，
 > 那里面装着玩家已有的翻译结果，**向后兼容必须做足**）+ 第 9 项（详情面板按 `母条目` 分组 +
 > 提示词总纲「闪闪果实」范例），最后第 10 项回归。
