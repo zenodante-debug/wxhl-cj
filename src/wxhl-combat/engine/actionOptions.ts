@@ -101,13 +101,36 @@ export interface 行动选项 {
  * 解析技能的**资源消耗**（世界书的「资源消耗：使用技能/动作即时扣耐力、MP」）。
  * 认 `MP 5` / `MP5` / `魔力 10` / `耐力 8` / `体力 8` 这些写法；「无」或认不出来 → null。
  */
-export function 解析消耗(消耗文本: unknown): { 资源: 'MP' | '耐力'; 量: number } | null {
+export function 解析消耗(消耗文本: unknown): 解析消耗结果 | null {
   const 文 = String(消耗文本 ?? '');
+  const 资源 = (名: string): 'MP' | '耐力' => (/MP|mp|魔力/.test(名) ? 'MP' : '耐力');
+
+  // 先认**按最大值比例**的写法（「最大MP的8%」/「MP上限的2%」/「最大耐力的5%」）——
+  // 必须排在绝对值前面，否则 "8%" 会被当成 8 点。
+  const 比 = /(?:最大)?(MP|mp|魔力|耐力|体力)(?:上限)?(?:的)?\s*(\d+(?:\.\d+)?)\s*%/.exec(文);
+  if (比) {
+    const 比例 = Number(比[2]) / 100;
+    if (Number.isFinite(比例) && 比例 > 0) return { 资源: 资源(比[1]), 比例 };
+  }
+
   const m = /(MP|mp|魔力|耐力|体力)\s*(\d+(?:\.\d+)?)/.exec(文);
   if (!m) return null;
   const 量 = Math.floor(Number(m[2]));
   if (!Number.isFinite(量) || 量 <= 0) return null;
-  return { 资源: /MP|mp|魔力/.test(m[1]) ? 'MP' : '耐力', 量 };
+  return { 资源: 资源(m[1]), 量 };
+}
+
+/** 解析出来的消耗：要么是**绝对值**（量），要么是**按最大值的比例**（比例，如 0.08 = 最大MP的 8%） */
+export interface 解析消耗结果 {
+  资源: 'MP' | '耐力';
+  量?: number;
+  比例?: number;
+}
+
+/** 这次消耗实际要扣多少（比例按该单位的最大值折算，向上取整） */
+export function 实扣量(耗: 解析消耗结果, 上限: number): number {
+  if (耗.比例 !== undefined) return Math.max(1, Math.ceil(上限 * 耗.比例));
+  return Math.max(0, Math.floor(耗.量 ?? 0));
 }
 
 /**
