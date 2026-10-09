@@ -10,7 +10,7 @@
 // ================================================================
 
 import type { 战斗单位, 战斗解释 } from '../types';
-import { 规范行动消耗, 是基础攻击哨兵, 副武器攻击 } from './actionOptions';
+import { 规范行动消耗, 是基础攻击哨兵, 副武器攻击, 行动消耗文本 } from './actionOptions';
 import { 徒手伤害骰 } from './damage';
 import { 效果预览, type 效果预览 as 效果预览类型 } from './effectPreview';
 import { 加权摘要 } from './rules';
@@ -166,11 +166,11 @@ export function 造技能展示(技能: Record<string, 战斗解释> | undefined
       const 倍率 =
         加权摘要(解释?.属性加权) ||
         (typeof 解释?.伤害倍率 === 'number' && 解释.伤害倍率 > 0 ? `×${解释.伤害倍率}` : '无伤害');
-      const 摘要段 = [解释?.行动消耗, 解释?.射程, 倍率].filter(Boolean).join(' · ');
+      const 摘要段 = [行动消耗文本(解释), 解释?.射程, 倍率].filter(Boolean).join(' · ');
       return {
         名,
         摘要: `${名}（${摘要段}）`,
-        行动消耗: 解释?.行动消耗 ?? '',
+        行动消耗: 行动消耗文本(解释),
         行动类型: 规范行动消耗(解释) ?? '被动/非行动',
         射程: 解释?.射程 ?? '',
         目标: 解释?.目标 ?? '',

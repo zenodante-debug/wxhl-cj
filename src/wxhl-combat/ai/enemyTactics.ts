@@ -10,6 +10,7 @@
 
 import type { 战斗状态, 战斗单位, 战斗解释 } from '../types';
 import { 距离带 } from '../engine/distance';
+import { 行动消耗文本 } from '../engine/actionOptions';
 import { 提取JSON } from './jsonExtract';
 
 export interface 敌方意图 {
@@ -37,7 +38,7 @@ function 显示名(u: 战斗单位): string {
 /** 一个技能在提示词里的一行摘要 —— 只写 AI 决定行动要用的字段 */
 function 技能行(名: string, 解释: 战斗解释): string {
   const 伤害 = typeof 解释.伤害倍率 === 'number' && 解释.伤害倍率 > 0 ? `｜伤害倍率 ${解释.伤害倍率}` : '';
-  return `    - ${名}｜${解释.行动消耗 ?? '主要行动'}｜射程 ${解释.射程 || '未写'}｜目标 ${
+  return `    - ${名}｜${行动消耗文本(解释) || '主要行动'}｜射程 ${解释.射程 || '未写'}｜目标 ${
     解释.目标 || '单体'
   }｜消耗 ${解释.消耗 || '无'}｜冷却 ${解释.冷却 ?? 0}｜${解释.类型 || '主动'}${伤害}`;
 }
