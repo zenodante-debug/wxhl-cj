@@ -34,19 +34,34 @@ unset GIT_INDEX_FILE
 rm -f "$tmp_index"
 
 old_commit=$(git rev-parse --verify --quiet "$DST_BRANCH" || true)
-if [ -n "$old_commit" ] && [ "$(git rev-parse "$old_commit^{tree}")" = "$new_tree" ]; then
-  echo "已是最新（$DST_BRANCH 的树与 $SRC_BRANCH 一致），无需推送。"
+
+# 幂等的判据必须是**远端**，不是本地导出分支 ——
+# 曾经踩过：先 update-ref 再 push，push 因网络失败，本地却已前进 →
+# 下次再跑时误判成"已是最新"，改动就永远推不上去了。
+remote_head=$(git ls-remote "$REMOTE" refs/heads/main 2>/dev/null | cut -f1 || true)
+if [ -z "$remote_head" ]; then
+  echo "⚠ 连不上远端（$REMOTE）—— 请检查网络/代理后重跑本脚本。" >&2
+  exit 1
+fi
+
+if [ -n "$old_commit" ] && [ "$(git rev-parse "$old_commit^{tree}")" = "$new_tree" ] && [ "$remote_head" = "$old_commit" ]; then
+  echo "已是最新（远端 main 与 $SRC_BRANCH 一致），无需推送。"
   exit 0
 fi
 
 msg="${2:-sync(wxhl-combat): 同步战斗脚本 @ $(git rev-parse --short "$SRC_BRANCH")}"
-if [ -n "$old_commit" ]; then
-  new_commit=$(git commit-tree "$new_tree" -p "$old_commit" -m "$msg")
+if [ -n "$old_commit" ] && [ "$(git rev-parse "$old_commit^{tree}")" = "$new_tree" ]; then
+  # 树没变但远端落后（上次推送失败）→ 直接推已有的提交，不造空提交
+  new_commit="$old_commit"
 else
-  new_commit=$(git commit-tree "$new_tree" -m "$msg")
+  if [ -n "$old_commit" ]; then
+    new_commit=$(git commit-tree "$new_tree" -p "$old_commit" -m "$msg")
+  else
+    new_commit=$(git commit-tree "$new_tree" -m "$msg")
+  fi
+  git update-ref "refs/heads/$DST_BRANCH" "$new_commit"
 fi
 
-git update-ref "refs/heads/$DST_BRANCH" "$new_commit"
 git push "$REMOTE" "$DST_BRANCH:main"
 
 echo "已推送：$(git rev-parse --short "$new_commit")  $msg"
