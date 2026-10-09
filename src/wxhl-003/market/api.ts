@@ -67,8 +67,33 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 const post = <T>(path: string, body: unknown): Promise<T> =>
   req<T>(path, { method: 'POST', body: JSON.stringify(body) });
 
-export function fetchListings(): Promise<Listing[]> {
-  return req<{ listings: Listing[] }>('/market/listings').then(r => r.listings);
+/**
+ * 取**全部**在售挂单：服务端分页（limit ≤ 500/页，带 `hasMore`），这里一页页翻到底。
+ *
+ * ⚠️ 早先这里裸调 `/market/listings`，服务端默认只回最新 50 条 —— 市集一超过 50 件，
+ * 更早的挂单就再也取不到（玩家挂的东西「凭空消失」）。翻页 + 服务端 `hasMore` 是根治。
+ *
+ * 两层兜底，保证不会死循环也不会漏：
+ * - 服务端**旧版**不认 `offset`（没有 `hasMore`）时，第 2 页会返回同一批 → 用 id 去重，
+ *   一整页没有新条目即视为到底（越早的版本越不会因此卡住或重复渲染）。
+ * - 硬上限 20 页（约 1 万条），防服务端异常时无限翻。
+ */
+export async function fetchListings(): Promise<Listing[]> {
+  const 全部: Listing[] = [];
+  const 已见 = new Set<string>();
+  for (let offset = 0, 页号 = 0; 页号 < 20; 页号++) {
+    const r = await req<{ listings: Listing[]; hasMore?: boolean }>(
+      `/market/listings?limit=500&offset=${offset}`,
+    );
+    const 页 = r.listings ?? [];
+    const 新条目 = 页.filter(l => !已见.has(l.id));
+    if (新条目.length === 0) break; // 到底了（也兜住不认 offset 的旧服务端）
+    for (const l of 新条目) 已见.add(l.id);
+    全部.push(...新条目);
+    if (!r.hasMore) break;
+    offset += 页.length;
+  }
+  return 全部;
 }
 
 export function createListing(p: {

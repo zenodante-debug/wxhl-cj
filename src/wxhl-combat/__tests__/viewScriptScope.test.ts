@@ -124,3 +124,87 @@ describe('views 的脚本作用域（try/finally 不能跨作用域引用）', (
     expect(找跨作用域引用(好码)).toEqual([]);
   });
 });
+
+// ================================================================
+// 防具 2：`.vue` 脚本里**调用了不存在的名字**
+//
+// 实战踩过（2026-10-09）：CombatView 里五处调用 `持久化附加()`，但那个函数的补丁
+// 锚点没匹配上、声明压根没加进去 —— `持久化附加 is not defined`，**点开战直接失败**。
+// `.vue` 没有类型检查，`renderViews` 的 SSR 也测不到（这些调用都在异步事件处理里，
+// 渲染时不会执行），所以只能静态查。
+//
+// 做法：脚本里**中文标识符的调用点**必须在本文件里有声明（function/const/let/var/class/参数）。
+// 我们自己的函数与变量几乎全是中文名，所以这条规则误报极少、又能抓到这类"忘了声明"。
+// ================================================================
+function 找未声明的调用(源: string): string[] {
+  const 源文件 = ts.createSourceFile('v.ts', 源, ts.ScriptTarget.ESNext, true, ts.ScriptKind.TS);
+  const 声明 = new Set<string>();
+
+  const 收声明 = (节点: ts.Node) => {
+    if (
+      (ts.isFunctionDeclaration(节点) ||
+        ts.isVariableDeclaration(节点) ||
+        ts.isParameter(节点) ||
+        ts.isClassDeclaration(节点)) &&
+      节点.name &&
+      ts.isIdentifier(节点.name)
+    ) {
+      声明.add(节点.name.text);
+    }
+    // import 进来的名字也算已声明（否则全是误报）
+    if (ts.isImportSpecifier(节点) || ts.isImportClause(节点) || ts.isNamespaceImport(节点)) {
+      const 名 = (节点 as any).name ?? (节点 as any).propertyName;
+      if (名 && ts.isIdentifier(名)) 声明.add(名.text);
+    }
+    ts.forEachChild(节点, 收声明);
+  };
+  收声明(源文件);
+
+  const 问题 = new Set<string>();
+  const 走 = (节点: ts.Node) => {
+    if (ts.isCallExpression(节点) && ts.isIdentifier(节点.expression)) {
+      const 名 = 节点.expression.text;
+      const 含中文 = /[一-龥]/.test(名);
+      if (含中文 && !声明.has(名)) {
+        const 行 = 源文件.getLineAndCharacterOfPosition(节点.getStart()).line + 1;
+        问题.add(`${名}（第 ${行} 行调用，但整个文件里没有声明）`);
+      }
+    }
+    ts.forEachChild(节点, 走);
+  };
+  走(源文件);
+  return [...问题];
+}
+
+describe('views 的脚本里没有"调用了不存在的名字"', () => {
+  const 视图 = fs.readdirSync(视图目录).filter(f => f.endsWith('.vue'));
+
+  for (const 文件名 of 视图) {
+    it(`${文件名}：中文函数调用都有声明`, () => {
+      expect(找未声明的调用(取脚本(文件名))).toEqual([]);
+    });
+  }
+
+  it('**规则自检**：忘记声明的调用必须被查出来（否则这条防具是假的）', () => {
+    const 坏码 = `
+      import { 写战斗状态 } from './store';
+      async function 执行本轮(战斗: any) {
+        await 写战斗状态(战斗.value, 持久化附加());
+      }
+    `;
+    const 问题 = 找未声明的调用(坏码);
+    expect(问题).toHaveLength(1);
+    expect(问题[0]).toContain('持久化附加');
+  });
+
+  it('规则自检：声明过的不会被误报（含参数与 const）', () => {
+    const 好码 = `
+      const 持久化附加 = () => ({});
+      function 写战斗状态(a: any, b: any) {}
+      async function 执行本轮(战斗: any) {
+        await 写战斗状态(战斗.value, 持久化附加());
+      }
+    `;
+    expect(找未声明的调用(好码)).toEqual([]);
+  });
+});

@@ -468,6 +468,19 @@ export async function aiGenerate(
       const result = await 带超时(generateRaw(config) as Promise<any>, 超时);
       const text = typeof result === 'string' ? result : (result as any).content || '';
 
+      // 空正文要**点名**：推理模型（deepseek-reasoner 之类）把内容全放在思考(reasoning)里、
+      // 正文是空的，我们只会拿到空串 —— 再往下走就是一句含糊的"非法 JSON"，玩家只会以为是我们坏了。
+      if (!String(text).trim()) {
+        lastErr =
+          `模型返回了空正文（${用途}）—— 推理模型（如 deepseek-reasoner）会把内容放在思考(reasoning)里、` +
+          `正文为空。换一个非推理模型，或在酒馆预设/API 侧关掉思考模式再试。`;
+        if (attempt < 2) {
+          await new Promise(r => setTimeout(r, 1500));
+          continue;
+        }
+        break; // 落到循环末尾的统一抛错（带上面这条说明）
+      }
+
       if (!jsonSchema) return text;
 
       try {

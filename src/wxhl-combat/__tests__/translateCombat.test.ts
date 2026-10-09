@@ -82,9 +82,10 @@ describe('翻译战斗解释 · 整场只调 1 次 AI（实战反馈：逐个技
     (globalThis as any).getScriptId = () => 'wxhl-combat';
     (globalThis as any).getVariables = () => ({ 快路: 配置 });
     (globalThis as any).replaceVariables = () => {};
-    // 第 0 条的规则是空对象（结构不完整 → 真正会失败的那种），第 1 条正常
+    // 第 0 条**根本不是对象**（不可救的那种），第 1 条正常
+    //（坏规则不再判失败——那类只记忽略数，见 translateLeniency.test.ts）
     (globalThis as any).generateRaw = async () =>
-      JSON.stringify({ 解释: [{ 编号: 0, 规则: [{}] }, { 编号: 1, 行动消耗: '次要行动', 射程: '自身', 目标: '自身', 消耗: '无', 冷却: 0, 分类: '基础', 类型: '被动', 可预判: false, 规则: [], 托管: [] }] });
+      JSON.stringify({ 解释: ['一段文字', { 编号: 1, 行动消耗: '次要行动', 射程: '自身', 目标: '自身', 消耗: '无', 冷却: 0, 分类: '基础', 类型: '被动', 可预判: false, 规则: [], 托管: [] }] });
 
     const 结果 = await 翻译战斗解释([
       { id: '契约者', 效果源: [{ 名称: '坏' }, { 名称: '好' }] as any },
@@ -95,7 +96,7 @@ describe('翻译战斗解释 · 整场只调 1 次 AI（实战反馈：逐个技
     // 失败项要带**原因**（给玩家看）与**来源**（勾选后重试时直接重发，无需回查）
     expect(结果.失败).toHaveLength(1);
     expect(结果.失败[0].名称).toBe('坏');
-    expect(结果.失败[0].原因).toContain('字段不合法');
+    expect(结果.失败[0].原因).toMatch(/字段不合法|未返回该条/); // 非对象条目会被跳过，记成漏条目
     expect(结果.失败[0].来源).toBeDefined();
   });
 

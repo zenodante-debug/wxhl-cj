@@ -1179,8 +1179,13 @@ export default {
       }
     }
 
-    // GET /market/listings  →  { listings: [在售挂单, 最新 50 条] }
-    // 可选查询参数（服务端筛选，前端暂未使用；老前端传空即全量最新 50 条）
+    // GET /market/listings  →  { listings: [在售挂单], hasMore }
+    // 分页：limit（默认 200、上限 500）+ offset；`hasMore` 由「多取一条」算出，省一次 COUNT。
+    //
+    // ⚠️ 早先这里写死「最新 50 条」且前端不传 limit —— 市集挂单一旦超过 50 件，
+    // **第 51 件起就再也取不到**（玩家挂的东西在市场里凭空消失）。分页是这条的根治：
+    // 只要客户端肯翻页，任何一条挂单都够得着。
+    // 排序带 `id` 兜底：`created` 同秒并列时，单靠 created 分页会漏行/重复行。
     if (url.pathname === '/market/listings' && request.method === 'GET') {
       try {
         const where = [];
@@ -1191,13 +1196,17 @@ export default {
         if (category) { where.push('category = ?'); args.push(category); }
         if (tierIdx !== null && tierIdx !== '') { where.push('tier_idx = ?'); args.push(Number(tierIdx)); }
         if (quality) { where.push('quality = ?'); args.push(quality); }
-        const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 50) || 50, 1), 200);
+        const limit = Math.min(Math.max(Number(url.searchParams.get('limit') ?? 200) || 200, 1), 500);
+        const offset = Math.max(Number(url.searchParams.get('offset') ?? 0) || 0, 0);
         const sql =
           `SELECT id, seller, tier, kind, item_json, qty, price, created, op_json FROM listings` +
           (where.length ? ` WHERE ${where.join(' AND ')}` : '') +
-          ` ORDER BY created DESC LIMIT ?`;
-        const rows = await env.MARKET_DB.prepare(sql).bind(...args, limit).all();
-        return json({ listings: (rows.results ?? []).map(rowToListing) }, { ...cors, 'Cache-Control': 'no-store' });
+          ` ORDER BY created DESC, id DESC LIMIT ? OFFSET ?`;
+        const rows = await env.MARKET_DB.prepare(sql).bind(...args, limit + 1, offset).all();
+        const all = rows.results ?? [];
+        const hasMore = all.length > limit;
+        const page = hasMore ? all.slice(0, limit) : all;
+        return json({ listings: page.map(rowToListing), hasMore }, { ...cors, 'Cache-Control': 'no-store' });
       } catch (e) {
         console.error('[wxhl-market] listings 查询失败', String(e));
         return new Response('市集查询失败: ' + String(e && e.message ? e.message : e), { status: 500, headers: cors });
