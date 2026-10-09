@@ -816,18 +816,54 @@ export async function 写回战斗结果(
   await Mvu.replaceMvuData(data, { type: 'message', message_id: -1 });
 }
 
+/**
+ * 开战时读一次「**上一楼正文**」（模型当时的输入）—— 收尾正文写"环境"的唯一天然来源。
+ *
+ * 玩家口径：「把模型输入的开战前的上一楼正文发过来呗」。
+ * 取法：从最新一楼往前找最多 3 楼，取**最后一条 assistant 消息**（若最后是玩家自己的发言就往前找）；
+ * 顺手剥掉 MVU 变量块（那是引擎的账本，不是场景），并截断防撑爆提示词。
+ * 任何异常都返回空串 —— 收尾提示词会明确写「（无）」。
+ */
+export async function 读上一楼正文(): Promise<string> {
+  for (const 深度 of [-1, -2, -3]) {
+    try {
+      const 楼层 = getChatMessages(深度) as any[];
+      const 条 = Array.isArray(楼层) ? 楼层[0] : undefined;
+      if (!条 || 条.role !== 'assistant') continue;
+      const 净 = 剥掉变量块(String(条.message ?? '')).trim();
+      if (净) return 净.slice(0, 3000);
+    } catch {
+      // 楼层不存在 / API 不可用 → 继续往前找
+    }
+  }
+  return '';
+}
+
+/** 剥掉 MVU 变量块与思考块（它们不是场景，进提示词只会浪费 token 与干扰模型） */
+function 剥掉变量块(文: string): string {
+  return 文
+    .replace(/<status_current_variable>[\s\S]*?<\/status_current_variable>/g, '')
+    .replace(/<UpdateVariable>[\s\S]*?<\/UpdateVariable>/g, '')
+    .replace(/<Analysis>[\s\S]*?<\/Analysis>/g, '')
+    .replace(/```yaml[\s\S]*?```/g, '');
+}
+
 /** 战斗结束：生成收尾正文 → 写入一条 assistant 楼层。
  * 状态也一并带上：收尾要**按击杀发放钥匙**（杂兵白/精英白银/BOSS黄金/隐藏BOSS钻石/契约者血腥）
  * 与主角真名，这两样都得从战斗状态里取。
  */
-export async function 写收尾楼层(步骤: 结算步骤[], 状态: 战斗状态): Promise<void> {
+export async function 写收尾楼层(
+  步骤: 结算步骤[],
+  状态: 战斗状态,
+  额外: { 开战前上下文?: string; 开场模式?: string } = {},
+): Promise<void> {
   const cfg = 读设置().强路;
   if (!cfg.url || !cfg.apiKey) {
     console.warn('[wxhl-combat] 强路 API 未配置，跳过收尾正文');
     return;
   }
   // 收尾正文**不限字数**（要写完整场战斗），默认 30s 根本生成不完 —— 给一个更宽的超时
-  const 正文 = await aiGenerate(cfg, 构建收尾提示词(步骤, 状态), undefined, '收尾正文', {
+  const 正文 = await aiGenerate(cfg, 构建收尾提示词(步骤, 状态, 额外), undefined, '收尾正文', {
     超时: Math.max(cfg.timeout || 0, 180000),
   });
   await createChatMessages([{ role: 'assistant', message: 正文 }]);
