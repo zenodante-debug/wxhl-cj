@@ -13,6 +13,7 @@ import type { 战斗单位, 战斗解释 } from '../types';
 import { 规范行动消耗, 是基础攻击哨兵, 副武器攻击 } from './actionOptions';
 import { 徒手伤害骰 } from './damage';
 import { 效果预览, type 效果预览 as 效果预览类型 } from './effectPreview';
+import { 加权摘要 } from './rules';
 
 /** 显示名：变量里的姓名（`头部.姓名`）；缺省退回变量路径最后一段 */
 export function 显示名(单位: 战斗单位): string {
@@ -150,7 +151,7 @@ export interface 技能展示 {
   目标: string;
   消耗: string;
   冷却?: number;
-  /** 「×1.4」或「无伤害」 */
+  /** 「×1.4」/「PER×3.6 + AGI×3.2」/「无伤害」 */
   倍率: string;
   规则数: number;
   /** 人话效果预览（头部元信息 + 规则逐条）——「点技能完全不知道有什么用」的解法 */
@@ -163,7 +164,8 @@ export function 造技能展示(技能: Record<string, 战斗解释> | undefined
     .sort((a, b) => a[0].localeCompare(b[0]))
     .map(([名, 解释]) => {
       const 倍率 =
-        typeof 解释?.伤害倍率 === 'number' && 解释.伤害倍率 > 0 ? `×${解释.伤害倍率}` : '无伤害';
+        加权摘要(解释?.属性加权) ||
+        (typeof 解释?.伤害倍率 === 'number' && 解释.伤害倍率 > 0 ? `×${解释.伤害倍率}` : '无伤害');
       const 摘要段 = [解释?.行动消耗, 解释?.射程, 倍率].filter(Boolean).join(' · ');
       return {
         名,

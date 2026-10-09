@@ -98,3 +98,86 @@ export function 属性修正值(实际属性值: number, 阶位: string): number
 export function 先攻判定(AGI实际值: number, 阶位: string): number {
   return rollDie(20) + 属性修正值(AGI实际值, 阶位);
 }
+
+// ==================== 属性键与「多属性加权」 ====================
+
+/** 四维属性键 */
+export type 属性键 = 'STR' | 'AGI' | 'CON' | 'PER';
+
+/**
+ * 把一个自由字符串归一成属性键；认不出来返回 `null`（**不兜底** ——
+ * 兜底是调用方的事：`关联属性` 缺省按 STR，而 `属性加权` 里认不出的条目直接丢掉）。
+ * 中英文写法都认（卡面写「感知」「敏捷」的不少）。
+ */
+export function 归一属性键(值: unknown): 属性键 | null {
+  const 文 = String(值 ?? '').toUpperCase();
+  if (!文) return null;
+  if (文.includes('AGI') || 文.includes('敏捷')) return 'AGI';
+  if (文.includes('CON') || 文.includes('体质')) return 'CON';
+  if (文.includes('PER') || 文.includes('感知')) return 'PER';
+  if (文.includes('STR') || 文.includes('力量')) return 'STR';
+  return null;
+}
+
+/** 一条加权项：某一维修正值乘多少 */
+export interface 属性加权项 {
+  属性: 属性键;
+  系数: number;
+}
+
+/**
+ * **多属性加权伤害**的宽容解析（卡面原话：「造成 PER×3.6 + AGI×3.2 的伤害」）。
+ *
+ * 认三种写法：
+ * - 数组：`[{"属性":"PER","系数":3.6},{"属性":"AGI","系数":3.2}]`（提示词要求的形状）
+ * - 单个对象：`{"属性":"PER","系数":3.6}`（模型图省事常这么写）
+ * - **字符串**：`"PER×3.6 + AGI×3.2"`（模型直接把卡面原话抄进来 —— 白捡的容错）
+ *
+ * 丢掉不可用的条目：认不出的属性名、非有限/≤0 的系数、缺系数的；同一维**重复只取第一条**
+ * （宁可少算，也不偷偷把同一维修正翻倍）。全丢光 → 空数组，调用方退回
+ * `关联属性修正 × 伤害倍率`（老行为）。
+ */
+export function 解析属性加权(值: unknown): 属性加权项[] {
+  const 候选: unknown[] =
+    typeof 值 === 'string'
+      ? [...值.matchAll(/([一-龥A-Za-z]{1,8})\s*[×xX*]\s*(\d+(?:\.\d+)?)/g)].map(m => ({
+          属性: m[1],
+          系数: Number(m[2]),
+        }))
+      : Array.isArray(值)
+        ? 值
+        : 值 && typeof 值 === 'object'
+          ? [值]
+          : [];
+
+  const 出: 属性加权项[] = [];
+  const 见过 = new Set<属性键>();
+  for (const 条 of 候选) {
+    if (!条 || typeof 条 !== 'object') continue;
+    const 属性 = 归一属性键((条 as any).属性);
+    const 系数 = Number((条 as any).系数);
+    if (!属性 || 见过.has(属性)) continue;
+    if (!Number.isFinite(系数) || 系数 <= 0) continue;
+    见过.add(属性);
+    出.push({ 属性, 系数 });
+  }
+  return 出;
+}
+
+/** 加权里**系数最大**的那一维（用于"关联属性没写时拿哪一维掷命中"）；空 → null */
+export function 主加权属性(加权: 属性加权项[]): 属性键 | null {
+  let 最佳: 属性加权项 | null = null;
+  for (const 条 of 加权) if (!最佳 || 条.系数 > 最佳.系数) 最佳 = 条;
+  return 最佳?.属性 ?? null;
+}
+
+/**
+ * **加权的紧凑写法**（「PER×3.6 + AGI×3.2」）—— 行动下拉标签 / 技能列表 / 效果预览头部
+ * 共用这一份口径，免得三处各写一套、其中一处忘了加权。没有加权 → 空串。
+ * 收的是**原始字段值**（数组 / 单对象 / 字符串都行），与 `解析属性加权` 同一套容错。
+ */
+export function 加权摘要(值: unknown): string {
+  return 解析属性加权(值)
+    .map(条 => `${条.属性}×${条.系数}`)
+    .join(' + ');
+}
