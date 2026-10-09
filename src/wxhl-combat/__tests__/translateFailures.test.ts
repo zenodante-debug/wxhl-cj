@@ -1,6 +1,6 @@
-import { describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it } from 'vitest';
 import { 校验战斗解释, 解析批量翻译结果 } from '../ai/skillInterpreter';
-import { aiGenerate } from '../store';
+import { aiGenerate, 重置端点拒收记忆 } from '../store';
 
 /** 新签名要的是「条目名数组」（子技能兜底命名 + 填 `母条目`）；这里只关心编号对号入座 */
 const 条目名 = (n: number) => Array.from({ length: n }, (_, i) => `条目${i + 1}`);
@@ -95,5 +95,52 @@ describe('AI 调用 · 空正文（推理模型把内容放进 reasoning）要�
     await expect(
       aiGenerate({ url: 'https://a.b', apiKey: 'k', model: 'm', timeout: 30000 }, '翻译', { name: 'x', value: {} }),
     ).rejects.toThrow(/空|思考|reasoning/);
+  });
+});
+
+// ================================================================
+// 三、**API 不认结构化输出 → 降级重试**
+//
+// 实测根因（2026-10-10，玩家找人诊断出来的）：酒馆助手把 `json_schema` 翻成
+// `response_format:{type:'json_schema'}`，**DeepSeek 端点直接回
+// 「This response_format type is unavailable now」** —— 不含 400、不含 invalid。
+// 老判定一个都不沾，于是脚本**带着同样的 schema 连错 3 次**，最后把
+// 「模型返回不合法 JSON」这个**假原因**抛给玩家 ——
+// 这就是「用 ds 老是报非法 json、换别的模型却好好的」的真正原因。
+// ================================================================
+describe('AI 调用 · API 不认结构化输出 → 去掉 schema 重试', () => {
+  const cfg = { url: 'https://a.b', apiKey: 'k', model: 'deepseek-chat', timeout: 30000 };
+
+  // 「这个端点拒收过 schema」是**跨调用**的记忆（省掉每次都白撞一次）—— 用例之间必须清掉
+  beforeEach(() => 重置端点拒收记忆());
+
+  const 桩 = (报错: string) => {
+    const 调用: any[] = [];
+    (globalThis as any).generateRaw = async (config: any) => {
+      调用.push(config);
+      if (config.json_schema) throw new Error(报错);
+      return '{"ok":1}';
+    };
+    return 调用;
+  };
+
+  it('DeepSeek 那句 unavailable → **只错一次**就降级并成功（不是错满 3 次后抛假原因）', async () => {
+    const 调用 = 桩('Chat completion request error: This response_format type is unavailable now');
+
+    const out = await aiGenerate(cfg, '翻译', { name: 'x', value: {} });
+
+    expect(out).toBe('{"ok":1}');
+    expect(调用.length).toBe(2);
+    expect(调用[0].json_schema).toBeDefined();
+    expect(调用[1].json_schema).toBeUndefined();
+  });
+
+  it('暂时性错误（超时）**不**降级 —— 三次都带着 schema，别因为一次超时永久丢掉结构化输出', async () => {
+    const 调用 = 桩('Request timeout after 30000ms');
+
+    await expect(aiGenerate(cfg, '翻译', { name: 'x', value: {} })).rejects.toThrow();
+
+    expect(调用.length).toBe(3);
+    expect(调用.every(c => c.json_schema)).toBe(true);
   });
 });

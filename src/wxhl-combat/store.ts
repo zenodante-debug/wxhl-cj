@@ -4,7 +4,7 @@
 // ================================================================
 
 import type { 战斗单位, 战斗解释, 战斗状态, 结算步骤 } from './types';
-import { sanitizeJsonSchema } from '@/wxhl-003/schemaSanitize';
+import { sanitizeJsonSchema, 结构化输出被拒 } from '@/wxhl-003/schemaSanitize';
 import type { ApiConfig } from './settings';
 import { 构建批量翻译提示词, 解析批量翻译结果, 批量战斗解释_SCHEMA, type 条目解析结果 } from './ai/skillInterpreter';
 import { 效果指纹, 翻译缓存版本 } from './ai/translationCache';
@@ -421,10 +421,27 @@ export function 重置AI调用计数(): void {
 /**
  * 精简版 aiGenerate（独立脚本自己的 AI 通道）。
  * - 请求侧 schema 先经 sanitizeJsonSchema 净化
- * - API 以 400 拒收 schema 时自动降级为纯提示词重试
+ * - API 拒收 schema 时自动降级为纯提示词重试（判定与**小手机共用一份**，见 schemaSanitize）
  * - 单次请求受 `cfg.timeout` 约束（generateRaw 自己不提供超时）
  * - **每发一次真实请求就 console.log 一条带计数与用途的日志**（排查"翻译是不是还在并发"的观测点）
  */
+
+/**
+ * 「这个端点上次就拒收过结构化输出」的记忆（`url::model`）。
+ *
+ * `schema已降级` 是**每次调用**的局部变量 —— 不记这一笔，DeepSeek 用户**每一次** aiGenerate
+ * 都要先白撞一次失败请求（翻译一批一条、敌方意图一条、收尾一条…），一场战斗白烧十来个请求。
+ * 键里带 `model`：换模型/换中转就是新键，不会把"这个模型不行"错记到别的模型头上。
+ */
+const 端点拒收过子schema = new Set<string>();
+
+const 端点键 = (cfg: ApiConfig): string => `${cfg.url}::${cfg.model}`;
+
+/** 清掉"端点拒收过 schema"的记忆（测试用；也留给"换了 API 想重来一次"的场景） */
+export function 重置端点拒收记忆(): void {
+  端点拒收过子schema.clear();
+}
+
 export async function aiGenerate(
   cfg: ApiConfig,
   userInput: string,
@@ -434,7 +451,6 @@ export async function aiGenerate(
 ): Promise<string> {
   if (!cfg.url || !cfg.apiKey) throw new Error('API 未配置');
   if (typeof generateRaw !== 'function') throw new Error('generateRaw 不可用');
-
   // 超时允许被调用方放大：翻译这种大批量输出，30s 根本生成不完（实战反馈）——
   // 调用方按条目数估一个更长的超时，用 cfg.timeout 兜底。
   const 超时 = 选项?.超时 ?? cfg.timeout;
@@ -445,7 +461,8 @@ export async function aiGenerate(
   }
 
   let lastErr = '';
-  let schema已降级 = false;
+  // **上次就拒收过的端点，这次直接不带** —— 否则每次调用都要白撞一次失败请求
+  let schema已降级 = 端点拒收过子schema.has(端点键(cfg));
   for (let attempt = 0; attempt < 3; attempt++) {
     try {
       const config: any = {
@@ -505,8 +522,16 @@ export async function aiGenerate(
       }
     } catch (e: any) {
       lastErr = e.message || String(e);
-      if (jsonSchema && !schema已降级 && /\b400\b|bad\s*request|invalid/i.test(lastErr)) {
+      // 「这个 API 不认结构化输出」→ 去掉 schema 立刻重试（判定与**小手机共用一份**）。
+      //
+      // ⚠️ 早先这里只认 `400 / Bad Request / invalid`，而 **DeepSeek 的原文是
+      // 「This response_format type is unavailable now」** —— 一个都不沾，于是它
+      // **带着同样的 schema 连错 3 次**，最后把「模型返回不合法 JSON」这个假原因抛给玩家
+      // （实测反馈：用 ds 当 API 老是报非法 json，换别的模型却好好的）。
+      if (jsonSchema && !schema已降级 && 结构化输出被拒(lastErr)) {
+        console.warn(`[wxhl-combat] 「${用途}」的 API 拒收结构化 schema，降级为纯提示词重试:`, lastErr.slice(0, 200));
         schema已降级 = true;
+        端点拒收过子schema.add(端点键(cfg)); // 记一笔：下次调这个端点**直接不带 schema**
         continue;
       }
       // 限流（429 / Too Many Requests）要**长间隔退避**，不能像普通失败那样 1.5s 就重发 ——

@@ -1,10 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { aiGenerate } from '../store';
+import { aiGenerate, 重置端点拒收记忆 } from '../store';
+import { 结构化输出被拒 } from '../schemaSanitize';
 
 /**
- * aiGenerate 的 schema 净化（方案 B）与 400 降级（方案 C）:
+ * aiGenerate 的 schema 净化（方案 B）与「API 不认结构化输出」降级（方案 C）:
  * - B: 发出去的 json_schema 必须先经 sanitizeJsonSchema 净化
- * - C: API 以 400/参数类错误拒收 schema 时, 自动去掉 json_schema 降级重试
+ * - C: API 以参数类错误拒收 schema 时, 自动去掉 json_schema 降级重试
+ *      （判定在 `schemaSanitize.结构化输出被拒`，**与战斗脚本共用一份**）
  * generateRaw 是酒馆助手注入的全局函数, 这里换成内存桩并按调用捕获。
  */
 describe('aiGenerate · schema 净化与 400 降级', () => {
@@ -31,6 +33,9 @@ describe('aiGenerate · schema 净化与 400 降级', () => {
     原值 = {};
     for (const k of 桩键) 原值[k] = (globalThis as any)[k];
     调用记录 = [];
+    // 「这个端点拒收过 schema」是**跨调用**的记忆（省掉每次都白撞一次）——
+     // 用例之间必须清掉，否则前一条用例的降级会传染给后一条。
+    重置端点拒收记忆();
   });
 
   // 桩是本文件私有的, 用完必须还原（同 settlementStore.test.ts 的约定）
@@ -71,6 +76,33 @@ describe('aiGenerate · schema 净化与 400 降级', () => {
     expect(调用记录.length).toBe(2);
     expect(调用记录[0].json_schema).toBeDefined();
     expect(调用记录[1].json_schema).toBeUndefined();
+  });
+
+  it('**DeepSeek 的「response_format type is unavailable」也触发降级**（早先漏了 → 连错 3 次）', async () => {
+    // 实测根因（2026-10-10）：酒馆助手把 json_schema 翻成 response_format:{type:'json_schema'}，
+    // DeepSeek 端点直接回「This response_format type is unavailable now」—— 不含 400、不含 invalid，
+    // 老判定一个都不沾，于是带着同样的 schema 连错 3 次，最后把「模型返回不合法 JSON」这个**假原因**
+    // 抛给玩家（换别的模型却好好的）。
+    (globalThis as any).generateRaw = async (config: any) => {
+      调用记录.push(config);
+      if (config.json_schema) throw new Error('This response_format type is unavailable now');
+      return '{"名称":"甲"}';
+    };
+    const out = await aiGenerate(cfg, '生成', 脏schema);
+
+    expect(out).toBe('{"名称":"甲"}');
+    expect(调用记录.length).toBe(2); // 只错一次就降级（不是错满 3 次）
+    expect(调用记录[0].json_schema).toBeDefined();
+    expect(调用记录[1].json_schema).toBeUndefined();
+  });
+
+  it('「不支持 / unsupported」这类中文与英文写法也认', () => {
+    expect(结构化输出被拒('unsupported response_format')).toBe(true);
+    expect(结构化输出被拒('该模型不支持结构化输出')).toBe(true);
+    expect(结构化输出被拒('Bad Request: INVALID_ARGUMENT')).toBe(true);
+    // 暂时性错误**不**降级（不该因为一次超时就永久丢掉 schema）
+    expect(结构化输出被拒('Request timeout after 30000ms')).toBe(false);
+    expect(结构化输出被拒('429 Too Many Requests')).toBe(false);
   });
 
   it('非 400 类错误不触发降级, 三次尝试都携带 schema', async () => {
