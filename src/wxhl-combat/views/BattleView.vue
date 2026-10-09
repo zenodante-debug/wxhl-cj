@@ -60,6 +60,18 @@
       </div>
     </div>
 
+    <!-- 场地（领域）：环境/场地 buff 是真的每回合在作用于半径内的人（2026-10-09），
+         所以必须看得见 —— 还剩几回合、中心在哪、里面在干什么（悬停看摘要）。 -->
+    <div v-if="场地.length" class="domain-row">
+      <span class="domain-label">场地</span>
+      <div v-for="d in 场地" :key="d.名" class="domain-card" :title="d.摘要">
+        <span class="domain-name">{{ d.名 }}</span>
+        <span class="domain-meta">
+          半径 {{ d.半径 }} 米 · 中心 {{ d.中心距离 }} 米 · 剩 {{ d.持续 }} 回合
+        </span>
+      </div>
+    </div>
+
     <!-- 单位卡：每个角色都能展开看全套（状态/buff/装备/技能）—— 实战反馈：战斗界面看不到状态 -->
     <div class="unit-cards">
       <div
@@ -292,7 +304,7 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { 距离带 } from '../engine/distance';
 import { 可提交, 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
-import { 造我方条目, 造技能展示, 布局分布, 选中行动预览, 显示名, type 我方条目 } from '../engine/viewModel';
+import { 造我方条目, 造技能展示, 造场地条目, 布局分布, 选中行动预览, 显示名, type 我方条目 } from '../engine/viewModel';
 import { 列行动选项 } from '../engine/actionOptions';
 import ShowLayer from './ShowLayer.vue';
 import { 演出开启 } from '../engine/showToggle';
@@ -443,6 +455,9 @@ const 距离条高度 = computed(() => {
 // 所以模板里直接写 u.HP_当前 / u.行动槽.主要 就行，不要写 u.单位.xxx
 // （写错这一层会在运行时抛错、把整个组件渲染成一片空白，实战踩过）。
 const 我方单位 = computed<我方条目[]>(() => 造我方条目(props.状态.单位));
+
+/** 场地（领域）面板的数据 —— 形状在 viewModel 里被测试钉死，模板只消费 */
+const 场地 = computed(() => 造场地条目(props.状态.领域));
 
 /** 每个我方单位各自的槽位填写；键 = 状态.单位 的键 */
 const 填写表 = reactive<Record<string, 行动槽填写>>({});
@@ -793,6 +808,43 @@ defineExpose({ 清空填写 });
   left: 50%;
   transform: translateX(-50%);
   font-size: 12px;
+  color: var(--cb-dim);
+}
+
+/* 场地（领域）：环境/场地 buff 每回合真的在作用于半径内的人，所以要看得见 */
+.domain-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px 0;
+}
+
+.domain-label {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: var(--cb-dim);
+}
+
+.domain-card {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  padding: 6px 12px;
+  border: 1px solid var(--cb-line);
+  border-radius: 6px;
+  background: linear-gradient(180deg, rgba(120, 90, 200, 0.16), rgba(0, 0, 0, 0));
+  cursor: help;
+}
+
+.domain-name {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--cb-gold);
+}
+
+.domain-meta {
+  font-size: 11px;
   color: var(--cb-dim);
 }
 
