@@ -87,8 +87,10 @@ function 归一单一行动类型(段: string): 可选项类型 | null {
   if (段 === '主要行动' || 段 === '次要行动' || 段 === '反应动作' || 段 === '免费行动') return 段;
   if (段.includes('反应')) return '反应动作';
   if (段.includes('免费')) return '免费行动';
-  if (段.includes('次要') || 段.includes('副')) return '次要行动';
-  if (段.includes('主要') || 段.includes('主')) return '主要行动';
+  // 关键词兜底要**窄**：单个「主」会命中「主动」、单个「副」会命中「副武器」——
+  // 那会把 `行动消耗: '主动'` 判成"主要行动"（当年这里就是这么踩的）。
+  if (段.includes('次要')) return '次要行动';
+  if (段.includes('主要') || 段.includes('主行动')) return '主要行动';
   return null;
 }
 

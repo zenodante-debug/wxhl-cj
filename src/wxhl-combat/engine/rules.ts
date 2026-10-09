@@ -138,16 +138,29 @@ export interface 属性加权项 {
  * `关联属性修正 × 伤害倍率`（老行为）。
  */
 export function 解析属性加权(值: unknown): 属性加权项[] {
+  // 模型有时会把数组**序列化成字符串**（`"[{\"属性\":\"PER\",\"系数\":3.6}]"`）——
+  // 先试一次 JSON 解析，省得一个引号之差就整条判失败重翻。
+  const 可能数组 =
+    typeof 值 === 'string' && /^\s*[[{]/.test(值)
+      ? (() => {
+          try {
+            return JSON.parse(值);
+          } catch {
+            return 值;
+          }
+        })()
+      : 值;
+
   const 候选: unknown[] =
-    typeof 值 === 'string'
-      ? [...值.matchAll(/([一-龥A-Za-z]{1,8})\s*[×xX*]\s*(\d+(?:\.\d+)?)/g)].map(m => ({
+    typeof 可能数组 === 'string'
+      ? [...可能数组.matchAll(/([一-龥A-Za-z]{1,8})\s*[×xX*]\s*(\d+(?:\.\d+)?)/g)].map(m => ({
           属性: m[1],
           系数: Number(m[2]),
         }))
-      : Array.isArray(值)
-        ? 值
-        : 值 && typeof 值 === 'object'
-          ? [值]
+      : Array.isArray(可能数组)
+        ? 可能数组
+        : 可能数组 && typeof 可能数组 === 'object'
+          ? [可能数组]
           : [];
 
   const 出: 属性加权项[] = [];
