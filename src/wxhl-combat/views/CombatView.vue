@@ -101,6 +101,7 @@ import {
 } from '../engine/loop';
 import { 阶段A资源恢复, 阶段F结算, 冷却递减, 濒死检定一轮, 濒死结算到底, 判定战局, 能行动 } from '../engine/turn';
 import { 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
+import { 需要选技能 } from '../engine/actionOptions';
 import { 显示名 } from '../engine/viewModel';
 import { 演出事件提取, type 演出事件 } from '../engine/showEvents';
 import { 击杀明细 } from '../ai/aftermath';
@@ -636,6 +637,17 @@ async function 执行本轮(各单位: Record<string, { 填写: 行动槽填写;
     for (const [键, 列表] of Object.entries(我方行动)) {
       if (列表.some(a => a.类型 !== '移动' && !a.目标)) {
         日志.value.push(`「${键}」还有行动没选目标，请先补齐再执行本轮`);
+        return;
+      }
+    }
+
+    // 连携类技能要选「目标技能」（「取消某个可选技能的冷却」）—— 没选也先提示，
+    // 别让引擎跳过那一条、白费一个行动槽（这类跳过玩家从战报里很难归因）。
+    for (const [键, 列表] of Object.entries(我方行动)) {
+      const 技能表 = 战斗.value.单位[键]?.技能 ?? {};
+      const 缺 = 列表.filter(a => a.技能 && 需要选技能(技能表[a.技能]) && !a.选择技能);
+      if (缺.length) {
+        日志.value.push(`「${键}」的「${缺[0].技能}」还要选一个目标技能（连携用），请先补齐再执行本轮`);
         return;
       }
     }

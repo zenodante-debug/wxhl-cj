@@ -196,19 +196,57 @@
         </div>
 
         <div class="slot-row">
-          <!-- 按**行动类型**匹配：主要行动只列主要行动技能 + 主武器攻击；次要行动同理（副武器攻击） -->
+          <!-- 按**行动类型**匹配：主要行动只列主要行动技能 + 主武器攻击；次要行动同理（副武器攻击）。
+               每个行动**各自带一个目标**（玩家口径：现在是所有行动都是一个目标）——
+               不选就落回这个单位的「默认目标」。 -->
           <label class="slot">
             <span class="slot-label">主要</span>
-            <select v-model="填写表[u.键].主要">
+            <select v-model="填写表[u.键].主要.值">
               <option value="">（不出手）</option>
               <option v-for="o in 主要选项(u)" :key="o.值" :value="o.值">{{ o.标签 }}</option>
             </select>
           </label>
+          <label class="slot slot-target">
+            <span class="slot-label">打谁</span>
+            <select v-model="填写表[u.键].主要.目标">
+              <option value="">（用默认目标）</option>
+              <template v-for="g in 目标分组(u)" :key="g.组">
+                <optgroup :label="g.组">
+                  <option v-for="e in g.项" :key="e.键" :value="e.键">{{ e.显示 }}</option>
+                </optgroup>
+              </template>
+            </select>
+          </label>
+          <label v-if="需选技能(u, 填写表[u.键].主要.值)" class="slot slot-target">
+            <span class="slot-label">选哪个技能</span>
+            <select v-model="填写表[u.键].主要.选择技能">
+              <option value="">（先选一个）</option>
+              <option v-for="c in 技能候选(u)" :key="c.值" :value="c.值">{{ c.标签 }}</option>
+            </select>
+          </label>
           <label class="slot">
             <span class="slot-label">次要</span>
-            <select v-model="填写表[u.键].次要">
+            <select v-model="填写表[u.键].次要.值">
               <option value="">（不出手）</option>
               <option v-for="o in 次要选项(u)" :key="o.值" :value="o.值">{{ o.标签 }}</option>
+            </select>
+          </label>
+          <label v-if="需选技能(u, 填写表[u.键].次要.值)" class="slot slot-target">
+            <span class="slot-label">选哪个技能</span>
+            <select v-model="填写表[u.键].次要.选择技能">
+              <option value="">（先选一个）</option>
+              <option v-for="c in 技能候选(u)" :key="c.值" :value="c.值">{{ c.标签 }}</option>
+            </select>
+          </label>
+          <label class="slot slot-target">
+            <span class="slot-label">对谁</span>
+            <select v-model="填写表[u.键].次要.目标">
+              <option value="">（用默认目标）</option>
+              <template v-for="g in 目标分组(u)" :key="g.组">
+                <optgroup :label="g.组">
+                  <option v-for="e in g.项" :key="e.键" :value="e.键">{{ e.显示 }}</option>
+                </optgroup>
+              </template>
             </select>
           </label>
           <label class="slot">
@@ -227,26 +265,42 @@
             </select>
           </label>
           <label class="slot">
-            <span class="slot-label">目标</span>
+            <span class="slot-label">默认目标</span>
             <select v-model="目标表[u.键]">
               <option value="">（选择目标）</option>
-              <optgroup label="敌方（攻击）">
-                <option v-for="e in 敌方单位" :key="e.键" :value="e.键">{{ e.显示 }}</option>
-              </optgroup>
-              <optgroup label="我方（支援：上 buff / 治疗 / 护盾）">
-                <option v-for="a in 支援目标(u)" :key="a.键" :value="a.键">{{ a.显示 }}</option>
-              </optgroup>
+              <template v-for="g in 目标分组(u)" :key="g.组">
+                <optgroup :label="g.组">
+                  <option v-for="e in g.项" :key="e.键" :value="e.键">{{ e.显示 }}</option>
+                </optgroup>
+              </template>
             </select>
           </label>
         </div>
 
-        <!-- 免费行动：**不限次数**，想放几个放几个（世界书：免费行动不占次数） -->
+        <!-- 免费行动：**不限次数**，想放几个放几个（世界书：免费行动不占次数）。
+             每条**自带目标** —— 以前是一组复选框，根本没有目标这一栏（玩家口径）。 -->
         <div class="free-row">
-          <span class="slot-label">免费行动（不限次，可多选）</span>
-          <label v-for="o in 免费选项(u)" :key="o.值" class="free-opt">
-            <input type="checkbox" :value="o.值" v-model="填写表[u.键].免费" />
-            {{ o.标签 }}
-          </label>
+          <span class="slot-label">免费行动（不限次）</span>
+          <div v-for="(f, i) in 填写表[u.键].免费" :key="i" class="free-line">
+            <select v-model="f.值">
+              <option value="">（选择免费行动）</option>
+              <option v-for="o in 免费选项(u)" :key="o.值" :value="o.值">{{ o.标签 }}</option>
+            </select>
+            <select v-if="需选技能(u, f.值)" v-model="f.选择技能">
+              <option value="">（选哪个技能）</option>
+              <option v-for="c in 技能候选(u)" :key="c.值" :value="c.值">{{ c.标签 }}</option>
+            </select>
+            <select v-model="f.目标">
+              <option value="">（用默认目标）</option>
+              <template v-for="g in 目标分组(u)" :key="g.组">
+                <optgroup :label="g.组">
+                  <option v-for="e in g.项" :key="e.键" :value="e.键">{{ e.显示 }}</option>
+                </optgroup>
+              </template>
+            </select>
+            <button class="ord-btn" title="删掉这条" @click="删免费(u, i)">✕</button>
+          </div>
+          <button class="add-free" @click="加免费(u)">＋ 添加免费行动</button>
           <span v-if="!免费选项(u).length" class="dim">（该单位没有免费行动）</span>
         </div>
 
@@ -268,6 +322,7 @@
             <div class="pv-head">
               <span class="pv-slot">{{ p.槽 }}</span>
               <span class="pv-name">{{ p.名 }}</span>
+              <span v-if="p.目标" class="pv-target">→ {{ 目标名(p.目标) }}</span>
               <span class="pv-meta">{{ p.预览.头部.join(' · ') }}</span>
             </div>
             <div v-for="(行, i) in p.预览.行" :key="i" class="pv-line">{{ 行 }}</div>
@@ -305,6 +360,7 @@ import { computed, reactive, ref, watch } from 'vue';
 import { 距离带 } from '../engine/distance';
 import { 可提交, 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
 import { 造我方条目, 造技能展示, 造场地条目, 布局分布, 选中行动预览, 显示名, type 我方条目 } from '../engine/viewModel';
+import { 需要选技能, 技能候选 } from '../engine/actionOptions';
 import { 列行动选项 } from '../engine/actionOptions';
 import ShowLayer from './ShowLayer.vue';
 import { 演出开启 } from '../engine/showToggle';
@@ -459,11 +515,58 @@ const 我方单位 = computed<我方条目[]>(() => 造我方条目(props.状态
 /** 场地（领域）面板的数据 —— 形状在 viewModel 里被测试钉死，模板只消费 */
 const 场地 = computed(() => 造场地条目(props.状态.领域));
 
+/**
+ * 界面上的**一条行动填写**：下拉值 + **它自己的目标**（玩家口径 2026-10-09：
+ * 「应该每个行动都增加可选目标吧，现在是所有行动都是一个目标」）。
+ */
+interface 界面条目 {
+  值: string;
+  目标: string;
+  /** 本次释放**选中的技能**（`需要选技能` 的技能才有：规则里写了"选中技能"） */
+  选择技能: string;
+}
+
+/** 界面上的单位填写：主要/次要**各自**带目标，免费行动是"添加一条"的列表 */
+interface 界面填写 {
+  主要: 界面条目;
+  次要: 界面条目;
+  移动?: number;
+  反应: string;
+  免费: 界面条目[];
+}
+
+const 空条目 = (): 界面条目 => ({ 值: '', 目标: '', 选择技能: '' });
+const 空填写 = (): 界面填写 => ({ 主要: 空条目(), 次要: 空条目(), 反应: '', 免费: [] });
+
 /** 每个我方单位各自的槽位填写；键 = 状态.单位 的键 */
-const 填写表 = reactive<Record<string, 行动槽填写>>({});
+const 填写表 = reactive<Record<string, 界面填写>>({});
+/** 每个单位的**默认目标**：行动没自己选目标时用它（只有一种敌人时自动选中，省一步） */
 const 目标表 = reactive<Record<string, string>>({});
 /** 玩家调过的行动顺序（键 → 有序键列表）；没调过的单位不在这里，用默认顺序 */
 const 顺序表 = reactive<Record<string, string[]>>({});
+
+/**
+ * 界面填写 → 引擎填写：空槽丢掉、**每条自带目标**；没写目标的落回这个单位的默认目标。
+ * 引擎那边两种形状都认（`行动槽填写`），所以这里只做"补默认目标"这一件事。
+ */
+function 转引擎填写(填: 界面填写, 默认目标: string): 行动槽填写 {
+  const 出: 行动槽填写 = { 反应: 填.反应, 移动: 填.移动, 目标: 默认目标 };
+  const 收 = (条: 界面条目) => ({
+    值: 条.值,
+    目标: 条.目标,
+    ...(条.选择技能 ? { 选择技能: 条.选择技能 } : {}),
+  });
+  if (填.主要.值.trim()) 出.主要 = 收(填.主要);
+  if (填.次要.值.trim()) 出.次要 = 收(填.次要);
+  const 免费 = 填.免费.filter(f => f.值.trim());
+  if (免费.length) 出.免费 = 免费.map(收);
+  return 出;
+}
+
+/** 我方的引擎填写（读界面填写 + 这个单位的默认目标） */
+function 引擎填写(u: 我方条目): 行动槽填写 {
+  return 转引擎填写(填写表[u.键] ?? 空填写(), 目标表[u.键] ?? '');
+}
 
 // 单位增删时补齐/清理填写表（Vue 3 的 reactive 对象新增键也是响应式的）
 watch(
@@ -471,8 +574,7 @@ watch(
   列表 => {
     const 在场上 = new Set(列表.map(x => x.键));
     for (const x of 列表) {
-      if (!填写表[x.键]) 填写表[x.键] = {};
-      if (!填写表[x.键].免费) 填写表[x.键].免费 = [];
+      if (!填写表[x.键]) 填写表[x.键] = 空填写();
       if (目标表[x.键] === undefined) 目标表[x.键] = '';
     }
     for (const 键 of Object.keys(填写表)) if (!在场上.has(键)) delete 填写表[键];
@@ -603,11 +705,11 @@ function 技能条目(条目: 我方条目) {
 }
 
 /**
- * 该单位**已经选中**的行动的效果预览（主要/次要下拉 + 免费多选）。
+ * 该单位**已经选中**的行动的效果预览（主要/次要下拉 + 免费条目）。
  * 形状与逻辑在 `engine/viewModel.选中行动预览`（纯函数、有测试钉死）。
  */
 function 选中预览(u: 我方条目) {
-  return 选中行动预览(u, 填写表[u.键] ?? {});
+  return 选中行动预览(u, 引擎填写(u));
 }
 
 /**
@@ -616,7 +718,7 @@ function 选中预览(u: 我方条目) {
  * 代码评审 Minor #13 点过这个隐患）。
  */
 function 行动条目(u: 我方条目) {
-  return 构造行动声明({ ...(填写表[u.键] ?? {}), 行动顺序: 顺序表[u.键] }, '').条目;
+  return 构造行动声明({ ...引擎填写(u), 行动顺序: 顺序表[u.键] }, '').条目;
 }
 
 /** ↑↓ 调序：把当前顺序固化进 顺序表（换位置只是换数组里两个元素） */
@@ -628,12 +730,42 @@ function 调序(u: 我方条目, i: number, 方向: -1 | 1) {
   顺序表[u.键] = 列表;
 }
 
+/** 免费行动：**不限次数**，界面上是"添加一条"（每条自带目标，在行动顺序里可 ↑↓） */
+function 加免费(u: 我方条目) {
+  填写表[u.键]?.免费.push(空条目());
+}
+function 删免费(u: 我方条目, i: number) {
+  填写表[u.键]?.免费.splice(i, 1);
+}
+
+/** 目标下拉的分组（敌方=攻击 / 我方=支援）—— 默认目标与每个行动的目标共用一个列表 */
+function 目标分组(u: 我方条目) {
+  return [
+    { 组: '敌方（攻击）', 项: 敌方单位.value },
+    { 组: '我方（支援：上 buff / 治疗 / 护盾）', 项: 支援目标(u) },
+  ];
+}
+
+/** 目标键 → 显示名（预览里写"这条打谁"用；键认不出来就原样显示） */
+function 目标名(键: string): string {
+  const u = props.状态.单位[键];
+  return u ? 显示名(u) : 键;
+}
+
+/**
+ * 这条技能**要不要玩家再选一个「目标技能」**（连携：「取消某个可选技能的冷却」）。
+ * 判据读的是规则本身（`engine/actionOptions.需要选技能`）—— 老缓存里的翻译也自动认。
+ */
+function 需选技能(u: 我方条目, 值: string): boolean {
+  return !!值 && 需要选技能(u.技能?.[值]);
+}
+
 /**
  * 能不能点「执行本轮」：至少要有一个单位真的出手（只预置反应不算）。
  * 我方全员倒地时不会走到这里 —— CombatView 会直接把濒死检定算到底并结束战斗
  * （不再空转回合、也不再调 AI）。
  */
-const 可提交本轮 = computed(() => 我方单位.value.some(x => 可提交(填写表[x.键] ?? {})));
+const 可提交本轮 = computed(() => 我方单位.value.some(x => 可提交(引擎填写(x))));
 
 /**
  * 「执行本轮」：交出**每个单位各自的**填写与目标。
@@ -643,11 +775,9 @@ function 执行本轮(): void {
   if (!可提交本轮.value) return;
   const 各单位: Record<string, { 填写: 行动槽填写; 目标: string }> = {};
   for (const x of 我方单位.value) {
-    const 填写 = 填写表[x.键];
-    if (!填写) continue;
     // 带上玩家排好的**行动顺序**（没调过就是默认顺序，引擎自己会兜底）
     各单位[x.键] = {
-      填写: { ...填写, 行动顺序: 行动条目(x).map(a => a.键) },
+      填写: { ...引擎填写(x), 行动顺序: 行动条目(x).map(a => a.键) },
       目标: 目标表[x.键] ?? '',
     };
   }
@@ -656,7 +786,7 @@ function 执行本轮(): void {
 
 /** 上层结算完通知清空（避免下一回合误带上一轮的选择） */
 function 清空填写() {
-  for (const 键 of Object.keys(填写表)) 填写表[键] = {};
+  for (const 键 of Object.keys(填写表)) 填写表[键] = 空填写();
   for (const 键 of Object.keys(顺序表)) delete 顺序表[键]; // 顺序也一起清（下一回合重排）
 }
 defineExpose({ 清空填写 });
@@ -1159,6 +1289,31 @@ defineExpose({ 清空填写 });
   }
 }
 
+/* 免费行动：一条一条添（每条自带目标）—— 以前是一组复选框，根本没有目标那一栏 */
+.free-line {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+.free-line select {
+  @include t.cb-plaque;
+  padding: 4px 6px;
+  font-size: 13px;
+  max-width: 200px;
+}
+.add-free {
+  @include t.cb-plaque;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: var(--cb-chalk-dim);
+  cursor: pointer;
+}
+
+/* 每个行动各自的目标下拉：比技能下拉窄一点，别把一行挤爆 */
+.slot-target select {
+  max-width: 160px;
+}
+
 .action-submit {
   display: flex;
   gap: 10px;
@@ -1278,6 +1433,11 @@ defineExpose({ 清空填写 });
   font-size: 13px;
   color: var(--cb-chalk);
   font-family: var(--cb-font-display);
+}
+/* 这条行动打谁（每个行动各自选目标之后，预览里得看得出目标） */
+.pv-target {
+  font-size: 12px;
+  color: var(--cb-amber);
 }
 .pv-meta {
   font-size: 11px;
