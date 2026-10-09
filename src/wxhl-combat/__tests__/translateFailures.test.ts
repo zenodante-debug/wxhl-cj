@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { 校验战斗解释, 解析批量翻译结果 } from '../ai/skillInterpreter';
 import { aiGenerate } from '../store';
 
+/** 新签名要的是「条目名数组」（子技能兜底命名 + 填 `母条目`）；这里只关心编号对号入座 */
+const 条目名 = (n: number) => Array.from({ length: n }, (_, i) => `条目${i + 1}`);
+
 // ================================================================
 // 翻译失败与 AI 空正文（两种"看起来像坏了"的情况，分开处理）
 //
@@ -61,7 +64,7 @@ describe('坏规则 → 判失败（进复核，能重翻）', () => {
       ],
     });
 
-    const 逐条 = 解析批量翻译结果(json, 2);
+    const 逐条 = 解析批量翻译结果(json, 条目名(2));
 
     expect(逐条[0].成功).toBe(false);
     expect(逐条[0].成功 === false && 逐条[0].原因).toContain('字段不合法');

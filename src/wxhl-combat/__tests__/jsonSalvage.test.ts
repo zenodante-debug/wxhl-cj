@@ -2,6 +2,9 @@ import { describe, expect, it } from 'vitest';
 import { 提取JSON, 提取JSON宽容 } from '../ai/jsonExtract';
 import { 解析批量翻译结果 } from '../ai/skillInterpreter';
 
+/** 新签名要的是「条目名数组」（子技能兜底命名 + 填 `母条目`）；这里只关心编号对号入座 */
+const 条目名 = (n: number) => Array.from({ length: n }, (_, i) => `条目${i + 1}`);
+
 // ================================================================
 // 玩家反馈：「用 ds（DeepSeek）来当 api 处理，经常报错说是非法 json 什么的，会不会太严苛？」
 //
@@ -113,7 +116,7 @@ describe('截断的批量翻译结果（DeepSeek 场景的端到端）', () => {
       JSON.stringify(合法条目(1)) +
       ',{"编号":2,"行动消耗":"次要';
 
-    const 结果 = 解析批量翻译结果(原文, 3);
+    const 结果 = 解析批量翻译结果(原文, 条目名(3));
 
     expect(结果[0].成功).toBe(true);
     expect(结果[1].成功).toBe(true);
@@ -121,6 +124,6 @@ describe('截断的批量翻译结果（DeepSeek 场景的端到端）', () => {
   });
 
   it('一条完整的都没回来 → 照旧抛错（不能假装成功）', () => {
-    expect(() => 解析批量翻译结果('{"解释":[{"编号":0,"行动', 1)).toThrow();
+    expect(() => 解析批量翻译结果('{"解释":[{"编号":0,"行动', 条目名(1))).toThrow();
   });
 });

@@ -548,14 +548,25 @@ export interface 翻译缓存统计 {
 // ==================== 翻译缓存（跨战斗复用，存脚本变量） ====================
 
 /**
- * 读翻译缓存（指纹 → 战斗解释）。
+ * 读翻译缓存（指纹 → **该效果翻出来的全部子技能**）。
+ *
+ * 为什么是**列表**：卡面一格可以塞好几招（§1.1），一个指纹翻出两三条是常态 ——
+ * 只存一条的话，第二场战斗会安静地少掉几招（玩家最难发现的那种坏）。
+ *
  * 版本不符（`翻译缓存版本` 变过）/ 结构不认识 → 一律视为空缓存：宁可重翻，不可喂旧口径。
+ * **本批改了口径（多属性加权 / 领域 / AoE / 一格多招），版本已撞到 2** —— 老缓存自动作废、重翻一次。
  */
-function 读翻译缓存(): Record<string, 战斗解释> {
+function 读翻译缓存(): Record<string, 战斗解释[]> {
   const v = getVariables({ type: 'script', script_id: getScriptId() }) as any;
   const 存 = v?.翻译缓存;
   if (!存 || 存.版本 !== 翻译缓存版本 || !存.条目 || typeof 存.条目 !== 'object') return {};
-  return 存.条目;
+  const 出: Record<string, 战斗解释[]> = {};
+  for (const [指纹, 值] of Object.entries(存.条目 as Record<string, unknown>)) {
+    // 单条（老形状 / 手改）也认 —— 包成单元素列表
+    if (Array.isArray(值)) 出[指纹] = 值 as 战斗解释[];
+    else if (值 && typeof 值 === 'object') 出[指纹] = [值 as 战斗解释];
+  }
+  return 出;
 }
 
 /**
@@ -563,7 +574,7 @@ function 读翻译缓存(): Record<string, 战斗解释> {
  * `replaceVariables` 是**整表替换**语义，必须先取回现有脚本变量再合并 ——
  * 否则会把 `战斗`（进行中的战斗状态）一起抹掉。
  */
-function 写翻译缓存(条目: Record<string, 战斗解释>): void {
+function 写翻译缓存(条目: Record<string, 战斗解释[]>): void {
   const scriptId = getScriptId();
   const v = (getVariables({ type: 'script', script_id: scriptId }) as any) ?? {};
   replaceVariables({ ...v, 翻译缓存: { 版本: 翻译缓存版本, 条目 } }, { type: 'script', script_id: scriptId });
@@ -590,10 +601,10 @@ export async function 整理翻译缓存(
   const 在用 = new Set<string>();
   for (const u of 单位列表) for (const s of u.效果源 ?? []) 在用.add(效果指纹(s));
 
-  const 条目: Record<string, 战斗解释> = {};
+  const 条目: Record<string, 战斗解释[]> = {};
   let 清理 = 0;
-  for (const [指纹, 解释] of Object.entries(旧)) {
-    if (在用.has(指纹)) 条目[指纹] = 解释;
+  for (const [指纹, 解释列表] of Object.entries(旧)) {
+    if (在用.has(指纹)) 条目[指纹] = 解释列表;
     else 清理++;
   }
 
@@ -693,12 +704,13 @@ export async function 翻译战斗解释(
   }
   if (条目.length === 0) return { 表, 失败, 缓存: { 命中: 0, 待翻: 0 } };
 
-  // 命中缓存的先落表；只把没命中的送去翻译
+  // 命中缓存的先落表；只把没命中的送去翻译。
+  // 缓存命中是**一整个列表**（一个卡面条目可能翻出好几招）—— 每条按自己的名字落表。
   const 缓存 = 读翻译缓存();
   const 待翻: 翻译条目[] = [];
   for (const e of 条目) {
     const 已有 = 缓存[e.指纹];
-    if (已有) 表[e.单位][e.名称] = 已有;
+    if (已有?.length) for (const 解 of 已有) 表[e.单位][解.名称 || e.名称] = 解;
     else 待翻.push(e);
   }
   const 统计: 翻译缓存统计 = { 命中: 条目.length - 待翻.length, 待翻: 待翻.length };
@@ -717,13 +729,13 @@ export async function 翻译战斗解释(
   const 新缓存 = { ...缓存 };
   let 有新增 = false;
 
-  /** 一批条目的结果按输入同序落表 / 入缓存 / 记失败 */
+  /** 一批条目的结果按输入同序落表 / 入缓存 / 记失败（**一个条目的全部子技能都落**） */
   const 落一批 = (批次: typeof 待翻, 逐条: 条目解析结果[]) => {
     逐条.forEach((r, i) => {
       const 归属 = 批次[i];
       if (r.成功) {
-        表[归属.单位][归属.名称] = r.解释;
-        新缓存[归属.指纹] = r.解释;
+        for (const 技 of r.技能) 表[归属.单位][技.名称] = 技.解释;
+        新缓存[归属.指纹] = r.技能.map(技 => 技.解释);
         有新增 = true;
       } else {
         失败.push({ 单位: 归属.单位, 名称: 归属.名称, 原因: r.原因, 来源: 归属.原始 });
@@ -740,7 +752,7 @@ export async function 翻译战斗解释(
       `技能翻译（共 ${批次.length} 项）`,
       { 超时: 翻译超时(批次.length, cfg.timeout) },
     );
-    return 解析批量翻译结果(raw, 批次.length);
+    return 解析批量翻译结果(raw, 批次.map(b => b.名称));
   };
 
   // 按批量大小切块、**顺序**发送（不并发）。

@@ -56,9 +56,12 @@ describe('skillInterpreter · 批量提示词', () => {
 });
 
 describe('skillInterpreter · 批量解析', () => {
+  /** 新签名要的是「条目名数组」（子技能兜底命名 + 填 `母条目`）；这些用例只关心编号对号入座 */
+  const 条目名 = (n: number) => Array.from({ length: n }, (_, i) => `条目${i + 1}`);
+
   it('按编号对号入座（效果名会跨单位重名，所以只能按编号）', () => {
     const json = JSON.stringify({ 解释: [一条解释(1), 一条解释(0)] });
-    const 逐条 = 解析批量翻译结果(json, 2);
+    const 逐条 = 解析批量翻译结果(json, 条目名(2));
 
     expect(逐条).toHaveLength(2);
     expect(逐条[0].成功).toBe(true);
@@ -67,7 +70,7 @@ describe('skillInterpreter · 批量解析', () => {
 
   it('编号越界 / 非整数 → 跳过该条，不越界写入', () => {
     const json = JSON.stringify({ 解释: [一条解释(0), 一条解释(99), 一条解释(-1)] });
-    const 逐条 = 解析批量翻译结果(json, 1);
+    const 逐条 = 解析批量翻译结果(json, 条目名(1));
 
     expect(逐条).toHaveLength(1);
     expect(逐条[0].成功).toBe(true);
@@ -76,7 +79,7 @@ describe('skillInterpreter · 批量解析', () => {
   it('某条规则全是垃圾 → 该条失败并带**原因**，不因一条坏丢掉整批', () => {
     // 坏规则**判失败**（响亮的失败 > 安静的空壳）→ 进复核，能一键重翻。
     const json = JSON.stringify({ 解释: [{ 编号: 0, 规则: [{}] }, 一条解释(1)] });
-    const 逐条 = 解析批量翻译结果(json, 2);
+    const 逐条 = 解析批量翻译结果(json, 条目名(2));
 
     expect(逐条[0].成功).toBe(false);
     expect(逐条[0].成功 === false && 逐条[0].原因).toContain('字段不合法');
@@ -85,7 +88,7 @@ describe('skillInterpreter · 批量解析', () => {
 
   it('某条**只回了编号**（字段全缺）→ 按默认骨架算成功（玩家的口径：孤零零的效果不该被判失败）', () => {
     const json = JSON.stringify({ 解释: [{ 编号: 0 }, 一条解释(1)] });
-    const 逐条 = 解析批量翻译结果(json, 2);
+    const 逐条 = 解析批量翻译结果(json, 条目名(2));
 
     expect(逐条[0].成功).toBe(true);
     expect(逐条[1].成功).toBe(true);
@@ -93,7 +96,7 @@ describe('skillInterpreter · 批量解析', () => {
 
   it('AI 漏回条目 → 缺的位置标失败并说明是漏条目', () => {
     const json = JSON.stringify({ 解释: [一条解释(0)] });
-    const 逐条 = 解析批量翻译结果(json, 3);
+    const 逐条 = 解析批量翻译结果(json, 条目名(3));
 
     expect(逐条[0].成功).toBe(true);
     expect(逐条[1].成功).toBe(false);
@@ -102,11 +105,11 @@ describe('skillInterpreter · 批量解析', () => {
   });
 
   it('没有「解释」数组 → 抛错（交给 aiGenerate 的重试链路）', () => {
-    expect(() => 解析批量翻译结果(JSON.stringify({ 别的: [] }), 1)).toThrow('没有 "解释" 数组');
+    expect(() => 解析批量翻译结果(JSON.stringify({ 别的: [] }), 条目名(1))).toThrow('没有 "解释" 数组');
   });
 
   it('顶层直接是数组也认（有的模型会省掉外层）', () => {
-    const 逐条 = 解析批量翻译结果(JSON.stringify([一条解释(0)]), 1);
+    const 逐条 = 解析批量翻译结果(JSON.stringify([一条解释(0)]), 条目名(1));
     expect(逐条[0].成功).toBe(true);
   });
 });

@@ -138,16 +138,23 @@
               <div class="dt-row dt-head">
                 <span>名称</span><span>行动</span><span>射程</span><span>目标</span><span>消耗</span><span>冷却</span><span>倍率</span><span>规则</span>
               </div>
-              <div v-for="d in 技能条目(u)" :key="d.名" class="dt-row">
-                <span class="dt-name" :title="d.名">{{ d.名 }}</span>
-                <span>{{ d.行动类型 }}</span>
-                <span>{{ d.射程 || '—' }}</span>
-                <span>{{ d.目标 || '—' }}</span>
-                <span>{{ d.消耗 || '—' }}</span>
-                <span>{{ d.冷却 ?? '—' }}</span>
-                <span>{{ d.倍率 }}</span>
-                <span>{{ d.规则数 ? d.规则数 + ' 条' : '—' }}</span>
-              </div>
+              <!-- 同源的几招（一个卡面条目拆出来的）挨着排，并在组首插一条标题 ——
+                   玩家口径：「这个技能，两个效果…效果内部又分为好几个效果，玩家想要释放具体的效果该怎么用」 -->
+              <template v-for="d in 技能条目(u)" :key="d.名">
+                <div v-if="d.组首 && d.同源条数 > 1" class="dt-group">
+                  同源：{{ d.母条目 }}（拆出 {{ d.同源条数 }} 招，各自独立可用）
+                </div>
+                <div class="dt-row">
+                  <span class="dt-name" :title="d.名">{{ d.名 }}</span>
+                  <span>{{ d.行动类型 }}</span>
+                  <span>{{ d.射程 || '—' }}</span>
+                  <span>{{ d.目标 || '—' }}</span>
+                  <span>{{ d.消耗 || '—' }}</span>
+                  <span>{{ d.冷却 ?? '—' }}</span>
+                  <span>{{ d.倍率 }}</span>
+                  <span>{{ d.规则数 ? d.规则数 + ' 条' : '—' }}</span>
+                </div>
+              </template>
               <div v-if="!技能条目(u).length" class="dt-empty">（没有已翻译的效果 —— 只能用基础武器攻击）</div>
             </div>
           </div>
@@ -1233,6 +1240,15 @@ defineExpose({ 清空填写 });
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+/* 同源分组标题：一个卡面条目拆出来的几招挨在一起，这里是那一组的开头 */
+.dt-group {
+  padding: 5px 8px 3px;
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: var(--cb-gold);
+  border-top: 1px solid var(--cb-border-soft);
+  background: rgba(120, 90, 200, 0.1);
 }
 .dt-empty {
   padding: 8px;
