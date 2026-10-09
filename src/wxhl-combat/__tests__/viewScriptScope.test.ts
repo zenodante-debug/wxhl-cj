@@ -208,3 +208,70 @@ describe('views 的脚本里没有"调用了不存在的名字"', () => {
     expect(找未声明的调用(好码)).toEqual([]);
   });
 });
+
+// ================================================================
+// 防具 3：**忙碌锁不能在 try 之外被卡死**
+//
+// 实战踩过（2026-10-09）：`开始战斗` 里
+//   开战中.value = true;
+//   本战意图模式.value = 读设置().意图模式;      ← 可能抛错
+//   开战前上下文.value = await 读上一楼正文();   ← 可能抛错/挂住
+//   try { …整段开战流程… } finally { 开战中.value = false; }
+// 这两行在 try **外面** —— 一旦抛错，负责复位 `开战中` 的 finally 永远不执行，
+// 按钮就永远停在「开战/准备中」，玩家点开战直接卡死（玩家原话：「准备中了一辈子」）。
+//
+// 规则：把忙碌旗标翻成 true 之后、进入 try 之前，**不许有 await，也不许调用会抛错的东西**
+//（读设置 / 读楼层 / 读变量…）。要调用就放进 try 里。
+// ================================================================
+function 找忙碌锁外的危险调用(源: string): string[] {
+  const 问题: string[] = [];
+  const 危险 = /(\bawait\b|读设置\(|读上一楼正文\(|getChatMessages\(|getVariables\()/g;
+  const 翻转 = /[\w一-龥]+\.value = true;/g; // 注意：\w 不匹配中文，必须显式带上汉字区间
+  let m: RegExpExecArray | null;
+  while ((m = 翻转.exec(源))) {
+    const 起 = m.index + m[0].length;
+    const try位置 = 源.indexOf('try {', 起);
+    if (try位置 < 0) continue; // 没有 try 的函数不在本条规则内（另有别的守卫）
+    const 窗口 = 源.slice(起, try位置);
+    危险.lastIndex = 0;
+    let d: RegExpExecArray | null;
+    while ((d = 危险.exec(窗口))) {
+      const 行 = 源.slice(0, 起 + d.index).split('\n').length;
+      问题.push(`${m[0]} 与 try 之间调用了「${d[0].trim()}」（第 ${行} 行）—— 抛错会卡死忙碌锁`);
+    }
+  }
+  return 问题;
+}
+
+describe('views 的忙碌锁：true 与 try 之间不许有危险调用', () => {
+  const 视图 = fs.readdirSync(视图目录).filter(f => f.endsWith('.vue'));
+
+  for (const 文件名 of 视图) {
+    it(`${文件名}：忙碌旗标后直接进 try`, () => {
+      expect(找忙碌锁外的危险调用(取脚本(文件名))).toEqual([]);
+    });
+  }
+
+  it('**规则自检**：把危险调用放在 try 前面必须被查出来', () => {
+    const 坏码 = `
+      async function 开始战斗() {
+        开战中.value = true;
+        开战前上下文.value = await 读上一楼正文();
+        try { await 落定开战(); } finally { 开战中.value = false; }
+      }
+    `;
+    const 问题 = 找忙碌锁外的危险调用(坏码);
+    expect(问题.length).toBeGreaterThan(0);
+    expect(问题.join('\n')).toContain('读上一楼正文');
+  });
+
+  it('规则自检：放进 try 里就不报', () => {
+    const 好码 = `
+      async function 开始战斗() {
+        开战中.value = true;
+        try { 开战前上下文.value = await 读上一楼正文(); } finally { 开战中.value = false; }
+      }
+    `;
+    expect(找忙碌锁外的危险调用(好码)).toEqual([]);
+  });
+});
