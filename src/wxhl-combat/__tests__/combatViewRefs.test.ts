@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import fs from 'node:fs';
 import path from 'node:path';
 import { parse, compileScript } from 'vue/compiler-sfc';
 import { ref } from 'vue';
+
+const { readFileSync } = fs;
 
 // ================================================================
 // 回归测试（2026-10-10）：**点开战 → `开战前上下文 is not defined`**

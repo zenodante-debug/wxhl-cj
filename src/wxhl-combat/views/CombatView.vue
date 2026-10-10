@@ -8,6 +8,28 @@
         @开战="开始战斗"
       />
 
+      <!-- 翻译复核：**可疑项也停在这里** —— 翻出来了但翻得可疑（拆解数 > 规则数、
+           有忽略的规则、有托管、规则系判定缺目标），点开战不该直接进战斗。 -->
+      <div v-if="可疑清单.length > 0" class="review-panel review-suspicious">
+        <h4>翻译复核 · {{ 可疑清单.length }} 项可疑</h4>
+        <p class="review-hint">
+          这些条目翻出来了，但效果预览里写着"只映射了 X 条" / "忽略了 Y 条" / "有托管" ——
+          玩家实测过「点开战直接进战斗，根本没给我复核的机会」。勾选要重翻的项后点「重新解析选中项」；
+          确认就这样 → 点「带着进战斗」。
+        </p>
+        <label v-for="(f, i) in 可疑清单" :key="'sus-' + i" class="review-row">
+          <input type="checkbox" v-model="f.选中" />
+          <span class="review-who">{{ f.单位 }} · {{ f.名称 }}</span>
+          <span class="review-why">{{ f.原因 }}</span>
+        </label>
+        <div class="review-actions">
+          <button :disabled="复核忙碌 || 选中项数 === 0" @click="重新解析">
+            {{ 复核忙碌 ? '重新解析中…' : `重新解析选中项（${选中项数}）` }}
+          </button>
+          <button class="ghost" :disabled="复核忙碌" @click="带着进战斗">带着进战斗</button>
+        </div>
+      </div>
+
       <!-- 翻译复核：失败项列出**原因**，勾选后可只重发这些（spec §5.4） -->
       <div v-if="翻译失败清单.length > 0" class="review-panel">
         <h4>翻译复核 · {{ 翻译失败清单.length }} 项未成功</h4>
@@ -197,6 +219,13 @@ const 开战中 = ref(false);
 const 开战进度 = ref('');
 /** 翻译失败清单（复核界面用）：带原因与来源，勾选后只重发选中的 */
 const 翻译失败清单 = ref<Array<翻译失败项 & { 选中: boolean }>>([]);
+/**
+ * **可疑清单**：翻出来了但翻得可疑（拆解数 > 规则数、有忽略的规则、有托管、规则系判定缺目标）。
+ * 解析**成功**了，但效果预览里写着"只映射了 1 条规则" / "忽略了 2 条" —— 玩家说
+ * 「点开战直接进战斗，根本没给我复核的机会」就是这一类。
+ * 它们也停在复核界面（与失败项同一个面板），玩家可以勾选重翻，或确认"就这样"带着进战斗。
+ */
+const 可疑清单 = ref<Array<{ 单位: string; 名称: string; 原因: string; 来源: any; 选中: boolean }>>([]);
 /** 停在复核界面时暂存的待开战上下文（重试成功后才真正开战） */
 const 待开战 = ref<{ 单位列表: 战斗单位[]; 开场模式: string } | null>(null);
 /** 复核界面自己在忙（重试期间挡重入） */
@@ -388,6 +417,17 @@ async function 开始战斗(选择: { id: string; 阵营: '我方' | '敌方' }[
       return;
     }
 
+    // **可疑项也停在复核界面**（翻出来了但翻得可疑）—— 玩家实测过「点开战直接进战斗，
+    // 根本没给我复核的机会」。拆解数 > 规则数 / 有忽略的规则 / 有托管 / 规则系判定缺目标
+    // 都该被拦下来让玩家看一眼（可以勾选重翻，也可以确认"就这样"带着进战斗）。
+    const 可疑 = 收集可疑项(单位列表, 表);
+    if (可疑.length > 0) {
+      可疑清单.value = 可疑;
+      待开战.value = { 单位列表, 开场模式 };
+      开战进度.value = `${可疑.length} 项翻译可疑（翻出来了但翻得可疑），勾选后可重翻，或确认带着进战斗`;
+      return;
+    }
+
     await 落定开战(单位列表, 开场模式);
   } catch (e: any) {
     日志.value.push(`开战失败：${e?.message ?? e}`);
@@ -429,7 +469,8 @@ async function 落定开战(单位列表: 战斗单位[], 开场模式入参: st
 
 /** 复核界面：重新解析**勾选的那些**（切块顺序发送，不并发） */
 async function 重新解析() {
-  const 选中 = 翻译失败清单.value.filter(f => f.选中);
+  // 失败项与可疑项**共用一个面板** —— 玩家勾谁，就重翻谁（来源都在条目上带着）
+  const 选中 = [...翻译失败清单.value.filter(f => f.选中), ...可疑清单.value.filter(f => f.选中)];
   if (选中.length === 0 || 复核忙碌.value || !待开战.value) return;
   复核忙碌.value = true;
   try {
@@ -446,13 +487,16 @@ async function 重新解析() {
     应用翻译(待开战.value.单位列表, 表);
     // 清单只保留这一轮**仍失败**的（成功的已经进技能表了）
     翻译失败清单.value = 失败.map(f => ({ ...f, 选中: true }));
+    // 可疑清单：这一轮重翻过的条目从可疑里清掉（翻好了就不该再拦）
+    const 已翻 = new Set(选中.map(f => `${f.单位}::${f.名称}`));
+    可疑清单.value = 可疑清单.value.filter(f => !已翻.has(`${f.单位}::${f.名称}`));
     const 成功数 = 选中.length - 失败.length;
     日志.value.push(
       失败.length === 0
         ? `重新解析成功：${成功数} 项已补上`
         : `重新解析：${成功数} 项成功、${失败.length} 项仍失败（原因已更新）`,
     );
-    if (翻译失败清单.value.length === 0) {
+    if (翻译失败清单.value.length === 0 && 可疑清单.value.length === 0) {
       开战进度.value = '全部翻译成功，可以开战了';
     }
   } catch (e: any) {
@@ -481,6 +525,65 @@ async function 带着缺失开战() {
   } finally {
     开战中.value = false;
   }
+}
+
+/** 可疑清单的「带着进战斗」：翻出来了但翻得可疑，玩家确认后就放行（记进日志，绝不静默） */
+async function 带着进战斗() {
+  const ctx = 待开战.value;
+  if (!ctx || 开战中.value || 复核忙碌.value) return;
+  开战中.value = true;
+  try {
+    if (可疑清单.value.length > 0) {
+      日志.value.push(
+        `带着 ${可疑清单.value.length} 项可疑翻译开战：` +
+          可疑清单.value.map(f => `${f.名称}（${f.原因}）`).join('；'),
+      );
+    }
+    可疑清单.value = [];
+    await 落定开战(ctx.单位列表, ctx.开场模式);
+  } catch (e: any) {
+    日志.value.push(`开战失败：${e?.message ?? e}`);
+  } finally {
+    开战中.value = false;
+  }
+}
+
+/**
+ * **收集可疑项**：翻出来了但翻得可疑的条目（拆解数 > 规则数 / 有忽略的规则 / 有托管 /
+ * 规则系判定缺目标）。
+ * 每一条都该被拦下来让玩家看一眼 —— 「点开战直接进战斗，根本没给我复核的机会」就是这一类。
+ */
+function 收集可疑项(
+  单位列表: 战斗单位[],
+  表: Record<string, Record<string, 战斗解释>>,
+): Array<{ 单位: string; 名称: string; 原因: string; 来源: any; 选中: boolean }> {
+  const 出: Array<{ 单位: string; 名称: string; 原因: string; 来源: any; 选中: boolean }> = [];
+  for (const u of 单位列表) {
+    for (const [名, 解释] of Object.entries(表[u.id] ?? {})) {
+      const 问题: string[] = [];
+      if ((解释.拆解?.length ?? 0) > (解释.规则?.length ?? 0)) {
+        问题.push(`拆解出 ${解释.拆解!.length} 条效果，却只映射成 ${解释.规则?.length ?? 0} 条规则`);
+      }
+      if ((解释.忽略的规则 ?? 0) > 0) 问题.push(`忽略了 ${解释.忽略的规则} 条规则（字段不完整）`);
+      if ((解释.托管?.length ?? 0) > 0) 问题.push(`有 ${解释.托管!.length} 条走托管（原文留底）`);
+      const 缺目标 = (解释.规则 ?? []).some(规则 =>
+        (规则.动作 ?? []).some(
+          动作 => 动作?.类 === '规则系判定' && (!动作.目标 || !String(动作.目标).trim()),
+        ),
+      );
+      if (缺目标) 问题.push('有规则系判定缺目标（会打出「→ undefined」）');
+      if (问题.length > 0) {
+        出.push({
+          单位: u.id,
+          名称: 名,
+          原因: 问题.join('；'),
+          来源: u.技能?.[名], // 来源原样带着（重翻时不用再回查）
+          选中: true,
+        });
+      }
+    }
+  }
+  return 出;
 }
 
 /**

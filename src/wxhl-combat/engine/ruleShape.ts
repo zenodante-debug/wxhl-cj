@@ -55,7 +55,17 @@ export const 引擎认得的规则系效果: string[] = [
  */
 export function 动作结构完好(动作: any): boolean {
   if (!动作 || typeof 动作 !== 'object') return false;
-  if (动作.类 === '规则系判定') return typeof 动作.效果 === 'string' && 动作.效果.trim().length > 0;
+  // `规则系判定` 必须**有名字**（非空字符串）——
+  // 名字是 `undefined` 时防火墙会拿它去判定，日志里刷一屏 `规则系「undefined」`（玩家实测：完全看不懂）。
+  // **目标也必须有**：不写目标 → 预览里打出 `规则系「穿透」→ undefined`（2026-10-10 实测）。
+  if (动作.类 === '规则系判定') {
+    return (
+      typeof 动作.效果 === 'string' &&
+      动作.效果.trim().length > 0 &&
+      typeof 动作.目标 === 'string' &&
+      动作.目标.trim().length > 0
+    );
+  }
   return true;
 }
 
