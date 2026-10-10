@@ -230,8 +230,10 @@ const 可疑清单 = ref<Array<{ 单位: string; 名称: string; 原因: string;
 const 待开战 = ref<{ 单位列表: 战斗单位[]; 开场模式: string } | null>(null);
 /** 复核界面自己在忙（重试期间挡重入） */
 const 复核忙碌 = ref(false);
-/** 已勾选的失败项数 */
-const 选中项数 = computed(() => 翻译失败清单.value.filter(f => f.选中).length);
+/** 已勾选的失败项数 + 可疑项数（两个清单共用一个面板，按钮上的数字要两边都算） */
+const 选中项数 = computed(() =>
+  翻译失败清单.value.filter(f => f.选中).length + 可疑清单.value.filter(f => f.选中).length,
+);
 /**
  * 战场内的进度文案（「结算本轮…」/「正在生成敌方意图（第 N 回合）…」）。
  * 生成敌方意图是一次几十秒的 AI 调用，这期间界面只有一个灰按钮和空白意图区 ——
