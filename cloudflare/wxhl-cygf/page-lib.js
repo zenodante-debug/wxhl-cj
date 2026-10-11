@@ -85,9 +85,25 @@ export function mapExtensionEntry(entry) {
   };
 }
 
-const TYPE_LABEL = { extension: '扩展', build: '构筑', character: '角色' };
+/** 酒馆世界书条目的空骨架（sourceId/sourceType 等由宿主按 sourceMeta 盖章） */
+function blankEntry() {
+  return {
+    name: '',
+    enabled: true,
+    strategy: { type: 'selective', keys: [], keys_secondary: { logic: 'and_any', keys: [] }, scan_depth: 'same_as_global' },
+    position: { type: 'after_character_definition', role: 'system', depth: 0, order: 100 },
+    content: '',
+    probability: 100,
+    recursion: { prevent_incoming: false, prevent_outgoing: false, delay_until: null },
+    effect: { sticky: null, cooldown: null, delay: null },
+    extra: { wxhlWorkshop: { sourceId: '', sourceType: '', version: '', title: '' } },
+  };
+}
 
-// ==================== 渲染模板（构筑/同人角色 → 条目正文） ====================
+/** 五个并列分类的显示名——与包契约 pack/manifest.ts 的 PACK_TYPE_LABEL 一一对应 */
+export const PACK_TYPE_LABEL = { dungeon: '副本', event: '事件', mechanism: '机制拓展', build: '构筑', persona: '人设' };
+
+// ==================== 渲染模板（构筑/人设/副本 → 条目正文） ====================
 function renderSkills(技能表) {
   const lines = Object.entries(技能表 ?? {}).map(([名, s]) => {
     const 效果 = Object.entries(s.效果 ?? {})
@@ -98,25 +114,33 @@ function renderSkills(技能表) {
   return lines.length ? lines.join('\n') : '无';
 }
 
-function renderEquipment(装备) {
-  return Object.entries(装备 ?? {})
-    .map(([槽, e]) => (e && e.名称 && e.名称 !== '无' ? `· ${槽}：${e.名称}（${e.品质 ?? '无'}·${e.阶位 ?? '无'}${e.伤害骰 && e.伤害骰 !== '无' ? `，伤害骰 ${e.伤害骰}` : ''}${e.倍率 ? `，倍率 ${e.倍率}` : ''}${e.主属性加成 ? `，主属性+${e.主属性加成}` : ''}）` : null))
-    .filter(Boolean)
-    .join('\n') || '无';
+function renderEffects(效果) {
+  const parts = Object.entries(效果 ?? {}).map(([k, v]) => `${k}：${v}`);
+  return parts.length ? `—— ${parts.join('；')}` : '';
 }
 
+function renderEquipment(装备) {
+  return (
+    Object.entries(装备 ?? {})
+      .map(([槽, e]) => (e && e.名称 && e.名称 !== '无' ? `· ${槽}：${e.名称}（${e.品质 ?? '无'}·${e.阶位 ?? '无'}${e.伤害骰 && e.伤害骰 !== '无' ? `，伤害骰 ${e.伤害骰}` : ''}${e.倍率 ? `，倍率 ${e.倍率}` : ''}${e.主属性加成 ? `，主属性+${e.主属性加成}` : ''}）` : null))
+      .filter(Boolean)
+      .join('\n') || '无'
+  );
+}
+
+/** 构筑：只印属性分配方向（不给具体数值），技能/装备沿用一期排版 */
 export function renderBuildEntry(build) {
-  const 属性 = build.属性基础 ?? {};
+  const 方向 = build.属性分配方向 ?? {};
   return [
     `【构筑】${build.构筑名}`,
     `定位：${build.定位}`,
-    `属性加点：STR ${属性.STR ?? 5} / AGI ${属性.AGI ?? 5} / CON ${属性.CON ?? 5} / PER ${属性.PER ?? 5}`,
+    `属性分配方向：主 ${方向.主属性 ?? '无'} / 副 ${方向.副属性 ?? '无'}`,
     build.天赋?.名称 && build.天赋.名称 !== '无' ? `天赋：${build.天赋.名称}（${build.天赋.品质 ?? ''}）${renderEffects(build.天赋.效果)}` : null,
     build.血统?.名称 && build.血统.名称 !== '无' ? `血统：${build.血统.名称}（${build.血统.品质 ?? ''}）${renderEffects(build.血统.效果)}` : null,
     build.称号?.名称 && build.称号.名称 !== '无' ? `称号：${build.称号.名称}${renderEffects(build.称号.效果)}` : null,
     build.职业?.名称 && build.职业.名称 !== '无' ? `职业：${build.职业.名称}（${build.职业.稀有度 ?? ''}）` : null,
     `通用技能：\n${renderSkills(build.通用技能)}`,
-    `装备：\n${renderEquipment(build.装备)}`,
+    `主要装备：\n${renderEquipment(build.主要装备)}`,
     Object.keys(build.背包建议 ?? {}).length
       ? `背包建议：\n${Object.entries(build.背包建议).map(([名, it]) => `· ${名} ×${it.数量 ?? 1}${it.描述 ? `：${it.描述}` : ''}`).join('\n')}`
       : null,
@@ -125,22 +149,62 @@ export function renderBuildEntry(build) {
     .join('\n');
 }
 
-function renderEffects(效果) {
-  const parts = Object.entries(效果 ?? {}).map(([k, v]) => `${k}：${v}`);
-  return parts.length ? `—— ${parts.join('；')}` : '';
+/** 人设：五要素 +（可选）构筑方向或嵌构筑 */
+export function renderPersonaEntry(persona) {
+  return [
+    `【人设】${persona.角色名}`,
+    persona.性格 ? `性格：${persona.性格}` : null,
+    persona.爱好?.length ? `爱好：${persona.爱好.join('、')}` : null,
+    persona.厌恶?.length ? `厌恶：${persona.厌恶.join('、')}` : null,
+    `背景故事：\n${persona.背景故事}`,
+    persona.构筑方向 ? `构筑方向：${persona.构筑方向}` : null,
+    persona.构筑 ? `构筑详情：\n${renderBuildEntry(persona.构筑)}` : null,
+  ]
+    .filter(Boolean)
+    .join('\n');
 }
 
-export function renderCharacterEntry(character) {
+function renderDungeonTask(任务) {
+  return `· ${任务?.名称 ?? ''}${任务?.说明 ? `：${任务.说明}` : ''}${任务?.奖励 ? `（奖励：${任务.奖励}）` : ''}`;
+}
+
+function renderDungeonAchievement(成就) {
+  return `· ${成就?.名称 ?? ''}${成就?.难度 ? `（${成就.难度}）` : ''}${成就?.说明 ? `：${成就.说明}` : ''}${成就?.奖励 ? `（奖励：${成就.奖励}）` : ''}`;
+}
+
+/** 副本：按 spec 4.1 字段排版，末节「GM 指导」 */
+export function renderDungeonEntry(dungeon) {
   return [
-    `【同人角色】${character.构筑名}（建议作为：${character.建议类型 ?? '其他契约者'}）`,
-    `外貌：${character.外貌}`,
-    character.性格 ? `性格：${character.性格}` : null,
-    `背景：${character.背景}`,
-    '',
-    renderBuildEntry(character),
+    `【副本】${dungeon.副本名称}`,
+    `类型：${dungeon.副本类型}　基准等级：${dungeon.基准等级}　时间限制：${dungeon.时间限制}`,
+    `背景设定：\n${dungeon.背景设定}`,
+    `地图与区域：\n${dungeon.地图与区域}`,
+    `敌人配置：\n${dungeon.敌人配置}`,
+    `主线任务：\n${renderDungeonTask(dungeon.主线任务)}`,
+    dungeon.支线任务?.length ? `支线任务：\n${dungeon.支线任务.map(renderDungeonTask).join('\n')}` : null,
+    dungeon.世界事件?.length ? `世界事件：\n${dungeon.世界事件.map(renderDungeonTask).join('\n')}` : null,
+    dungeon.隐藏任务?.length ? `隐藏任务：\n${dungeon.隐藏任务.map(renderDungeonTask).join('\n')}` : null,
+    dungeon.成就?.length ? `成就：\n${dungeon.成就.map(renderDungeonAchievement).join('\n')}` : null,
+    `GM 指导：\n${dungeon.GM指导}`,
   ]
-    .filter(x => x !== null)
+    .filter(Boolean)
     .join('\n');
+}
+
+// ==================== 封面回退 ====================
+// 深色底 + 🧩 的内联 SVG 占位图（URL 编码进 data: URI，绝不出破图）
+export const COVER_PLACEHOLDER =
+  'data:image/svg+xml,' +
+  encodeURIComponent(
+    '<svg xmlns="http://www.w3.org/2000/svg" width="400" height="240" viewBox="0 0 400 240">' +
+      '<rect width="400" height="240" fill="#1f2430"/>' +
+      '<text x="200" y="128" font-size="72" text-anchor="middle" dominant-baseline="central">🧩</text>' +
+      '</svg>',
+  );
+
+/** 干净的 http(s) 封面链接原样返回；空串/非法（含 javascript:）回退内置占位图 */
+export function coverOrPlaceholder(cover) {
+  return typeof cover === 'string' && /^https?:\/\/[^\s"'<>\\]+$/.test(cover) ? cover : COVER_PLACEHOLDER;
 }
 
 // ==================== 包 → 条目 ====================
@@ -149,26 +213,38 @@ export function sourceMetaOf(pack) {
 }
 
 export function packToWorldbookEntries(pack) {
-  if (pack.type === 'extension') {
-    return (pack.worldbookEntries ?? []).map(entry => ({
-      ...mapExtensionEntry(entry),
-      name: `[回廊mod][${TYPE_LABEL[pack.type]}]${pack.name}·${entry.name}`,
-    }));
+  const label = PACK_TYPE_LABEL[pack.type] ?? '内容';
+  const prefix = entry => `[回廊mod][${label}]${pack.name}·${entry.name}`;
+  if (pack.type === 'mechanism') {
+    return (pack.条目 ?? []).map(e => ({ ...mapExtensionEntry(e), name: prefix(e) }));
   }
-  const isBuild = pack.type === 'build';
-  const payload = isBuild ? pack.build : pack.character;
-  const name = isBuild ? payload.构筑名 : payload.构筑名;
+  if (pack.type === 'event') {
+    const list = (pack.事件条目 ?? []).map(e => ({ ...mapExtensionEntry(e), name: e.name })); // 事件名保持原样（控制器按名取）
+    if (pack.控制器条目) {
+      list.push({ ...blankEntry(), name: pack.控制器条目.名称, content: pack.控制器条目.正文, strategy: { type: 'constant', keys: [], keys_secondary: { logic: 'and_any', keys: [] }, scan_depth: 'same_as_global' } });
+    }
+    return list;
+  }
+  if (pack.type === 'dungeon') {
+    const list = [
+      {
+        ...blankEntry(),
+        name: `[回廊mod][副本]${pack.name}`,
+        strategy: { type: 'selective', keys: [pack.副本名称], keys_secondary: { logic: 'and_any', keys: [] }, scan_depth: 'same_as_global' },
+        content: renderDungeonEntry(pack),
+      },
+    ];
+    for (const e of pack.额外条目 ?? []) list.push({ ...mapExtensionEntry(e), name: prefix(e) });
+    return list;
+  }
+  const payload = pack.type === 'build' ? pack.build : pack.persona;
+  const keys = pack.type === 'build' ? [payload.构筑名] : [payload.角色名];
   return [
     {
-      name: `[回廊mod][${TYPE_LABEL[pack.type]}]${pack.name}`,
-      enabled: true,
-      strategy: { type: 'selective', keys: [name], keys_secondary: { logic: 'and_any', keys: [] }, scan_depth: 'same_as_global' },
-      position: { type: 'after_character_definition', role: 'system', depth: 0, order: 100 },
-      content: isBuild ? renderBuildEntry(payload) : renderCharacterEntry(payload),
-      probability: 100,
-      recursion: { prevent_incoming: false, prevent_outgoing: false, delay_until: null },
-      effect: { sticky: null, cooldown: null, delay: null },
-      extra: { wxhlWorkshop: { sourceId: '', sourceType: pack.type, version: '', title: '' } },
+      ...blankEntry(),
+      name: `[回廊mod][${label}]${pack.name}`,
+      strategy: { type: 'selective', keys, keys_secondary: { logic: 'and_any', keys: [] }, scan_depth: 'same_as_global' },
+      content: pack.type === 'build' ? renderBuildEntry(payload) : renderPersonaEntry(payload),
     },
   ];
 }

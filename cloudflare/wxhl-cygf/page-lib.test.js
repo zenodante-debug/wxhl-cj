@@ -1,9 +1,9 @@
 // cloudflare/wxhl-cygf/page-lib.test.js
 import { describe, expect, it, vi } from 'vitest';
 import {
-  computeInstalled, createBridgeClient, isAgreementAccepted, mapExtensionEntry,
+  computeInstalled, coverOrPlaceholder, createBridgeClient, isAgreementAccepted, mapExtensionEntry,
   MAX_IMPORT_BYTES, packToWorldbookEntries, parseWorldbookJson,
-  renderBuildEntry, renderCharacterEntry, sourceMetaOf,
+  renderBuildEntry, renderPersonaEntry, sourceMetaOf,
 } from './page-lib.js';
 
 describe('桥客户端', () => {
@@ -138,51 +138,43 @@ describe('条目映射', () => {
 describe('渲染模板', () => {
   const build = {
     构筑名: '重装堡垒', 定位: '物理破坏配合高容错换血',
-    属性基础: { STR: 10, AGI: 5, CON: 12, PER: 6 },
+    属性分配方向: { 主属性: 'STR', 副属性: 'CON' },
     天赋: { 名称: '石肤', 品质: '蓝色', 效果: { 减伤: '受击-2' } },
     血统: { 名称: '无' }, 称号: { 名称: '无' },
     职业: { 名称: '卫士', 稀有度: '蓝', 职业技能: {}, 职业特性: {} },
     通用技能: { 横扫: { 类型: '主动', 消耗: '10MP', 效果: { 说明: '横扫一片' } } },
-    装备: { 主武器: { 名称: '斩首大剑', 品质: '紫色', 阶位: '二阶', 伤害骰: '2d6', 倍率: 1.5, 主属性加成: 3 }, 头部: { 名称: '无' } },
+    主要装备: { 主武器: { 名称: '斩首大剑', 品质: '紫色', 阶位: '二阶', 伤害骰: '2d6', 倍率: 1.5, 主属性加成: 3 }, 头部: { 名称: '无' } },
     背包建议: { 治疗药水: { 描述: '回血', 数量: 3 } },
   };
 
-  it('构筑渲染含构筑名/定位/属性/技能/装备/背包', () => {
+  it('构筑渲染含构筑名/定位/属性方向/技能/装备/背包（只给方向不给数值）', () => {
     const text = renderBuildEntry(build);
     expect(text).toContain('重装堡垒');
     expect(text).toContain('物理破坏配合高容错换血');
-    expect(text).toContain('STR 10');
+    expect(text).toContain('主 STR');
     expect(text).toContain('横扫');
     expect(text).toContain('斩首大剑');
     expect(text).toContain('治疗药水');
-  });
-
-  it('同人角色渲染在构筑基础上含外貌/背景/建议类型', () => {
-    const character = { ...build, 构筑名: '雾中剑客', 外貌: '白发蒙眼', 性格: '沉默', 背景: '……', 建议类型: 'BOSS' };
-    const text = renderCharacterEntry(character);
-    expect(text).toContain('雾中剑客');
-    expect(text).toContain('白发蒙眼');
-    expect(text).toContain('BOSS');
   });
 });
 
 describe('packToWorldbookEntries / sourceMetaOf / computeInstalled', () => {
   const extPack = {
-    id: 'abc12345', name: '雾中列车', type: 'extension', version: '1.0.0',
-    worldbookEntries: [{ name: '时刻表', content: 'x', keys: ['列车'] }],
+    id: 'abc12345', name: '雾中列车', type: 'mechanism', version: '1.0.0',
+    条目: [{ name: '时刻表', content: 'x', keys: ['列车'] }],
   };
 
-  it('扩展包 → 每条一个酒馆条目，名字带包名前缀，extra 留空给宿主盖章', () => {
+  it('机制拓展包 → 每条一个酒馆条目，名字带包名前缀，extra 留空给宿主盖章', () => {
     const entries = packToWorldbookEntries(extPack);
     expect(entries).toHaveLength(1);
-    expect(entries[0].name).toBe('[回廊mod][扩展]雾中列车·时刻表');
+    expect(entries[0].name).toBe('[回廊mod][机制拓展]雾中列车·时刻表');
     expect(entries[0].extra.wxhlWorkshop.sourceId).toBe('');
   });
 
   it('构筑包 → 单条绿灯条目，关键词为构筑名', () => {
     const pack = {
       id: 'b1', name: '重装堡垒构筑', type: 'build', version: '2.0.0',
-      build: { 构筑名: '重装堡垒', 定位: '……', 属性基础: { STR: 10, AGI: 5, CON: 12, PER: 6 }, 天赋: { 名称: '无' }, 血统: { 名称: '无' }, 称号: { 名称: '无' }, 职业: { 名称: '无' }, 通用技能: {}, 装备: {}, 背包建议: {} },
+      build: { 构筑名: '重装堡垒', 定位: '……', 属性分配方向: { 主属性: 'STR', 副属性: '无' }, 天赋: { 名称: '无' }, 血统: { 名称: '无' }, 称号: { 名称: '无' }, 职业: { 名称: '无' }, 通用技能: {}, 主要装备: {}, 背包建议: {} },
     };
     const entries = packToWorldbookEntries(pack);
     expect(entries).toHaveLength(1);
@@ -192,7 +184,7 @@ describe('packToWorldbookEntries / sourceMetaOf / computeInstalled', () => {
   });
 
   it('sourceMetaOf 带 version 与 title（宿主盖章后落进 extra，供已装版本对比）', () => {
-    expect(sourceMetaOf(extPack)).toEqual({ sourceId: 'abc12345', sourceType: 'extension', version: '1.0.0', title: '雾中列车' });
+    expect(sourceMetaOf(extPack)).toEqual({ sourceId: 'abc12345', sourceType: 'mechanism', version: '1.0.0', title: '雾中列车' });
   });
 
   it('computeInstalled 按 sourceId 聚合已装版本与条数', () => {
@@ -270,5 +262,63 @@ describe('世界书 JSON 导入器', () => {
     const r = parseWorldbookJson(book([native({ selective: false, keysecondary: ['b'], key: ['/雾.*车/', 'a,b'] })]), 'x.json');
     expect(r.entries[0].keys).toEqual(['/雾.*车/', 'a,b']);
     expect(r.entries[0].keysSecondary).toEqual([]);
+  });
+});
+
+describe('五类包 → 世界书条目', () => {
+  const manifest = { format: 'wxhl-mod@2', id: 'p1', name: '雾中列车', version: '1.0.0', author: { name: 'a' }, description: 'd', cover: '', tags: [], requires: {} };
+
+  it('mechanism → 逐条映射，名字加 包名 前缀', () => {
+    const entries = packToWorldbookEntries({ ...manifest, type: 'mechanism', 条目: [{ name: '时刻表', content: 'x', keys: ['列车'] }] });
+    expect(entries).toHaveLength(1);
+    expect(entries[0].name).toBe('[回廊mod][机制拓展]雾中列车·时刻表');
+    expect(entries[0].strategy.type).toBe('selective');
+  });
+
+  it('event → 条目原样（保留 事件_ 名）+ 控制器条目', () => {
+    const entries = packToWorldbookEntries({
+      ...manifest, type: 'event',
+      事件条目: [{ name: '事件_雾中列车_开演', content: 'x', keys: ['开演'] }],
+      控制器条目: { 名称: 'EJS/雾中列车控制器', 正文: '<% %>' },
+    });
+    expect(entries.map(e => e.name)).toEqual(['事件_雾中列车_开演', 'EJS/雾中列车控制器']);
+    expect(entries[1].content).toBe('<% %>');
+    expect(entries[1].strategy.type).toBe('constant'); // 控制器必须常驻才跑得到
+  });
+
+  it('dungeon → 1 条副本条目 + 额外条目', () => {
+    const entries = packToWorldbookEntries({
+      ...manifest, type: 'dungeon',
+      副本名称: '雾中列车', 副本类型: '和平', 基准等级: 3, 时间限制: '三天',
+      背景设定: 'bg', 地图与区域: 'map', 敌人配置: 'foe',
+      主线任务: { 名称: '活着下车', 说明: 'm', 奖励: 'r' }, 支线任务: [], 世界事件: [], 隐藏任务: [], 成就: [],
+      GM指导: 'gm', 额外条目: [{ name: '列车员', content: 'npc', keys: ['列车员'] }],
+    });
+    expect(entries).toHaveLength(2);
+    expect(entries[0].name).toBe('[回廊mod][副本]雾中列车');
+    expect(entries[0].strategy.keys).toEqual(['雾中列车']);
+    expect(entries[0].content).toContain('GM 指导');
+    expect(entries[0].content).toContain('活着下车');
+    expect(entries[1].name).toBe('[回廊mod][副本]雾中列车·列车员');
+  });
+
+  it('build → 单条，正文含属性方向与主要装备（不含具体数值）', () => {
+    const text = renderBuildEntry({ 构筑名: '重装堡垒', 定位: '换血', 属性分配方向: { 主属性: 'STR', 副属性: 'CON' }, 职业: { 名称: '卫士' }, 主要装备: { 主武器: { 名称: '斩首大剑' } } });
+    expect(text).toContain('重装堡垒');
+    expect(text).toContain('主 STR');
+    expect(text).toContain('斩首大剑');
+  });
+
+  it('persona → 单条，含五要素；有构筑方向时带上', () => {
+    const text = renderPersonaEntry({ 角色名: '雾中剑客', 性格: '沉默', 爱好: ['擦剑'], 厌恶: ['吵'], 背景故事: 'bg', 构筑方向: '高闪避流血' });
+    expect(text).toContain('雾中剑客');
+    expect(text).toContain('擦剑');
+    expect(text).toContain('高闪避流血');
+  });
+
+  it('coverOrPlaceholder：空串与非法都回退到内置占位图（不产生破图）', () => {
+    expect(coverOrPlaceholder('https://x.test/a.png')).toBe('https://x.test/a.png');
+    expect(coverOrPlaceholder('')).toMatch(/^data:image\/svg\+xml/);
+    expect(coverOrPlaceholder('javascript:alert(1)')).toMatch(/^data:image\/svg\+xml/);
   });
 });
