@@ -6,6 +6,7 @@ rem  用法：把本文件用资源管理器找到，双击即可；或在终端
 rem  你只需要：① 若弹浏览器就点授权  ② 把建库输出的 database_id 粘回来
 rem ============================================================
 cd /d "%~dp0"
+rem 任何一步失败都会跳到 :hold 停住窗口，方便你把内容发给 Claude
 
 echo.
 echo ==========================================
@@ -35,7 +36,7 @@ goto :check_login
 
 :wrangler_broken
 echo [X] wrangler 无法运行。把上面的错误发给 Claude 看。
-pause & exit /b 1
+goto :hold
 
 :check_login
 echo.
@@ -52,7 +53,7 @@ goto :create_db
 
 :login_fail
 echo [X] 登录失败。请重试，或把上面输出发给 Claude。
-pause & exit /b 1
+goto :hold
 
 :create_db
 echo.
@@ -66,10 +67,10 @@ goto :write_id
 
 :no_id
 echo [X] 没拿到 database_id。把上面 d1 create 的输出发给 Claude。
-pause & exit /b 1
+goto :hold
 
 :write_id
-powershell -NoProfile -Command "$f='%~dp0wrangler.toml'; (Get-Content -Raw $f) -replace 'PENDING_CREATE','%DBID%' | Set-Content -Encoding ascii $f"
+powershell -NoProfile -Command "$f='%~dp0wrangler.toml'; (Get-Content -Raw $f) -replace 'PENDING_CREATE','%DBID%' | Set-Content -Encoding utf8 $f"
 findstr /C:"%DBID%" "%~dp0wrangler.toml" >nul
 if errorlevel 1 goto :write_fail
 echo [OK] 已把 database_id 写进 wrangler.toml
@@ -77,7 +78,7 @@ goto :set_secret
 
 :write_fail
 echo [X] 写入 wrangler.toml 失败。请手动把 database_id 改成 %DBID% 后重跑。
-pause & exit /b 1
+goto :hold
 
 :set_secret
 echo.
@@ -91,7 +92,7 @@ goto :deploy
 
 :no_key
 echo [X] 密钥不能为空。
-pause & exit /b 1
+goto :hold
 
 :deploy
 echo.
@@ -103,7 +104,7 @@ goto :smoke
 
 :deploy_fail
 echo [X] 部署失败。请把上面的完整输出发给 Claude（这是关键一步）。
-pause & exit /b 1
+goto :hold
 
 :smoke
 echo.
@@ -124,6 +125,7 @@ echo   打开浏览器访问：https://cygf.657868.xyz
 echo   然后在酒馆里点「创意工坊」按钮确认页面能出来
 echo ==========================================
 
-:end
+:hold
 echo.
+echo （窗口保持打开，你可以向上翻看每一步的结果）
 pause
