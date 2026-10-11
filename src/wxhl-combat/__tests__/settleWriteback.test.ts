@@ -108,8 +108,7 @@ describe('settleWriteback · MVU 写回', () => {
     expect(特殊状态['愤怒']).toContain('持续3回合');
   });
 
-  it('非有限值的资源直接跳过（NaN 不许跟着写进卡面）', async () => {
-    const 写入: any[] = [];
+  it('非有限值的资源直接跳过（NaN 不许跟着写进卡面）', async () => {    const 写入: any[] = [];
     (globalThis as any).waitGlobalInitialized = async () => {};
     (globalThis as any).Mvu = {
       replaceMvuData: async (data: any) => { 写入.push(data); },
@@ -136,5 +135,38 @@ describe('settleWriteback · MVU 写回', () => {
     const 特殊状态 = 写入[写入.length - 1].stat_data.契约者.状态.特殊状态;
     expect(特殊状态['坏资源']).toBeUndefined();
     expect(Object.keys(特殊状态)).toEqual(['好资源']);
+  });
+});
+
+// 玩家口径（2026-10-11）：「快捷物品不要放进"特殊资源"啊，特殊资源是单指那些层数、状态、
+//   施法的资源等等。」—— 所以快捷物品**既不能显示在「资源:」那一行，也不能被写进
+//   卡面的「特殊状态栏」**（那是特殊资源的地盘）。它有自己的写回路径：背包。
+describe('快捷物品不许混进「特殊状态」', () => {
+  it('`单位.快捷物品` 不会被写进 状态.特殊状态', async () => {
+    const 写入: any[] = [];
+    (globalThis as any).waitGlobalInitialized = async () => {};
+    (globalThis as any).Mvu = {
+      replaceMvuData: async (data: any) => { 写入.push(data); },
+      getMvuData: () => ({ stat_data: { 契约者: { 衍生属性: {}, 状态: { 特殊状态: {} } } } }),
+    };
+
+    const 状态: 战斗状态 = {
+      进行中: false, 回合: 1, 先攻: [], 领域: [],
+      单位: {
+        契约者: {
+          id: '契约者', 阵营: '我方', 类型: '玩家', 属性: { 实际: { STR: 10, AGI: 10, CON: 10, PER: 10 } }, 阶位: '一阶',
+          HP_当前: 100, HP_最大: 100, MP_当前: 0, MP_最大: 0, 耐力_当前: 0, 耐力_最大: 0,
+          防御: 0, 闪避值: 0, 距离: 0, 行动槽: { 主要: 0, 次要: 0, 移动: 0, 反应: 0, 免费: 0 }, 额度: 0,
+          冷却: {}, 护盾: 0, 架势: null, 状态: [], 濒死: null, 资源: {}, 快捷物品: { 绷带: 3 },
+          词条: new Set(), 技能: {},
+        },
+      },
+      待决: null,
+    };
+
+    await 写回战斗结果(状态, {});
+
+    const 回 = JSON.stringify(写入[写入.length - 1]);
+    expect(回).not.toContain('绷带');
   });
 });

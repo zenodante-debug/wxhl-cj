@@ -166,6 +166,27 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
     expect(html).not.toContain('资源:');
   });
 
+  // 玩家口径（2026-10-11）：「快捷物品不要放进"特殊资源"啊……快捷物品在角色详情下面单开一行，
+  // 列出可使用的快捷物品，和对应的效果，以及剩余数量。数量为 0 也不归零。」
+  it('BattleView：快捷物品**单开一行**，与「资源:」分开 —— 剩 0 也照列', { timeout: 编译超时 }, async () => {
+    const 状态 = 造战斗状态();
+    状态.单位.契约者 = { ...状态.单位.契约者, 快捷物品: { 绷带: 0, 恢复药水: 3 } };
+
+    const html = await 渲染('BattleView.vue', { 状态, 日志: [], 敌方意图: [] });
+
+    expect(html).toContain('快捷物品:');
+    expect(html).toContain('绷带 ×0');
+    expect(html).toContain('恢复药水 ×3');
+    // **绝不能**跑去「资源:」那一行（那是特殊资源的地盘）
+    expect(html).not.toContain('资源:');
+  });
+
+  it('BattleView：没有快捷物品的单位不出现「快捷物品:」那一行', { timeout: 编译超时 }, async () => {
+    const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [] });
+
+    expect(html).not.toContain('快捷物品:');
+  });
+
   it('行动下拉**按行动类型过滤**：主要只列主要行动技能 + 基础攻击；次要列次要的（这里是空的）', { timeout: 编译超时 }, async () => {
     // 造战斗状态里：月牙天冲/诛仙裂空 都是「主要行动」，两个单位都没有副武器
     const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [] });

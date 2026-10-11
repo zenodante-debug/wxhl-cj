@@ -108,6 +108,8 @@
         <div v-if="u.状态.length" class="unit-status">状态: {{ u.状态.map(st => st.名 + (st.层数 ? `×${st.层数}` : '')).join('，') }}</div>
         <!-- 自定义资源（愤怒 / 环位…）：引擎真的会记，但以前界面一个字都不显示 → 玩家说"用不了" -->
         <div v-if="资源文案(u.资源)" class="unit-res">资源: {{ 资源文案(u.资源) }}</div>
+        <!-- 快捷物品：**与「资源」分开**（玩家口径：特殊资源单指层数/状态/施法资源） -->
+        <div v-if="快捷物品文案(u)" class="unit-quick">快捷物品: {{ 快捷物品文案(u) }}</div>
         <div v-if="u.护盾 > 0" class="unit-shield">护盾: {{ u.护盾 }}</div>
         <div v-if="冷却中(u)" class="unit-cd">冷却中: {{ 冷却中(u) }}</div>
 
@@ -134,6 +136,19 @@
             <div v-if="资源文案(u.资源)" class="ud-line">资源：{{ 资源文案(u.资源) }}</div>
             <div v-if="u.词条 && [...u.词条].length" class="ud-line">词条：{{ [...u.词条].join('、') }}</div>
             <div v-if="u.护盾 > 0" class="ud-line">护盾：{{ u.护盾 }}</div>
+          </div>
+
+          <!-- 快捷物品（玩家口径 2026-10-11：「在角色详情下面单开一行，列出可使用的快捷物品、
+               对应的效果、以及剩余数量。数量为 0 也不归零」）。
+               与「特殊资源」分开 —— 那是层数/状态/施法资源，这是背包里的道具。 -->
+          <div v-if="造快捷物品展示(u).length" class="ud-block">
+            <div class="ud-title">快捷物品（{{ 造快捷物品展示(u).length }}）</div>
+            <div v-for="it in 造快捷物品展示(u)" :key="it.名称" class="ud-line">
+              {{ it.名称 }} ×{{ it.剩余 }}
+              <span v-if="it.剩余 <= 0" class="dim2">（用完了）</span>
+              <div v-for="(行, i) in it.效果" :key="i" class="dim2">　{{ 行 }}</div>
+              <div v-if="!it.效果.length" class="dim2">　（没有翻出效果 —— 这条道具在战斗里不会生效）</div>
+            </div>
           </div>
 
           <div class="ud-block">
@@ -403,7 +418,7 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { 距离带 } from '../engine/distance';
 import { 可提交, 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
-import { 造我方条目, 造技能展示, 造场地条目, 布局分布, 选中行动预览, 显示名, 资源文案, type 我方条目 } from '../engine/viewModel';
+import { 造我方条目, 造技能展示, 造场地条目, 布局分布, 选中行动预览, 显示名, 资源文案, 快捷物品文案, 造快捷物品展示, type 我方条目 } from '../engine/viewModel';
 import { 需要选技能, 技能候选 } from '../engine/actionOptions';
 import { 列行动选项 } from '../engine/actionOptions';
 import { 徒手伤害骰 } from '../engine/damage';

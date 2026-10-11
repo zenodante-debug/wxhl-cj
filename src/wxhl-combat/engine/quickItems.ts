@@ -47,13 +47,15 @@ export function 收集快捷物品(
 }
 
 /**
- * 把选中的物品折算成**开战时要灌进 `单位.资源` 的初始数量**。
+ * 把选中的物品折算成**开战时要灌进 `单位.快捷物品` 的初始数量**。
  *
- * 为什么要灌：用掉一个就减一个、用完就用不了 —— 那个"还剩几个"需要一个计数器，
- * 而 `资源` 正好是引擎现成的计数器（而且 §20 已经在单位卡上显示「资源: 绷带 ×99」，
- * 玩家一眼就能看见还剩几个）。物品名对不上背包的（改名/删了）直接跳过。
+ * 为什么要灌：用掉一个就减一个、用完就用不了 —— 那个"还剩几个"需要一个计数器。
+ * 灌进 `单位.快捷物品` 而**不是 `单位.资源`**（玩家口径 2026-10-11）：
+ * 「特殊资源」单指层数/状态/施法资源那类，要落成状态、要写进卡面的特殊状态栏；
+ * 快捷物品是背包里的道具，有自己的显示位与自己的写回路径（背包）。
+ * 物品名对不上背包的（改名/删了）直接跳过。
  */
-export function 快捷物品资源(
+export function 快捷物品初始数量(
   选中名: string[] | undefined,
   背包: Array<{ 名称: string; 数量: number }>,
 ): Record<string, number> {
@@ -96,13 +98,13 @@ export function 快捷物品消耗(
  */
 export function 快捷物品写回表(
   初始表: Record<string, Record<string, number> | undefined> | undefined,
-  单位表: Record<string, { id: string; 资源?: Record<string, number> }> | undefined,
+  单位表: Record<string, { id: string; 快捷物品?: Record<string, number> }> | undefined,
 ): Record<string, Record<string, number>> {
   const 出: Record<string, Record<string, number>> = {};
   for (const [id, 初] of Object.entries(初始表 ?? {})) {
     if (!初) continue;
     const 单位 = Object.values(单位表 ?? {}).find(u => u?.id === id);
-    const 消耗 = 快捷物品消耗(初, 单位?.资源);
+    const 消耗 = 快捷物品消耗(初, 单位?.快捷物品);
     if (Object.keys(消耗).length) 出[id] = 消耗;
   }
   return 出;
