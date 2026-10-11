@@ -35,16 +35,22 @@ export function classifyAuthMessage(data: unknown): AuthMessage | null {
  */
 export function installAuthRelay(): () => void {
   let loginWindow: Window | null = null;
+  let workshopFrame: Window | null = null;
 
   const getFrameWindow = (): Window | null =>
     ($(`#${PANEL_ID} iframe.wxhl-cygf-frame`)[0] as HTMLIFrameElement | undefined)?.contentWindow ?? null;
 
   const listener = (event: MessageEvent) => {
+    if (event.origin !== workshopOrigin()) {
+      console.warn(`[wxhl创意工坊] 拒绝来自 ${event.origin} 的登录消息`);
+      return;
+    }
     const message = classifyAuthMessage(event.data);
     if (!message) return;
     switch (message.kind) {
       case 'open': {
         if (loginWindow && !loginWindow.closed) loginWindow.close();
+        workshopFrame = (event.source as Window | null) ?? getFrameWindow();
         loginWindow = window.parent.open(message.url, 'discord_login', 'width=600,height=800,scrollbars=yes,resizable=yes');
         if (!loginWindow) {
           toastr.warning('请允许弹出窗口以完成 Discord 登录', '创意工坊');
@@ -54,11 +60,16 @@ export function installAuthRelay(): () => void {
         return;
       }
       case 'success': {
-        getFrameWindow()?.postMessage({ channel: AUTH_CHANNEL, action: 'discordLoginComplete', hash: message.hash }, workshopOrigin());
+        const target = workshopFrame && !workshopFrame.closed ? workshopFrame : getFrameWindow();
+        if (!target) {
+          toastr.warning('登录已完成，但工坊面板已关闭 —— 请重新打开创意工坊', '创意工坊');
+        } else {
+          target.postMessage({ channel: AUTH_CHANNEL, action: 'discordLoginComplete', hash: message.hash }, workshopOrigin());
+          toastr.success('Discord 登录成功', '创意工坊');
+        }
         setTimeout(() => {
           if (loginWindow && !loginWindow.closed) loginWindow.close();
         }, 200);
-        toastr.success('Discord 登录成功', '创意工坊');
         return;
       }
       case 'error': {

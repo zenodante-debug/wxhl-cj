@@ -23,6 +23,8 @@ describe('classifyAuthMessage · 登录消息分类', () => {
     ['别的 channel', { channel: 'wxhl-workshop:worldbook', action: 'openDiscordLogin', url: 'https://x' }],
     ['未知 action', { channel: AUTH_CHANNEL, action: 'rm-rf' }],
     ['open 缺 url', { channel: AUTH_CHANNEL, action: 'openDiscordLogin' }],
+    ['open 的 url 是空串', { channel: AUTH_CHANNEL, action: 'openDiscordLogin', url: '' }],
+    ['success 缺 hash', { channel: AUTH_CHANNEL, action: 'discordLoginSuccess' }],
     ['非对象', 'discord'],
     ['null', null],
   ])('%s → null', (_label, data) => {
