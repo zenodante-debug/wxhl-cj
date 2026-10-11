@@ -1,0 +1,75 @@
+import { PANEL_ID, workshopOrigin } from './panel';
+
+export const AUTH_CHANNEL = 'wxhl-workshop:auth';
+
+export type AuthMessage =
+  | { kind: 'open'; url: string }
+  | { kind: 'success'; hash: string }
+  | { kind: 'error'; error: string; errorDescription?: string };
+
+/** 把原始 postMessage data 归类为登录消息；不认得的一律 null */
+export function classifyAuthMessage(data: unknown): AuthMessage | null {
+  if (!data || typeof data !== 'object') return null;
+  const d = data as Record<string, any>;
+  if (d.channel !== AUTH_CHANNEL) return null;
+  switch (d.action) {
+    case 'openDiscordLogin':
+      return typeof d.url === 'string' && d.url !== '' ? { kind: 'open', url: d.url } : null;
+    case 'discordLoginSuccess':
+      return typeof d.hash === 'string' ? { kind: 'success', hash: d.hash } : null;
+    case 'discordLoginError':
+      return {
+        kind: 'error',
+        error: typeof d.error === 'string' && d.error !== '' ? d.error : '未知错误',
+        errorDescription: typeof d.errorDescription === 'string' ? d.errorDescription : undefined,
+      };
+    default:
+      return null;
+  }
+}
+
+/**
+ * 登录转发（范例一职责，修正其通配符 origin 缺陷）：
+ * 工坊请求开授权弹窗 → 授权完成页通知 opener → 宿主把 hash 转发回工坊 iframe（限定工坊 origin）。
+ * 挂在酒馆主页面窗口上；返回拆卸函数。
+ */
+export function installAuthRelay(): () => void {
+  let loginWindow: Window | null = null;
+
+  const getFrameWindow = (): Window | null =>
+    ($(`#${PANEL_ID} iframe.wxhl-cygf-frame`)[0] as HTMLIFrameElement | undefined)?.contentWindow ?? null;
+
+  const listener = (event: MessageEvent) => {
+    const message = classifyAuthMessage(event.data);
+    if (!message) return;
+    switch (message.kind) {
+      case 'open': {
+        if (loginWindow && !loginWindow.closed) loginWindow.close();
+        loginWindow = window.parent.open(message.url, 'discord_login', 'width=600,height=800,scrollbars=yes,resizable=yes');
+        if (!loginWindow) {
+          toastr.warning('请允许弹出窗口以完成 Discord 登录', '创意工坊');
+          return;
+        }
+        toastr.info('请在弹出窗口中完成 Discord 登录', '创意工坊');
+        return;
+      }
+      case 'success': {
+        getFrameWindow()?.postMessage({ channel: AUTH_CHANNEL, action: 'discordLoginComplete', hash: message.hash }, workshopOrigin());
+        setTimeout(() => {
+          if (loginWindow && !loginWindow.closed) loginWindow.close();
+        }, 200);
+        toastr.success('Discord 登录成功', '创意工坊');
+        return;
+      }
+      case 'error': {
+        toastr.error(message.errorDescription ?? message.error, 'Discord 登录失败');
+        if (loginWindow && !loginWindow.closed) loginWindow.close();
+        return;
+      }
+    }
+  };
+
+  window.parent.addEventListener('message', listener);
+  console.info('[wxhl创意工坊] Discord 登录转发已启用');
+  return () => window.parent.removeEventListener('message', listener);
+}
