@@ -39,7 +39,7 @@ describe('CombatView · 点开战不该 ReferenceError（2026-10-10 回归）', 
     // compileScript（dev 模式）**保留** TS 标注，顶层声明长成 `const 名 = ref<…>(…)`。
     // 断言用**正则**而不是 `.includes('ref(')` —— 中文里 `.includes` 的字符串拼接在这一步出过幺蛾子，
     // 名字本身要在场、同一行里还得真的在调 `ref(`（否则只是注释里提了一嘴）。
-    for (const 名 of ['本战意图模式', '日志', '开战前上下文', '开场模式']) {
+    for (const 名 of ['本战意图模式', '日志', '开战前上下文', '开场模式', '敌方意图列表']) {
       const 命中 = new RegExp(`^\\s*const ${名}\\s*=\\s*ref[<(']`).test(编译后) ||
         new RegExp(`^\\s*const ${名}\\s*=\\s*ref`, 'm').test(编译后);
       expect(
@@ -49,12 +49,13 @@ describe('CombatView · 点开战不该 ReferenceError（2026-10-10 回归）', 
     }
   });
 
-  it('真跑一遍持久化附加：四个值都拿得到（不给 ReferenceError 留门）', () => {
+  it('真跑一遍持久化附加：每个值都拿得到（不给 ReferenceError 留门）', () => {
     const 码 = `
       const 本战意图模式 = ${'ref'}('ai');
       const 日志 = ${'ref'}(['a']);
       const 开战前上下文 = ${'ref'}('正文');
       const 开场模式 = ${'ref'}('对峙');
+      const 敌方意图列表 = ${'ref'}([{ 单位: '骨卫兵', 行动: [] }]);
       ${抠函数('持久化附加')}
       return 持久化附加();
     `;
@@ -64,6 +65,7 @@ describe('CombatView · 点开战不该 ReferenceError（2026-10-10 回归）', 
     expect(r.日志).toEqual(['a']);
     expect(r.开战前上下文).toBe('正文');
     expect(r.开场模式).toBe('对峙');
+    expect(r.敌方意图).toEqual([{ 单位: '骨卫兵', 行动: [] }]);
   });
 
   it('**反向钉子**：把声明抠掉，这函数就该炸（证明测试不是空转）', () => {

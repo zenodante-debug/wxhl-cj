@@ -239,6 +239,13 @@
               <option value="徒手">徒手（{{ 徒手骰文本(u) }}）</option>
             </select>
           </label>
+          <label class="slot slot-target" title="这次攻击打哪：头部 ×1.5 / 臂部·腿部 ×0.75 / 眼部·核心 ×2（代价是命中 DC 更高）">
+            <span class="slot-label">部位</span>
+            <select v-model="填写表[u.键].主要.部位">
+              <option value="">不指定</option>
+              <option v-for="p in 部位选项" :key="p" :value="p">{{ p }}</option>
+            </select>
+          </label>
           <label class="slot">
             <span class="slot-label">次要</span>
             <select v-model="填写表[u.键].次要.值">
@@ -261,6 +268,13 @@
               <option value="徒手">徒手（{{ 徒手骰文本(u) }}）</option>
             </select>
           </label>
+          <label class="slot slot-target" title="这次攻击打哪：头部 ×1.5 / 臂部·腿部 ×0.75 / 眼部·核心 ×2（代价是命中 DC 更高）">
+            <span class="slot-label">部位</span>
+            <select v-model="填写表[u.键].次要.部位">
+              <option value="">不指定</option>
+              <option v-for="p in 部位选项" :key="p" :value="p">{{ p }}</option>
+            </select>
+          </label>
           <label class="slot slot-target">
             <span class="slot-label">对谁</span>
             <select v-model="填写表[u.键].次要.目标">
@@ -273,9 +287,10 @@
             </select>
           </label>
           <label class="slot">
-            <span class="slot-label">移动（目标距离·米，可为负）</span>
-            <!-- 不设 min：目标距离可以是负数（向后移动 / 撤到玩家身后）；0 或当前位置 = 原地不动，不扣槽 -->
-            <input type="number" step="1" placeholder="负数=向后" v-model.number="填写表[u.键].移动" />
+            <span class="slot-label">移动（位移量·米，可为负）</span>
+            <!-- 位移量（加减法）：当前 9 米输入 10 → 到 19 米；输入 -5 → 到 4 米。
+                 0 = 原地不动（不扣槽、不扣额度）。 -->
+            <input type="number" step="1" placeholder="+10 前进 / -5 后撤" v-model.number="填写表[u.键].移动" />
           </label>
           <label class="slot">
             <span class="slot-label">反应（预置）</span>
@@ -556,6 +571,11 @@ interface 界面条目 {
    * 空串 = 主武器（老行为）。
    */
   武器来源: '' | '主武器' | '副武器' | '徒手';
+  /**
+   * **攻击部位**（第二步_部位锁定）—— 玩家口径：「行动释放时供玩家选择部位」。
+   * 空串 = 用技能自己声明的（再没有 = 无部位加成）。
+   */
+  部位: '' | '头部' | '臂部' | '腿部' | '眼部/核心';
 }
 
 /** 界面上的单位填写：主要/次要**各自**带目标，免费行动是"添加一条"的列表 */
@@ -567,7 +587,7 @@ interface 界面填写 {
   免费: 界面条目[];
 }
 
-const 空条目 = (): 界面条目 => ({ 值: '', 目标: '', 选择技能: '', 武器来源: '' });
+const 空条目 = (): 界面条目 => ({ 值: '', 目标: '', 选择技能: '', 武器来源: '', 部位: '' });
 const 空填写 = (): 界面填写 => ({ 主要: 空条目(), 次要: 空条目(), 反应: '', 免费: [] });
 
 /** 每个我方单位各自的槽位填写；键 = 状态.单位 的键 */
@@ -596,6 +616,7 @@ function 转引擎填写(u: 我方条目, 填: 界面填写, 默认目标: strin
       目标: 有效目标(条.目标) ? 条.目标 : '',
       ...(选技能 ? { 选择技能: 选技能 } : {}),
       ...(条.武器来源 ? { 武器来源: 条.武器来源 } : {}),
+      ...(条.部位 ? { 部位: 条.部位 } : {}),
     };
   };
   if (填.主要.值.trim()) 出.主要 = 收(填.主要);
@@ -616,6 +637,9 @@ function 有效目标(键: string): boolean {
 function 徒手骰文本(u: 我方条目): string {
   return 徒手伤害骰(u.阶位);
 }
+
+/** 攻击部位下拉的取值（第二步_部位锁定；"不指定" = 用技能自己声明的） */
+const 部位选项 = ['头部', '臂部', '腿部', '眼部/核心'] as const;
 
 /** 我方的引擎填写（读界面填写 + 这个单位的默认目标） */
 function 引擎填写(u: 我方条目): 行动槽填写 {
