@@ -23,6 +23,7 @@ describe('resolveWorkshopUrl · 工坊地址', () => {
     ['userinfo 指向他域', 'https://cygf.657868.xyz@evil.com'],
     ['带凭据的地址', 'https://user:pass@evil.com'],
     ['破坏 HTML 属性的值', 'https://x" onmouseover="alert(1)'],
+    ['引号破坏属性（无空格）', 'https://x"onload="alert(1)"'],
     ['不是 URL', 'not a url'],
   ])('非法覆盖值（%s）→ 回退默认', (_label, value) => {
     vi.stubGlobal('getVariables', vi.fn().mockReturnValue({ wxhl_cygf_workshop_url: value }));
