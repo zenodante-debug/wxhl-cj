@@ -6,6 +6,7 @@
 
 export function makeFakeD1() {
   const packs = new Map(); // id → row
+  let coverColumnAdded = false; // 记录 cover 列是否已 ALTER 补过，用于模拟「列已存在」报错
 
   const oneLine = sql => sql.replace(/\s+/g, ' ').trim();
 
@@ -92,8 +93,6 @@ export function makeFakeD1() {
           return {
             async run() {
               if (/^CREATE (TABLE|INDEX)/i.test(flat)) return { success: true, meta: { changes: 0 } };
-              // 迁移语句：假件的行本来就带全部列，ALTER 对它恒为 no-op —— 但要是改了别的形态照样炸
-              if (/^ALTER TABLE packs ADD COLUMN cover TEXT NOT NULL DEFAULT ''$/i.test(flat)) return { success: true, meta: { changes: 0 } };
 
               let m;
               if ((m = flat.match(/^INSERT INTO packs \([^)]*\) VALUES \(([^)]*)\)$/i))) {
@@ -170,9 +169,16 @@ export function makeFakeD1() {
             },
           };
         },
-        // 不带参数的调用（ensureSchema 的 CREATE）
+        // 不带参数的调用（ensureSchema 的 CREATE / ALTER 迁移）
         async run() {
           if (/^CREATE (TABLE|INDEX)/i.test(flat)) return { success: true, meta: { changes: 0 } };
+          // 迁移：首次 ALTER 补列成功；再次 ALTER 模拟真 SQLite 的「列已存在」报错
+          //（worker 只该吞这一类错，其余照抛）。改了别的形态照样炸。
+          if (/^ALTER TABLE packs ADD COLUMN cover TEXT NOT NULL DEFAULT ''$/i.test(flat)) {
+            if (coverColumnAdded) throw new Error('duplicate column name: cover');
+            coverColumnAdded = true;
+            return { success: true, meta: { changes: 0 } };
+          }
           throw new Error(`fakeD1 不认识这条 SQL（无 bind run）: 「${flat}」`);
         },
       };

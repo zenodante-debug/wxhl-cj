@@ -13,15 +13,16 @@ const check = (name, ok, detail = '') => {
 };
 
 const pack = {
-  format: 'wxhl-mod@1',
+  format: 'wxhl-mod@2',
   id: 'smoke',
   name: `冒烟测试包-${Date.now()}`,
-  type: 'extension',
+  type: 'mechanism',
   version: '1.0.0',
   author: { name: 'smoke' },
   tags: ['冒烟'],
   description: '部署后冒烟，随即删除',
-  worldbookEntries: [{ name: '冒烟条目', content: '冒烟正文', keys: ['冒烟'] }],
+  cover: '',
+  条目: [{ name: '冒烟条目', content: '冒烟正文', keys: ['冒烟'] }],
 };
 
 const postJson = (path, body, method = 'POST') =>

@@ -124,3 +124,27 @@ describe('数据层', () => {
     await expect(db.prepare(`SELECT id FROM packs WHERE boo = ? ORDER BY updated DESC LIMIT ? OFFSET ?`).bind('x', 1, 0).all()).rejects.toThrow(/未知列|no such column/);
   });
 });
+
+describe('ensureSchema 迁移（cover 列）', () => {
+  it('连跑两次都成功：第二次 ALTER 报「列已存在」被吞（旧库升级路径，Review I-1/M-1）', async () => {
+    const db = makeFakeD1();
+    await expect(ensureSchema(db)).resolves.toBeUndefined();
+    // 第二次：假件抛 duplicate column name: cover —— worker 只该吞这一类错
+    await expect(ensureSchema(db)).resolves.toBeUndefined();
+  });
+
+  it('非「列已存在」的 ALTER 错误照常抛出（不被静默吞掉 → schemaReady 才会重置重试）', async () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {});
+    const flaky = {
+      prepare(sql) {
+        return {
+          async run() {
+            if (/^ALTER/i.test(sql)) throw new Error('D1 transient failure 9999');
+          },
+        };
+      },
+    };
+    await expect(ensureSchema(flaky)).rejects.toThrow('D1 transient failure 9999');
+    warn.mockRestore();
+  });
+});

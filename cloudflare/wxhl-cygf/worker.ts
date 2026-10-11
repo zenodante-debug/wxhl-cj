@@ -58,7 +58,7 @@ export function likeEscape(s: string): string {
 }
 
 export async function ensureSchema(db: D1Database): Promise<void> {
-  // CREATE TABLE IF NOT EXISTS 不会改老表结构；以后加列必须显式 ALTER（market 惯例）
+  // CREATE TABLE IF NOT EXISTS 不会改老表结构；新库直接带 cover，老库靠下面的 ALTER 补（market 惯例）
   await db
     .prepare(
       `CREATE TABLE IF NOT EXISTS packs (
@@ -75,14 +75,24 @@ export async function ensureSchema(db: D1Database): Promise<void> {
         status TEXT NOT NULL DEFAULT 'published',
         downloads INTEGER NOT NULL DEFAULT 0,
         entry_count INTEGER NOT NULL DEFAULT 0,
+        cover TEXT NOT NULL DEFAULT '',
         created TEXT NOT NULL,
         updated TEXT NOT NULL
       )`,
     )
     .run();
-  // 迁移：给已存在的旧表补 cover 列（CREATE TABLE IF NOT EXISTS 不会改老表结构）。
-  // 列已存在时 ALTER 会报错，属预期，吞掉即可（market 惯例）。
-  await db.prepare(`ALTER TABLE packs ADD COLUMN cover TEXT NOT NULL DEFAULT ''`).run().catch(() => {});
+  // 迁移：CREATE TABLE IF NOT EXISTS 不会改老表结构，老库靠这条 ALTER 补 cover
+  //（新库的 CREATE 已带 cover，ALTER 必报 duplicate column name，属预期）。
+  // 只吞「列已存在」；其他错误（瞬时故障/权限/配额）必须抛出 → schemaReady 记忆化重置 →
+  // 下次请求重试，而不是永久 500。
+  try {
+    await db.prepare(`ALTER TABLE packs ADD COLUMN cover TEXT NOT NULL DEFAULT ''`).run();
+  } catch (e) {
+    if (!(e instanceof Error && e.message.includes('duplicate column'))) {
+      console.warn('[wxhl工坊] cover 列迁移失败：', e);
+      throw e;
+    }
+  }
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_packs_type ON packs(type)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_packs_updated ON packs(updated DESC)`).run();
 }
