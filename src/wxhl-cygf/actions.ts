@@ -87,6 +87,7 @@ export const MUTATING_ACTIONS: ReadonlySet<string> = new Set([
   'updateEntry',
   'deleteEntries',
   'upsertWorkshopEntries',
+  'deleteWorkshopEntries',
 ]);
 
 function requireString(payload: Record<string, any>, key: string): string {
@@ -179,6 +180,19 @@ async function handleAction(action: string, payload: Record<string, any>): Promi
       const next = computeUpsertWorldbook(worldbook, sourceMeta, stamped);
       await replaceWorldbook(name, next, { render: 'immediate' });
       return { total: next.length, installed: newEntries.length };
+    }
+    case 'deleteWorkshopEntries': {
+      const name = requireString(payload, 'worldbookName');
+      const sourceMeta = payload.sourceMeta as SourceMeta | undefined;
+      if (!sourceMeta || typeof sourceMeta.sourceId !== 'string' || sourceMeta.sourceId === '') {
+        throw new Error('deleteWorkshopEntries 缺少 sourceMeta.sourceId');
+      }
+      // 整包卸载：互斥队列内读全量→按把手过滤→一次性写回，避免页面自己找 uid 再删的读改写竞争
+      const worldbook = await getWorldbook(name);
+      const kept = worldbook.filter(entry => !matchesSource(entry, sourceMeta));
+      const removed = worldbook.length - kept.length;
+      if (removed > 0) await replaceWorldbook(name, kept, { render: 'immediate' });
+      return { removed };
     }
     default:
       throw new Error(`未知桥接动作: ${action}`);

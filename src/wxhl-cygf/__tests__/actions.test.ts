@@ -165,4 +165,40 @@ describe('dispatchAction · 动作分发', () => {
   it('getContext 含 ensure 写操作 → 必须走互斥队列', () => {
     expect(MUTATING_ACTIONS.has('getContext')).toBe(true);
   });
+
+  it('deleteWorkshopEntries 必须走互斥队列', () => {
+    expect(MUTATING_ACTIONS.has('deleteWorkshopEntries')).toBe(true);
+  });
+
+  it('deleteWorkshopEntries 按把手整包删除，返回 removed；无把手条目不动', async () => {
+    const mine = { uid: 1, name: 'a', position: { order: 1 }, extra: { wxhlWorkshop: { sourceId: 'p1', sourceType: 'extension' } } };
+    const other = { uid: 2, name: 'b', position: { order: 2 }, extra: { wxhlWorkshop: { sourceId: 'p2' } } };
+    const manual = { uid: 3, name: 'c', position: { order: 3 } };
+    const replace = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('getWorldbook', vi.fn().mockResolvedValue([mine, other, manual]));
+    vi.stubGlobal('replaceWorldbook', replace);
+
+    const result = (await dispatchAction('deleteWorkshopEntries', {
+      worldbookName: '无限回廊mod',
+      sourceMeta: { sourceId: 'p1' },
+    })) as any;
+    expect(result).toEqual({ removed: 1 });
+    expect(replace).toHaveBeenCalledWith('无限回廊mod', [other, manual], { render: 'immediate' });
+  });
+
+  it('deleteWorkshopEntries 没有匹配 → 不写回，返回 removed:0', async () => {
+    const replace = vi.fn();
+    vi.stubGlobal('getWorldbook', vi.fn().mockResolvedValue([{ uid: 1, name: 'x', position: { order: 1 } }]));
+    vi.stubGlobal('replaceWorldbook', replace);
+    const result = (await dispatchAction('deleteWorkshopEntries', {
+      worldbookName: '无限回廊mod',
+      sourceMeta: { sourceId: 'p9' },
+    })) as any;
+    expect(result).toEqual({ removed: 0 });
+    expect(replace).not.toHaveBeenCalled();
+  });
+
+  it('deleteWorkshopEntries 缺 sourceMeta.sourceId → 响亮报错', async () => {
+    await expect(dispatchAction('deleteWorkshopEntries', { worldbookName: 'x' })).rejects.toThrow('sourceMeta.sourceId');
+  });
 });

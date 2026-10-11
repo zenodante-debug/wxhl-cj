@@ -1,3 +1,5 @@
+import { z } from 'zod';
+
 export const PackAuthor = z.object({
   name: z.string().min(1),
   discord: z.string().prefault(''),

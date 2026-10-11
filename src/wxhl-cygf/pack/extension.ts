@@ -1,3 +1,4 @@
+import { z } from 'zod';
 import { PackManifest } from './manifest';
 
 export const ExtensionEntry = z

@@ -1,4 +1,5 @@
 // 字段对照 src/wxhl-cygf/变量结构_特殊资源通用版.json（主卡权威结构，2026-10-11 复制）手写，禁自动转换。
+import { z } from 'zod';
 import { PackManifest } from './manifest';
 
 export const 技能Schema = z
