@@ -209,7 +209,8 @@ describe('数据层', () => {
   it('列表：type 过滤与关键词搜索（名称/简介/作者）', async () => {
     const db = await freshDb();
     await insertPack(db, row({ id: 'p1', name: '雾中列车', type: 'extension' }));
-    await insertPack(db, row({ id: 'p2', name: '重装堡垒', type: 'build' }));
+    // 注意：row() 的默认简介里含「列车」，所以 p2 必须换掉简介，否则搜索断言不可能成立
+    await insertPack(db, row({ id: 'p2', name: '重装堡垒', type: 'build', description: '一座钢铁要塞' }));
     expect((await listPacks(db, { type: 'build', limit: 50, offset: 0 })).rows.map(r => r.id)).toEqual(['p2']);
     expect((await listPacks(db, { q: '列车', limit: 50, offset: 0 })).rows.map(r => r.id)).toEqual(['p1']);
     expect((await listPacks(db, { q: '测试作者', limit: 50, offset: 0 })).total).toBe(2);
@@ -1097,7 +1098,13 @@ describe('桥客户端', () => {
       const data = { channel: 'wxhl-workshop:worldbook', kind: 'response', id, ok, ...(ok ? { payload } : { error: payload }) };
       listeners.forEach(l => l({ data }));
     };
-    return { posted, respond, parentWindow, selfWindow };
+    /** 用别的 channel 发一条同 id 的响应 */
+    const respondChannel = (channel, id, payload) => {
+      listeners.forEach(l => l({ data: { channel, kind: 'response', id, ok: true, payload } }));
+    };
+    /** 原样灌任意消息体 */
+    const respondRaw = data => listeners.forEach(l => l({ data }));
+    return { posted, respond, respondChannel, respondRaw, parentWindow, selfWindow };
   }
 
   it('request 发 request 信封，收到同 id 响应后 resolve payload', async () => {
@@ -1138,12 +1145,16 @@ describe('桥客户端', () => {
     const w = fakeWindows();
     const bridge = createBridgeClient({ parentWindow: w.parentWindow, selfWindow: w.selfWindow });
     const promise = bridge.request('handshake');
-    const wrongId = { data: { channel: 'wxhl-workshop:worldbook', kind: 'response', id: 'nobody', ok: true, payload: {} } };
-    const wrongChannel = { data: { channel: 'other', kind: 'response', id: w.posted[0].id, ok: true, payload: {} } };
-    // 手动触发两条无关消息后再发正确响应
-    const listeners = [...(w.selfWindow as any).__proto__ ? [] : []];
-    w.respond('nobody', {}); // 无人认领
-    w.respond(w.posted[0].id, { ok: true });
+    const sentId = w.posted[0].id;
+    // 先灌三条无关消息：别的 id、别的 channel、以及一条非响应消息
+    w.respond('nobody', { ignored: true });
+    w.respondChannel('other', sentId, { ignored: true });
+    w.respondRaw({ channel: 'wxhl-workshop:worldbook', kind: 'request', id: sentId, action: 'x' });
+    let settled = false;
+    promise.then(() => (settled = true));
+    await Promise.resolve();
+    expect(settled).toBe(false); // 三条无关消息都没能结算这个请求
+    w.respond(sentId, { ok: true });
     await expect(promise).resolves.toEqual({ ok: true });
     bridge.destroy();
   });
