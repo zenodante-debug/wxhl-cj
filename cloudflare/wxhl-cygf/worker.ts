@@ -1,5 +1,9 @@
 // 无限回廊 · 创意工坊 Worker（存储层：Cloudflare D1）
 // 部署见同目录 README.md。包格式契约共享自 src/wxhl-cygf/pack/（单一真源，勿另写）。
+import { z } from 'zod';
+import { ContentPack } from '../../src/wxhl-cygf/pack';
+import WORKSHOP_HTML from './workshop.html';
+import PAGE_LIB from './page-lib.js';
 
 export interface PackRow {
   id: string;
@@ -157,3 +161,216 @@ export async function resetManageKey(db: D1Database, id: string, newHash: string
 export async function bumpDownloads(db: D1Database, id: string): Promise<void> {
   await db.prepare(`UPDATE packs SET downloads = downloads + 1 WHERE id = ?`).bind(id).run();
 }
+
+// ==================== HTTP 层 ====================
+const MAX_PACK_BYTES = 256 * 1024;
+const MAX_NAME_LEN = 100;
+const MAX_ENTRIES = 100;
+
+export function genPackId(): string {
+  const alphabet = '0123456789abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ';
+  const bytes = crypto.getRandomValues(new Uint8Array(8));
+  return Array.from(bytes, b => alphabet[b % alphabet.length]).join('');
+}
+
+export async function sha256Hex(input: string): Promise<string> {
+  const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(input));
+  return Array.from(new Uint8Array(digest), b => b.toString(16).padStart(2, '0')).join('');
+}
+
+function json(data: unknown, status = 200): Response {
+  return new Response(JSON.stringify(data), { status, headers: { 'Content-Type': 'application/json; charset=utf-8' } });
+}
+
+function err(message: string, status: number): Response {
+  return json({ error: message }, status);
+}
+
+/** 把上传体校验成合法包；返回错误消息或 null。服务端是唯一权威校验点。 */
+function validatePack(pack: unknown): { ok: true; pack: any } | { ok: false; error: string } {
+  const result = ContentPack.safeParse(pack);
+  if (!result.success) {
+    return { ok: false, error: `包格式不符合规范：${z.prettifyError(result.error)}` };
+  }
+  const parsed = result.data as any;
+  if (parsed.name.length > MAX_NAME_LEN) return { ok: false, error: `名称过长（上限 ${MAX_NAME_LEN} 字符）` };
+  if (parsed.type === 'extension' && parsed.worldbookEntries.length > MAX_ENTRIES) {
+    return { ok: false, error: `条目数过多（上限 ${MAX_ENTRIES} 条）` };
+  }
+  return { ok: true, pack: parsed };
+}
+
+function entryCountOf(pack: any): number {
+  return pack.type === 'extension' ? pack.worldbookEntries.length : 1;
+}
+
+function toRow(pack: any, id: string, manageHash: string, now: string, existing?: PackRow): PackRow {
+  return {
+    id,
+    name: pack.name,
+    type: pack.type,
+    version: pack.version,
+    author_name: pack.author.name,
+    author_discord: pack.author.discord ?? '',
+    tags_json: JSON.stringify(pack.tags ?? []),
+    description: pack.description ?? '',
+    pack_json: JSON.stringify(pack),
+    manage_hash: manageHash,
+    status: 'published',
+    downloads: existing?.downloads ?? 0,
+    entry_count: entryCountOf(pack),
+    created: existing?.created ?? now,
+    updated: now,
+  };
+}
+
+// listPacks 现在只回 10 列元数据投影（PackListRow），toMeta 只读这些列
+function toMeta(row: PackListRow) {
+  return {
+    id: row.id,
+    name: row.name,
+    type: row.type,
+    version: row.version,
+    authorName: row.author_name,
+    tags: JSON.parse(row.tags_json || '[]'),
+    description: row.description,
+    downloads: row.downloads,
+    entryCount: row.entry_count,
+    updated: row.updated,
+  };
+}
+
+export default {
+  async fetch(request: Request, env: { WORKSHOP_DB: D1Database; WORKSHOP_ADMIN_KEY?: string }): Promise<Response> {
+    const url = new URL(request.url);
+    try {
+      if (url.pathname === '/' && request.method === 'GET') {
+        return new Response(WORKSHOP_HTML, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
+      }
+      if (url.pathname === '/page-lib.js' && request.method === 'GET') {
+        return new Response(PAGE_LIB, { headers: { 'Content-Type': 'application/javascript; charset=utf-8' } });
+      }
+
+      await ensureSchema(env.WORKSHOP_DB);
+      const db = env.WORKSHOP_DB;
+
+      // 管理端点（/api/admin/*）：Worker secret WORKSHOP_ADMIN_KEY；没配就一律 403（fail-closed，market 惯例）
+      if (url.pathname.startsWith('/api/admin/')) {
+        if (request.method !== 'POST') return err('管理端点只接受 POST', 405);
+        let body: any;
+        try {
+          body = await request.json();
+        } catch {
+          return err('请求体不是合法 JSON', 400);
+        }
+        const adminKey = env.WORKSHOP_ADMIN_KEY;
+        if (!adminKey || body?.key !== adminKey) return err('管理密钥不正确或未配置', 403);
+
+        if (url.pathname === '/api/admin/list') {
+          const { rows, total } = await listPacks(db, { limit: 200, offset: 0 });
+          return json({ total, rows: rows.map(toMeta) });
+        }
+        if (url.pathname === '/api/admin/delete') {
+          const ids = Array.isArray(body.ids) ? body.ids.filter((x: unknown) => typeof x === 'string') : [];
+          if (ids.length === 0) return err('缺少 ids', 400);
+          let deleted = 0;
+          for (const id of ids) {
+            if (await deletePackById(db, id)) deleted++;
+          }
+          return json({ ok: true, deleted });
+        }
+        if (url.pathname === '/api/admin/reset-key') {
+          if (typeof body.id !== 'string' || !body.id) return err('缺少 id', 400);
+          const manageKey = crypto.randomUUID().replaceAll('-', '');
+          const manageHash = await sha256Hex(manageKey);
+          if (!(await resetManageKey(db, body.id, manageHash))) return err('内容包不存在', 404);
+          return json({ ok: true, id: body.id, manageKey });
+        }
+        return err('没有这个管理端点', 404);
+      }
+
+      if (url.pathname === '/api/packs' && request.method === 'GET') {
+        const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 20, 1), 50);
+        const offset = Math.max(Number(url.searchParams.get('offset')) || 0, 0);
+        const sort = url.searchParams.get('sort') === 'downloads' ? 'downloads' : 'updated';
+        const { rows, total } = await listPacks(db, {
+          q: url.searchParams.get('q') ?? undefined,
+          type: url.searchParams.get('type') ?? undefined,
+          tag: url.searchParams.get('tag') ?? undefined,
+          sort,
+          limit,
+          offset,
+        });
+        return json({ packs: rows.map(toMeta), total });
+      }
+
+      const detailMatch = url.pathname.match(/^\/api\/packs\/([0-9a-zA-Z]{8})$/);
+      if (detailMatch && request.method === 'GET') {
+        const row = await getPackById(db, detailMatch[1]);
+        if (!row || row.status !== 'published') return err('内容包不存在或已下架', 404);
+        await bumpDownloads(db, row.id);
+        return json({ pack: JSON.parse(row.pack_json) });
+      }
+
+      if (url.pathname === '/api/packs' && request.method === 'POST') {
+        const text = await request.text();
+        if (text.length > MAX_PACK_BYTES) return err(`包体过大（上限 ${MAX_PACK_BYTES / 1024}KB）`, 413);
+        let body: unknown;
+        try {
+          body = JSON.parse(text);
+        } catch {
+          return err('请求体不是合法 JSON', 400);
+        }
+        const checked = validatePack(body);
+        if (!checked.ok) return err(checked.error, 422);
+        checked.pack.id = genPackId(); // id 一律服务端生成
+        // id 撞车重试一次（Review Focus #5）
+        if (await getPackById(db, checked.pack.id)) checked.pack.id = genPackId();
+        if (await getPackById(db, checked.pack.id)) return err('服务繁忙，请重试', 503);
+        const manageKey = crypto.randomUUID().replaceAll('-', '');
+        const manageHash = await sha256Hex(manageKey);
+        await insertPack(db, toRow(checked.pack, checked.pack.id, manageHash, new Date().toISOString()));
+        return json({ id: checked.pack.id, manageKey }, 201);
+      }
+
+      if (detailMatch && request.method === 'PUT') {
+        let body: any;
+        try {
+          body = await request.json();
+        } catch {
+          return err('请求体不是合法 JSON', 400);
+        }
+        if (typeof body?.manageKey !== 'string' || !body.manageKey) return err('缺少 manageKey', 400);
+        const checked = validatePack(body.pack);
+        if (!checked.ok) return err(checked.error, 422);
+        checked.pack.id = detailMatch[1];
+        const manageHash = await sha256Hex(body.manageKey);
+        const existing = await getPackById(db, detailMatch[1]);
+        // 不区分「包不存在」与「密钥不对」，不泄露包的存在性
+        if (!existing || existing.manage_hash !== manageHash) return err('内容包不存在或管理密钥不正确', 403);
+        const okUpdate = await updatePackByKey(db, detailMatch[1], manageHash, toRow(checked.pack, detailMatch[1], manageHash, new Date().toISOString(), existing));
+        if (!okUpdate) return err('内容包不存在或管理密钥不正确', 403);
+        return json({ ok: true, id: detailMatch[1] });
+      }
+
+      if (detailMatch && request.method === 'DELETE') {
+        let body: any;
+        try {
+          body = await request.json();
+        } catch {
+          return err('请求体不是合法 JSON', 400);
+        }
+        if (typeof body?.manageKey !== 'string' || !body.manageKey) return err('缺少 manageKey', 400);
+        const manageHash = await sha256Hex(body.manageKey);
+        const okDelete = await deletePackByKey(db, detailMatch[1], manageHash);
+        if (!okDelete) return err('内容包不存在或管理密钥不正确', 403);
+        return json({ ok: true, id: detailMatch[1] });
+      }
+
+      return err('没有这个接口', 404);
+    } catch (error) {
+      console.error('[wxhl工坊] 未捕获异常:', error);
+      return err(error instanceof Error ? `服务内部错误：${error.message}` : '服务内部错误', 500);
+    }
+  },
+};

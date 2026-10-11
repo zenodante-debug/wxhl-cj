@@ -1,4 +1,9 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
+
+// worker.ts 现在也导入 wrangler Text 资源（workshop.html / page-lib.js）——vitest 不识别该规则，同样 mock 掉
+vi.mock('./workshop.html', () => ({ default: '<!doctype html><title>stub</title>' }));
+vi.mock('./page-lib.js', () => ({ default: '// stub' }));
+
 import { makeFakeD1 } from './fake-d1.mjs';
 import { bumpDownloads, deletePackById, deletePackByKey, ensureSchema, getPackById, insertPack, likeEscape, listPacks, resetManageKey, updatePackByKey } from './worker.ts';
 
