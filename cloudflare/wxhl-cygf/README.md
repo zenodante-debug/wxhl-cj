@@ -58,6 +58,18 @@ packs(id PK, name, type, version, author_name, author_discord, tags_json, descri
 
 ## 部署
 
+**一键脚本（推荐）**——在你自己终端的 **Git Bash** 里跑：
+
+```bash
+bash cloudflare/wxhl-cygf/deploy.sh
+```
+
+它依次做：检查登录 → 建 D1 并把 `database_id` **自动写回** `wrangler.toml` → 设管理密钥 → `deploy` → 跑冒烟。
+可重复运行（已建的库不重建、已填的 id 不覆盖）。中途只需你：未登录时先跑一次 `wrangler login`（弹浏览器），以及输入管理密钥。
+用 `WORKSHOP_ADMIN_KEY=xxx bash cloudflare/wxhl-cygf/deploy.sh` 可免去手输。
+
+**手动等价步骤**：
+
 ```bash
 npm install -g wrangler            # 或 npx wrangler
 wrangler login                     # ← 需要浏览器授权，交给用户操作
@@ -67,6 +79,9 @@ wrangler secret put WORKSHOP_ADMIN_KEY   # 工坊主管理密钥（可留空，�
 wrangler deploy                    # 在 cloudflare/wxhl-cygf/ 目录下执行
 node cloudflare/wxhl-cygf/smoke.mjs      # 部署后冒烟，全绿才算上线成功
 ```
+
+> **发布顺序**：宿主脚本（`src/wxhl-cygf/`，含 `deleteWorkshopEntries` 原语）必须先进入酒馆脚本库生效，
+> 否则玩家在工坊里点"卸载"会报 `未知桥接动作`。
 
 > **同步约定**：`wrangler.toml` 的 Text 规则必须同时覆盖 `**/*.html` 与 `**/page-lib.js`。
 > 少写 `page-lib.js` 那个 glob，`import PAGE_LIB from './page-lib.js'` 会被当普通 JS 模块、
