@@ -742,6 +742,19 @@ describe('cover 与五类型', () => {
     expect(list.packs[0].cover).toBe('');
     expect(list.packs[0].typeLabel).toBe('内容'); // 未知/旧 type 回退通用标签，不崩
   });
+
+  it('entryCount 按新契约算：mechanism=条目数，event=事件条目+控制器', async () => {
+    const upM = await upload({ ...v2(), type: 'mechanism', 条目: [{ name: 'a', content: 'c', keys: ['k'] }, { name: 'b', content: 'c', keys: ['k'] }] });
+    const upE = await upload({
+      ...v2(), type: 'event',
+      事件条目: [{ name: '事件_p_a', content: 'c', keys: ['k'] }],
+      控制器条目: { 名称: 'EJS/p控制器', 正文: '<% %>' },
+    });
+    const list = await (await worker.fetch(get('/api/packs'), env())).json();
+    const byId = Object.fromEntries(list.packs.map(p => [p.id, p.entryCount]));
+    expect(byId[upM.body.id]).toBe(2);
+    expect(byId[upE.body.id]).toBe(2);
+  });
 });
 ```
 
@@ -760,6 +773,28 @@ await db.prepare(`ALTER TABLE packs ADD COLUMN cover TEXT NOT NULL DEFAULT ''`).
 // toMeta 加 cover: row.cover ?? '' 与 typeLabel: PACK_TYPE_LABEL[row.type as keyof typeof PACK_TYPE_LABEL] ?? '内容'
 // toRow 从 pack.cover ?? '' 取值
 ```
+
+**同时必须改掉按旧契约写死的条目计数**（Task 1 换了契约后，`entryCountOf` 里 `type === 'extension'` 与 `worldbookEntries` 已成死代码，mechanism/event 包会被错算成 1 条，`MAX_ENTRIES` 校验也永不触发）：
+
+```typescript
+/** 一个包最终会落地成几条世界书条目（与 page-lib 的 packToWorldbookEntries 口径一致） */
+function entryCountOf(pack: any): number {
+  if (pack.type === 'mechanism') return pack.条目.length;
+  if (pack.type === 'event') return pack.事件条目.length + (pack.控制器条目 ? 1 : 0);
+  if (pack.type === 'dungeon') return 1 + (pack.额外条目?.length ?? 0);
+  return 1; // build / persona 各渲染成一条
+}
+
+/** 只对"条目列表型"的包限条数；结构化类型天然只有 1~数条 */
+function entriesOverLimit(pack: any): boolean {
+  if (pack.type === 'mechanism') return pack.条目.length > MAX_ENTRIES;
+  if (pack.type === 'event') return pack.事件条目.length > MAX_ENTRIES;
+  if (pack.type === 'dungeon') return (pack.额外条目?.length ?? 0) > MAX_ENTRIES;
+  return false;
+}
+```
+
+`validatePack` 里把原来的 `parsed.type === 'extension' && parsed.worldbookEntries.length > MAX_ENTRIES` 换成 `entriesOverLimit(parsed)`。
 
 `PACK_TYPE_LABEL` 从 `../../src/wxhl-cygf/pack` 导入（单一真源）。
 
