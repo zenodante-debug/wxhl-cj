@@ -1437,7 +1437,7 @@ export function mountStatusbar(root: HTMLElement): () => void {
         '<div class="mate-sub-body' +
         (subResExpanded ? '' : ' hidden') +
         '">' +
-        renderResourceTree(_.get(m, '特殊资源', {}), targetPath + '.特殊资源', _ui.expand_subs, subKeyBase + '.特殊资源') +
+        renderResourceTree(_.get(m, '特殊资源', {}), targetPath + '.特殊资源', _ui.expand_subs, subKeyBase + '.特殊资源.列表') +
         '</div>';
       h += '</div>';
 
