@@ -324,6 +324,98 @@ export async function 读取单位效果源(路径: string): Promise<单位效�
   return 出;
 }
 
+/** 背包里的一件物品（规范化形状；`原文` 留着给翻译器看额外字段） */
+export interface 背包物品 {
+  名称: string;
+  描述: string;
+  数量: number;
+  /** 背包条目的原始对象（品质/伤害骰这类 catchall 字段全在里面） */
+  原文: Record<string, any>;
+}
+
+/**
+ * 读一个实体的背包（快捷物品栏用，plan §21）。
+ *
+ * 权威 schema：`实体.背包 = Record<物品名, { 描述, 数量, ...catchall }>`，
+ * 且 **每个实体各有自己的背包**（`实体Schema` 是统一超集）——
+ * 所以队友的栏位读的是**队友自己**的背包，不是玩家的。
+ *
+ * schema 那层 `.transform(pickBy(数量 > 0))` 已经把数量为 0 的滤掉了，
+ * 这里再滤一遍是**第二道**（老存档、手改变量都可能绕过 schema）。
+ */
+export async function 读取背包(路径: string): Promise<背包物品[]> {
+  await waitGlobalInitialized('Mvu');
+  const vars = getVariables({ type: 'message', message_id: -1 });
+  const { 实体 } = 定位单位(vars?.stat_data, 路径);
+
+  const 出: 背包物品[] = [];
+  for (const [名称, 条目] of Object.entries<any>(实体.背包 ?? {})) {
+    if (!条目 || typeof 条目 !== 'object') continue;
+    const 数量 = Number(条目.数量);
+    if (!Number.isFinite(数量) || 数量 <= 0) continue;
+    出.push({
+      名称,
+      描述: typeof 条目.描述 === 'string' ? 条目.描述 : '',
+      数量,
+      原文: 条目,
+    });
+  }
+  return 出;
+}
+
+/**
+ * 快捷物品 → 一条效果源（并进开战时的待翻清单，和技能/装备/天赋一起翻）。
+ *
+ * - `名称` 加 `（快捷物品）` 后缀：既让玩家一眼看出这条是哪来的，
+ *   也给引擎一个**稳定的标记**（翻译完之后按 `解释.母条目` 认领，见 `CombatView.标记快捷物品`）。
+ * - `行动消耗` 固定 `免费行动`（玩家口径：用道具不占行动槽）。
+ * - 效果里带上背包条目的**全部字段**（品质/伤害骰这类 catchall 可能是模型唯一能看出"这是什么"的线索），
+ *   只把 `数量` 摘掉 —— 数量是账，不是效果。
+ */
+export function 快捷物品转效果源(物品: 背包物品): 单位效果源 {
+  const { 数量: _数量, ...其余 } = 物品.原文 ?? {};
+  return {
+    名称: `${物品.名称}（快捷物品）`,
+    类型: '物品',
+    行动类型: '免费行动',
+    关联属性: '',
+    阶位: '',
+    消耗: '无',
+    冷却: '无',
+    射程: '自身',
+    目标: '自身',
+    效果: { 描述: 物品.描述, ...其余 },
+  };
+}
+
+/**
+ * 把战斗中用掉的快捷物品**写回背包**（收尾时调一次）。
+ *
+ * 玩家裁定（plan §21.1）：用一次扣一个，**战斗中记账、收尾时写回** ——
+ * 所以这是**一次性**的收尾动作，不是每用一次就改变量。
+ *
+ * ⚠️ 这是本项目**唯一**一处会写 `状态` / `衍生属性` 之外的字段
+ * （`写回战斗结果` 的铁律是"只写 衍生属性.*_当前 与 状态.特殊状态"）——
+ * 玩家明确点头才加的，别把它顺手并进 `写回战斗结果`：那会让铁律那句话变成半真半假。
+ *
+ * 只改 `数量`，条目上的其它字段（描述/品质/…）原样保留。
+ */
+export async function 写回背包消耗(路径: string, 消耗: Record<string, number>): Promise<void> {
+  const 有效 = Object.entries(消耗 ?? {}).filter(([, n]) => Number.isFinite(n) && n > 0);
+  if (!有效.length) return; // 空表不写 —— 别白改一次变量
+  await waitGlobalInitialized('Mvu');
+  const data = Mvu.getMvuData({ type: 'message', message_id: -1 });
+  const 路径前缀 = 路径 === '契约者' ? '契约者' : `契约者.${路径}`;
+
+  for (const [名, 扣] of 有效) {
+    const 现有 = Number(_.get(data, `stat_data.${路径前缀}.背包.${名}.数量`) ?? 0);
+    const 新值 = Math.max(0, (Number.isFinite(现有) ? 现有 : 0) - 扣);
+    _.set(data, `stat_data.${路径前缀}.背包.${名}.数量`, 新值);
+  }
+
+  await Mvu.replaceMvuData(data, { type: 'message', message_id: -1 });
+}
+
 export interface 可参战单位 {
   id: string;
   名称: string;

@@ -11,18 +11,33 @@
         <div class="roster-head">
           <span>参战</span><span>名称</span><span>类型</span><span>阶位</span><span>HP</span><span>阵营</span>
         </div>
-        <div v-for="u in 名单" :key="u.id" class="plate-row" :class="{ off: !选中[u.id] }">
-          <input type="checkbox" v-model="选中[u.id]" />
-          <span class="plate-name">{{ u.名称 }}</span>
-          <span class="dim">{{ u.类型 }}</span>
-          <span class="dim">{{ u.阶位 }}</span>
-          <span class="dim mono">{{ u.HP_当前 }}/{{ u.HP_最大 }}</span>
-          <select v-model="阵营[u.id]" :disabled="!选中[u.id]">
-            <option value="我方">我方</option>
-            <option value="敌方">敌方</option>
-            <option value="待定">不参战</option>
-          </select>
-        </div>
+        <template v-for="u in 名单" :key="u.id">
+          <div class="plate-row" :class="{ off: !选中[u.id] }">
+            <input type="checkbox" v-model="选中[u.id]" />
+            <span class="plate-name">{{ u.名称 }}</span>
+            <span class="dim">{{ u.类型 }}</span>
+            <span class="dim">{{ u.阶位 }}</span>
+            <span class="dim mono">{{ u.HP_当前 }}/{{ u.HP_最大 }}</span>
+            <select v-model="阵营[u.id]" :disabled="!选中[u.id]">
+              <option value="我方">我方</option>
+              <option value="敌方">敌方</option>
+              <option value="待定">不参战</option>
+            </select>
+          </div>
+
+          <!-- 快捷物品栏：**每个我方单位各 3 个**（玩家口径）。
+               选项 = **这个单位自己背包**里的物品（读变量拉取），带数量好决定带哪三件。 -->
+          <div v-if="显示快捷栏(!!选中[u.id], 阵营[u.id])" class="quick-bar">
+            <span class="quick-label">快捷物品栏</span>
+            <select v-for="i in 栏位下标" :key="i" v-model="快捷[u.id][i]">
+              <option value="">（空栏位）</option>
+              <option v-for="物 in 背包表[u.id] ?? []" :key="物.名称" :value="物.名称">
+                {{ 物.名称 }} ×{{ 物.数量 }}
+              </option>
+            </select>
+            <span v-if="(背包表[u.id] ?? []).length === 0" class="dim">（这个单位的背包是空的）</span>
+          </div>
+        </template>
       </div>
 
       <div class="distance-row">
@@ -52,7 +67,8 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
-import { 读取可参战单位, type 可参战单位 } from '../store';
+import { 读取可参战单位, 读取背包, type 可参战单位, type 背包物品 } from '../store';
+import { 造空栏位, 显示快捷栏, 收集快捷物品 } from '../engine/quickItems';
 import { 开场距离选项 } from '../engine/setup';
 
 defineProps<{
@@ -64,13 +80,21 @@ defineProps<{
   禁用?: boolean;
 }>();
 
-const emit = defineEmits<{ (e: '开战', 选择: { id: string; 阵营: '我方' | '敌方' }[], 开场模式: string): void }>();
+const emit = defineEmits<{
+  (e: '开战', 选择: { id: string; 阵营: '我方' | '敌方' }[], 开场模式: string, 快捷物品: Record<string, string[]>): void;
+}>();
 
 const loading = ref(true);
 const 名单 = ref<可参战单位[]>([]);
 const 选中 = ref<Record<string, boolean>>({});
 const 阵营 = ref<Record<string, '我方' | '敌方' | '待定'>>({});
 const 开场模式 = ref('对峙/室内');
+/** 每个单位自己的背包（快捷物品栏的选项来源）—— 读**该单位自己**的，不是玩家的 */
+const 背包表 = ref<Record<string, 背包物品[]>>({});
+/** 每个单位的 3 个栏位（值 = 背包物品名，空串 = 没选） */
+const 快捷 = ref<Record<string, string[]>>({});
+/** 模板里 v-for 用的固定下标（别在模板里反复调函数造数组） */
+const 栏位下标 = [0, 1, 2];
 
 onMounted(async () => {
   try {
@@ -78,6 +102,15 @@ onMounted(async () => {
     for (const u of 名单.value) {
       选中.value[u.id] = u.默认阵营 !== '待定';
       阵营.value[u.id] = u.默认阵营;
+      快捷.value[u.id] = 造空栏位();
+    }
+    // 背包逐个读：**读不到就是空列表**（副本角色/其他契约者不一定有背包），绝不能因此开不了战。
+    for (const u of 名单.value) {
+      try {
+        背包表.value[u.id] = await 读取背包(u.id);
+      } catch {
+        背包表.value[u.id] = [];
+      }
     }
   } finally {
     loading.value = false;
@@ -96,7 +129,7 @@ function 开战() {
   const 选择 = 名单.value
     .filter(u => 选中.value[u.id] && 阵营.value[u.id] !== '待定')
     .map(u => ({ id: u.id, 阵营: 阵营.value[u.id] as '我方' | '敌方' }));
-  emit('开战', 选择, 开场模式.value);
+  emit('开战', 选择, 开场模式.value, 收集快捷物品(名单.value, 选中.value, 阵营.value, 快捷.value));
 }
 </script>
 
@@ -163,6 +196,27 @@ function 开战() {
 .dim {
   color: var(--cb-dim);
   font-size: 13px;
+}
+
+/* 快捷物品栏：缩进在铭牌下面，和参战名单一眼能对上是谁的 */
+.quick-bar {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+  margin: -2px 0 6px 40px;
+  padding: 6px 12px;
+  border-left: 2px solid var(--cb-border-soft);
+  font-size: 13px;
+}
+
+.quick-label {
+  color: var(--cb-dim);
+  letter-spacing: 1px;
+}
+
+.quick-bar select {
+  max-width: 180px;
 }
 
 .distance-row {

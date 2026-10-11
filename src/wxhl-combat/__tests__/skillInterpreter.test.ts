@@ -227,6 +227,14 @@ describe('skillInterpreter · 提示词必须教模型用上引擎真正执行�
     expect(提示词).toMatch(/别把.*写成 HP|千万别把.*HP/);
   });
 
+  // plan §21：开战前选的快捷物品也要进翻译清单
+  it('有【快捷物品怎么写】：免费行动 + 别自己写"用掉一个" + 别忘了写规则', () => {
+    expect(提示词).toContain('（快捷物品）');
+    expect(提示词).toContain('免费行动');
+    expect(提示词).toMatch(/不要把"用掉一个"写成|数量由引擎自己管/);
+    expect(提示词).toMatch(/别忘了写规则|整条进托管就等于/);
+  });
+
   it('属性点 vs 修正值两条通道讲清楚（修正值通道不再乘位阶系数）', () => {
     expect(提示词).toContain('STR修正');
     expect(提示词).toContain('AGI修正');
