@@ -224,3 +224,164 @@ export function acceptAgreement(storage) {
     /* 隐私模式下写不进就算了——下次再弹一次 */
   }
 }
+
+// ==================== 世界书 JSON 导入（移植自用户提供补丁 worldbook-json-import.mjs） ====================
+// 纯转换：绝不执行世界书内容，也绝不碰 DOM。整次拒绝——任一条目有工坊不支持的设置，
+// 整次导入抛错并点名，绝不静默跳过单条或偷偷改设置。
+export const MAX_IMPORT_BYTES = 10 * 1024 * 1024;
+export const MAX_IMPORT_ENTRIES = 2000;
+
+const IMPORT_POSITIONS = new Map([[0, 'before_char'], [1, 'after_char'], [4, 'at_depth']]);
+const KNOWN_WORLDBOOK_FIELDS = new Set([
+  'uid', 'displayIndex', 'comment', 'name', 'content', 'key', 'keysecondary',
+  'constant', 'disable', 'selective', 'selectiveLogic', 'position', 'role',
+  'depth', 'order', 'probability', 'useProbability', 'sticky', 'cooldown', 'delay',
+  'preventRecursion', 'excludeRecursion', 'vectorized', 'ignoreBudget',
+  'matchPersonaDescription', 'matchCharacterDescription', 'matchCharacterPersonality',
+  'matchCharacterDepthPrompt', 'matchScenario', 'matchCreatorNotes',
+  'delayUntilRecursion', 'outletName', 'group', 'groupOverride', 'groupWeight',
+  'scanDepth', 'caseSensitive', 'matchWholeWords', 'useGroupScoring', 'automationId',
+  'characterFilterNames', 'characterFilterTags', 'characterFilterExclude',
+  'triggers', 'addMemo', 'extensions', 'characterFilter',
+]);
+const UNSUPPORTED_NONEMPTY_FIELDS = [
+  'vectorized', 'ignoreBudget', 'matchPersonaDescription', 'matchCharacterDescription',
+  'matchCharacterPersonality', 'matchCharacterDepthPrompt', 'matchScenario', 'matchCreatorNotes',
+  'delayUntilRecursion', 'outletName', 'group', 'automationId', 'characterFilterNames',
+  'characterFilterTags', 'characterFilterExclude', 'triggers', 'extensions', 'characterFilter',
+];
+const UNSUPPORTED_IF_PRESENT = ['scanDepth', 'caseSensitive', 'matchWholeWords'];
+const GLOBAL_UNSUPPORTED = ['scan_depth', 'token_budget', 'recursive_scanning', 'extensions'];
+
+const isPlainObject = value => value !== null && typeof value === 'object' && !Array.isArray(value);
+const hasOwn = (object, key) => Object.prototype.hasOwnProperty.call(object, key);
+
+function hasData(value) {
+  if (value === undefined || value === null || value === false || value === 0 || value === '') return false;
+  if (Array.isArray(value)) return value.length > 0;
+  if (isPlainObject(value)) return Object.keys(value).length > 0;
+  return true;
+}
+
+function importBool(entry, field, fallback) {
+  if (!hasOwn(entry, field)) return fallback;
+  if (typeof entry[field] !== 'boolean') throw new Error(`${field} 必须是布尔值`);
+  return entry[field];
+}
+
+function importNumber(entry, field, fallback, { integer = true, min = -Infinity, max = Infinity } = {}) {
+  if (!hasOwn(entry, field)) return fallback;
+  const value = entry[field];
+  if (typeof value !== 'number' || !Number.isFinite(value) || (integer && !Number.isInteger(value)) || value < min || value > max) {
+    throw new Error(`${field} 的数值不合法`);
+  }
+  return value;
+}
+
+function importNullableNumber(entry, field) {
+  if (entry[field] === undefined || entry[field] === null) return null;
+  return importNumber(entry, field, null, { min: 0 });
+}
+
+function importKeywords(entry, field) {
+  if (!hasOwn(entry, field)) return [];
+  if (!Array.isArray(entry[field]) || entry[field].some(word => typeof word !== 'string' || word.length === 0)) {
+    throw new Error(`${field} 必须是非空字符串组成的数组`);
+  }
+  return [...entry[field]];
+}
+
+function checkUnsupportedSettings(entry, constant, secondaryKeys, position) {
+  const unsupported = [];
+  for (const field of UNSUPPORTED_NONEMPTY_FIELDS) {
+    if (hasData(entry[field])) unsupported.push(field);
+  }
+  // 显式给出的逐条覆盖值不同于继承宿主全局设置（包括 false 与 0）：当前包无对应字段。
+  for (const field of UNSUPPORTED_IF_PRESENT) {
+    if (entry[field] !== undefined && entry[field] !== null) unsupported.push(field);
+  }
+  if (!constant && secondaryKeys.length > 0 && importBool(entry, 'selective', true) && (entry.selectiveLogic ?? 0) !== 0) {
+    unsupported.push('selectiveLogic（工坊仅支持 AND ANY）');
+  }
+  if (position === 4 && (entry.role ?? 0) !== 0) unsupported.push('role（工坊仅支持 system）');
+  for (const key of Object.keys(entry)) if (!KNOWN_WORLDBOOK_FIELDS.has(key)) unsupported.push(key);
+  if (unsupported.length) throw new Error('当前工坊不能保留这些设置：' + unsupported.join('、'));
+}
+
+function convertWorldbookEntry(entry, index) {
+  if (!isPlainObject(entry)) throw new Error('条目必须是对象');
+  if (typeof entry.content !== 'string' || entry.content.length === 0) throw new Error('正文为空或不是字符串');
+  if (!['key', 'comment', 'uid', 'disable'].some(key => hasOwn(entry, key))) {
+    throw new Error('不是酒馆原生世界书条目；请在酒馆的世界书管理中导出 JSON');
+  }
+  const keys = importKeywords(entry, 'key');
+  const secondary = importKeywords(entry, 'keysecondary');
+  const constant = importBool(entry, 'constant', false);
+  const position = importNumber(entry, 'position', 0);
+  if (!IMPORT_POSITIONS.has(position)) throw new Error(`插入位置 ${position} 暂不受工坊支持（仅支持角色定义前、后和指定深度）`);
+  checkUnsupportedSettings(entry, constant, secondary, position);
+  if (!constant && keys.length === 0) throw new Error('绿灯条目没有主关键词，当前工坊服务器不接受此格式（禁用条目也一样）');
+  if (entry.comment !== undefined && typeof entry.comment !== 'string') throw new Error('comment 必须是字符串');
+  if (entry.name !== undefined && typeof entry.name !== 'string') throw new Error('name 必须是字符串');
+  const sourceName = (entry.comment || entry.name || '').trim();
+  const name = sourceName || `条目 ${index + 1}`;
+  return {
+    generatedName: !sourceName,
+    entry: {
+      name,
+      // 正文（含 EJS/HTML 与换行）逐字以字符串保留。
+      content: entry.content,
+      enabled: !importBool(entry, 'disable', false),
+      constant,
+      keys,
+      // selective 为 false 时，未使用的次要关键词不影响原作。
+      keysSecondary: importBool(entry, 'selective', true) ? secondary : [],
+      position: IMPORT_POSITIONS.get(position),
+      depth: importNumber(entry, 'depth', 4, { min: 0 }),
+      order: importNumber(entry, 'order', 100),
+      probability: importBool(entry, 'useProbability', true) ? importNumber(entry, 'probability', 100, { integer: false, min: 0, max: 100 }) : 100,
+      preventRecursion: importBool(entry, 'preventRecursion', false),
+      excludeRecursion: importBool(entry, 'excludeRecursion', false),
+      sticky: importNullableNumber(entry, 'sticky'),
+      cooldown: importNullableNumber(entry, 'cooldown'),
+      delay: importNullableNumber(entry, 'delay'),
+    },
+  };
+}
+
+export function parseWorldbookJson(text, filename = '世界书.json') {
+  if (typeof text !== 'string') throw new Error('无法读取文件文本');
+  if (new TextEncoder().encode(text).byteLength > MAX_IMPORT_BYTES) throw new Error('文件过大，请使用 10 MB 以内的世界书 JSON');
+  let book;
+  try { book = JSON.parse(text.replace(/^\uFEFF/, '')); }
+  catch { throw new Error('JSON 格式不正确，请选择从酒馆导出的世界书文件'); }
+  if (!isPlainObject(book) || (!isPlainObject(book.entries) && !Array.isArray(book.entries))) {
+    throw new Error('未找到 entries；请选择世界书 JSON，角色卡或酒馆脚本 JSON 不适用');
+  }
+  for (const field of GLOBAL_UNSUPPORTED) {
+    if (hasData(book[field])) throw new Error(`世界书全局设置 ${field} 暂不能由当前工坊保留`);
+  }
+  const rawEntries = Object.values(book.entries);
+  if (!rawEntries.length) throw new Error('世界书没有条目');
+  if (rawEntries.length > MAX_IMPORT_ENTRIES) throw new Error(`条目过多，单次最多导入 ${MAX_IMPORT_ENTRIES} 条`);
+  const entries = [], errors = [];
+  let generatedNames = 0;
+  for (const [index, raw] of rawEntries.entries()) {
+    try {
+      const converted = convertWorldbookEntry(raw, index);
+      entries.push(converted.entry);
+      generatedNames += Number(converted.generatedName);
+    } catch (error) {
+      const title = typeof raw?.comment === 'string' && raw.comment.trim() ? raw.comment.trim() : `条目 ${index + 1}`;
+      errors.push(`${title}：${error.message}`);
+    }
+  }
+  if (errors.length) {
+    throw new Error(`尚未导入，原草稿已保留。有 ${errors.length} 条条目需要处理：\n` + errors.slice(0, 10).join('\n') + (errors.length > 10 ? '\n（仅显示前 10 条）' : ''));
+  }
+  return {
+    name: (typeof book.name === 'string' && book.name.trim()) || filename.replace(/\.json$/i, ''),
+    entries,
+    summary: { total: entries.length, disabled: entries.filter(entry => !entry.enabled).length, generatedNames },
+  };
+}

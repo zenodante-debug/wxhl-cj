@@ -2,7 +2,8 @@
 import { describe, expect, it, vi } from 'vitest';
 import {
   computeInstalled, createBridgeClient, isAgreementAccepted, mapExtensionEntry,
-  packToWorldbookEntries, renderBuildEntry, renderCharacterEntry, sourceMetaOf,
+  MAX_IMPORT_BYTES, packToWorldbookEntries, parseWorldbookJson,
+  renderBuildEntry, renderCharacterEntry, sourceMetaOf,
 } from './page-lib.js';
 
 describe('桥客户端', () => {
@@ -215,5 +216,59 @@ describe('免责声明', () => {
     expect(isAgreementAccepted(shim)).toBe(false);
     storage.set('wxhl_cygf_agreement', '1');
     expect(isAgreementAccepted(shim)).toBe(true);
+  });
+});
+
+describe('世界书 JSON 导入器', () => {
+  const book = (entries, extra = {}) => JSON.stringify({ name: '我的世界书', entries: Object.fromEntries(entries.map((e, i) => [String(i), e])), ...extra });
+  const native = (over = {}) => ({ uid: 1, key: ['雾'], keysecondary: [], comment: '时刻表', content: '正文\n第二行', constant: false, disable: false, selective: true, position: 1, depth: 4, order: 100, probability: 100, useProbability: true, ...over });
+
+  it('原生世界书 → 映射成工坊条目（保留正文换行/EJS、关键词、位置、递归）', () => {
+    const r = parseWorldbookJson(book([native({ preventRecursion: true, sticky: 2 })]), '我的世界书.json');
+    expect(r.name).toBe('我的世界书');
+    expect(r.entries[0]).toMatchObject({
+      name: '时刻表', content: '正文\n第二行', enabled: true, constant: false,
+      keys: ['雾'], position: 'after_char', order: 100, preventRecursion: true, sticky: 2, cooldown: null,
+    });
+    expect(r.summary).toEqual({ total: 1, disabled: 0, generatedNames: 0 });
+  });
+
+  it('位置 0/1/4 分别映射；其他位置整次拒绝并点名', () => {
+    expect(parseWorldbookJson(book([native({ position: 0 })]), 'x.json').entries[0].position).toBe('before_char');
+    expect(parseWorldbookJson(book([native({ position: 4, depth: 2 })]), 'x.json').entries[0].position).toBe('at_depth');
+    expect(() => parseWorldbookJson(book([native({ position: 2 })]), 'x.json')).toThrow(/插入位置/);
+  });
+
+  it('高级设置整次拒绝并点名（Review Focus #2）', () => {
+    expect(() => parseWorldbookJson(book([native({ vectorized: true })]), 'x.json')).toThrow(/vectorized/);
+    expect(() => parseWorldbookJson(book([native({ scanDepth: 2 })]), 'x.json')).toThrow(/scanDepth/);
+    expect(() => parseWorldbookJson(book([native({ group: 'g' })]), 'x.json')).toThrow(/group/);
+    // 整次拒绝：一条坏的，另一条好的也不能偷偷进去
+    expect(() => parseWorldbookJson(book([native({ comment: '好条目' }), native({ vectorized: true })]), 'x.json')).toThrow(/尚未导入|不能保留/);
+  });
+
+  it('绿灯没有主关键词 → 拒绝（服务器也不接受）', () => {
+    expect(() => parseWorldbookJson(book([native({ key: [] })]), 'x.json')).toThrow(/主关键词/);
+  });
+
+  it('禁用条目也照原样带来；未命名条目自动生成名字并计数', () => {
+    const r = parseWorldbookJson(book([native({ disable: true, comment: '' })]), 'x.json');
+    expect(r.entries[0].enabled).toBe(false);
+    expect(r.entries[0].name).toBe('条目 1');
+    expect(r.summary.generatedNames).toBe(1);
+    expect(r.summary.disabled).toBe(1);
+  });
+
+  it('坏输入：非 JSON / 无 entries / 全局设置 / 巨大文件 → 人话报错', () => {
+    expect(() => parseWorldbookJson('{oops', 'x.json')).toThrow(/JSON/);
+    expect(() => parseWorldbookJson(JSON.stringify({ name: 'x' }), 'x.json')).toThrow(/entries/);
+    expect(() => parseWorldbookJson(book([native()], { token_budget: 100 }), 'x.json')).toThrow(/全局设置/);
+    expect(() => parseWorldbookJson('x'.repeat(MAX_IMPORT_BYTES + 1), 'x.json')).toThrow(/过大/);
+  });
+
+  it('selective=false 时丢弃次要关键词；保留正则与逗号', () => {
+    const r = parseWorldbookJson(book([native({ selective: false, keysecondary: ['b'], key: ['/雾.*车/', 'a,b'] })]), 'x.json');
+    expect(r.entries[0].keys).toEqual(['/雾.*车/', 'a,b']);
+    expect(r.entries[0].keysSecondary).toEqual([]);
   });
 });
