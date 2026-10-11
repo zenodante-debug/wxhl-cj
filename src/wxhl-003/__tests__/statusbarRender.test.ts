@@ -1,6 +1,6 @@
 // 状态栏渲染器：纯函数，只吐 HTML 字符串。
 import { describe, expect, it } from 'vitest';
-import { joinPath, renderSpecialStatusList, statusKind } from '../statusbar/render';
+import { joinPath, renderResourceTree, renderSpecialStatusList, statusKind } from '../statusbar/render';
 
 describe('joinPath', () => {
   it('普通键直接拼', () => {
@@ -77,5 +77,75 @@ describe('renderSpecialStatusList', () => {
 
   it('对象型状态不得渲染成 [object Object]', () => {
     expect(renderSpecialStatusList({ x: { 分类: '增益' } }, 'p')).not.toContain('[object Object]');
+  });
+});
+
+describe('renderResourceTree', () => {
+  const 无 = new Set<string>();
+
+  it('空对象 → 暂无资源', () => {
+    expect(renderResourceTree({}, 'p', 无, 'k')).toContain('暂无资源');
+  });
+
+  it('带 当前/上限 的条目：显示计数与单位', () => {
+    const h = renderResourceTree(
+      { 职业: { 充能: { 当前: 2, 上限: 3, 单位: '层', 恢复方式: '短休' } } },
+      '契约者.特殊资源', 无, 'k',
+    );
+    expect(h).toContain('充能');
+    expect(h).toContain('data-path="契约者.特殊资源.职业.充能.当前"');
+    expect(h).toContain('data-path="契约者.特殊资源.职业.充能.上限"');
+    expect(h).toContain('短休');
+  });
+
+  it('缺 当前 → 显示未记录', () => {
+    const h = renderResourceTree({ g: { r: { 上限: 5 } } }, 'p', 无, 'k');
+    expect(h).toContain('未记录');
+  });
+
+  it('嵌套对象 → 折叠块，标题带条数', () => {
+    const h = renderResourceTree({ 血统: { 龙裔: { 龙息: { 当前: 1, 上限: 1 } } } }, 'p', 无, 'k');
+    expect(h).toContain('mate-sub');
+    expect(h).toContain('data-sub-key="k.血统"');
+    expect(h).toContain('龙息');
+  });
+
+  it('数组 → 折叠块，标题带长度', () => {
+    const h = renderResourceTree({ 列表: [10, 20] }, 'p', 无, 'k');
+    expect(h).toContain('(2)');
+    expect(h).toContain('10');
+    expect(h).toContain('20');
+  });
+
+  it('标量 → 一行 名称：值', () => {
+    const h = renderResourceTree({ 备注: '随便写点' }, 'p', 无, 'k');
+    expect(h).toContain('备注');
+    expect(h).toContain('随便写点');
+  });
+
+  it('空值条目整条跳过，不产生空行', () => {
+    const h = renderResourceTree({ a: null, b: '', c: {}, d: [] }, 'p', 无, 'k');
+    expect(h).not.toContain('skill-line');
+  });
+
+  it('键名含点：data-path 里被转义，且不产生错层', () => {
+    const h = renderResourceTree({ 职业: { '魔能.爆裂': { 当前: 1, 上限: 1 } } }, '契约者.特殊资源', 无, 'k');
+    expect(h).toContain('data-path="契约者.特殊资源.职业.魔能\\.爆裂.当前"');
+  });
+
+  it('默认折叠：未展开时带 collapsed / hidden', () => {
+    const h = renderResourceTree({ g: { a: { 当前: 1, 上限: 1 } } }, 'p', 无, 'k');
+    expect(h).toContain('collapsed');
+    expect(h).toContain('hidden');
+  });
+
+  it('已展开：根块与分组块都不带 collapsed', () => {
+    const h = renderResourceTree({ g: { a: { 当前: 1, 上限: 1 } } }, 'p', new Set(['k', 'k.g']), 'k');
+    expect(h).not.toContain('collapsed');
+  });
+
+  it('畸形值不抛异常', () => {
+    expect(() => renderResourceTree({ a: new Date() } as any, 'p', 无, 'k')).not.toThrow();
+    expect(() => renderResourceTree(null, 'p', 无, 'k')).not.toThrow();
   });
 });

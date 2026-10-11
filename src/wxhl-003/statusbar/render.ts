@@ -8,7 +8,7 @@
 // 生成的 HTML 自己带上 collapsed / hidden class，事后由 applyUiStateToDom() 套状态。
 // ================================================================
 
-import { editSpan, editText } from './editable';
+import { editableKey, editSpan, editText, escapeAttr } from './editable';
 
 /**
  * 拼 lodash 路径。键名里的 `.` 会被 lodash 当成分隔符，
@@ -78,4 +78,106 @@ export function renderSpecialStatusList(states: any, basePath: string): string {
       return h + '</div>';
     })
     .join('');
+}
+
+const 是对象 = (v: any): boolean => v !== null && typeof v === 'object' && !Array.isArray(v);
+/** 条目自带计数？（有 当前 或 上限 任一） */
+const 有计数 = (v: any): boolean =>
+  Object.prototype.hasOwnProperty.call(v, '当前') || Object.prototype.hasOwnProperty.call(v, '上限');
+/** 该对象是不是「分组」（而不是一条叶子条目）：显式标注，或含嵌套对象/数组 */
+const 是分组 = (v: any): boolean =>
+  v.类型 === '分组' || Object.values(v).some(x => 是对象(x) || Array.isArray(x));
+
+/** 折叠块：生成的 HTML 自己带 collapsed / hidden，事后由 applyUiStateToDom() 套状态 */
+function 折叠块(标题Html: string, 内容: string, 键: string, 展开: boolean): string {
+  return (
+    '<div class="mate-sub" style="margin-top:4px;">' +
+    '<div class="mate-sub-header" data-sub-key="' + escapeAttr(键) + '">' +
+    '<span class="mate-sub-title">' + 标题Html + '</span>' +
+    '<span class="mate-sub-toggle' + (展开 ? '' : ' collapsed') + '">▼</span></div>' +
+    '<div class="mate-sub-body' + (展开 ? '' : ' hidden') + '">' + 内容 + '</div>' +
+    '</div>'
+  );
+}
+
+/**
+ * 通用特殊资源树。`data` 即某个 `特殊资源` 对象（一级 key = 来源），
+ * `keyBase` 是折叠键前缀（个人面板给 '契约者.特殊资源'，实体给 subKeyBase + '.特殊资源'）。
+ */
+export function renderResourceTree(data: any, basePath: string, expanded: Set<string>, keyBase: string): string {
+  const 集合 = expanded instanceof Set ? expanded : new Set<string>();
+
+  /** 计数文本：`当前 / 上限 单位`，当前缺失显示「未记录」 */
+  const 计数 = (v: any, 路径: string): string => {
+    const cur = v.当前, max = v.上限;
+    const curHtml =
+      空值(cur) || !Number.isFinite(Number(cur))
+        ? '<span class="empty-hint" style="padding:0;display:inline;">未记录</span>'
+        : editSpan(cur, joinPath(路径, '当前'));
+    const unit = 空值(v.单位) ? '点' : v.单位;
+    return curHtml + ' / ' + editSpan(max ?? 0, joinPath(路径, '上限')) + ' ' + editText(String(unit), joinPath(路径, '单位'));
+  };
+
+  /** 叶子条目：名称（可改名）+ 计数 + 其余标量字段 */
+  const 条目叶 = (名称: string, v: any, 路径: string, 父路径: string | null): string => {
+    const 名 = 父路径 === null ? 名称 : editableKey(名称, 父路径);
+    let h = '<div class="skill-line"><span style="color:#e0c080;font-weight:bold;">' + 名 + '</span>';
+    if (有计数(v)) h += ' <span style="color:#a09080;">' + 计数(v, 路径) + '</span>';
+    Object.keys(v).forEach(function (k) {
+      if (k === '当前' || k === '上限' || k === '单位' || k === '类型') return;
+      const val = v[k];
+      if (空值(val) || 是对象(val) || Array.isArray(val)) return;
+      h += '<div style="margin-top:2px;font-size:13px;color:#a09080;">' + k + '：' + editText(String(val), joinPath(路径, k)) + '</div>';
+    });
+    return h + '</div>';
+  };
+
+  const 渲染节点 = (名称: string, 值: any, 路径: string, 键: string, 父路径: string | null): string => {
+    try {
+      if (空值(值)) return '';
+      if (值 instanceof Date || typeof 值 === 'function') return '';
+
+      if (Array.isArray(值)) {
+        if (值.length === 0) return '';
+        const 内容 = 值
+          .map((项, i) => 渲染节点('[' + (i + 1) + ']', 项, 路径 + '.' + i, 键 + '.' + i, null))
+          .join('');
+        return 内容 === '' ? '' : 折叠块(名称 + ' (' + 值.length + ')', 内容, 键, 集合.has(键));
+      }
+
+      if (是对象(值)) {
+        const 键们 = Object.keys(值);
+        if (键们.length === 0) return '';
+        const 计Html = 有计数(值) ? '　' + 计数(值, 路径) : '';
+        if (是分组(值)) {
+          const 内容 = 键们
+            .filter(k => k !== '类型' && k !== '当前' && k !== '上限' && k !== '单位')
+            .map(k => 渲染节点(k, 值[k], joinPath(路径, k), 键 + '.' + k, 路径))
+            .join('');
+          return 内容 === '' ? '' : 折叠块(名称 + 计Html, 内容, 键, 集合.has(键));
+        }
+        return 条目叶(名称, 值, 路径, 父路径);
+      }
+
+      /* 标量 */
+      return (
+        '<div class="skill-line"><span style="color:#e0c080;font-weight:bold;">' + 名称 + '</span>' +
+        '<div style="margin-top:2px;font-size:13px;color:#a09080;">' + editText(String(值), 路径) + '</div></div>'
+      );
+    } catch (e) {
+      console.warn('[wxhl-statusbar] 资源渲染失败', 路径, e);
+      return '';
+    }
+  };
+
+  const 根们 = Object.keys(data || {});
+  if (根们.length === 0) return '<span class="empty-hint">暂无资源</span>';
+
+  /* 根层：数据路径从 basePath 起、折叠键从 keyBase 起；父路径传 basePath（根下面这一层才可改名） */
+  const 内容 = 根们
+    .map(k => 渲染节点(k, data[k], joinPath(basePath, k), keyBase + '.' + k, basePath))
+    .join('');
+
+  if (内容 === '') return '<span class="empty-hint">暂无资源</span>';
+  return 折叠块('<span style="color:#a09080;">资源列表 (' + 根们.length + ')</span>', 内容, keyBase, 集合.has(keyBase));
 }
