@@ -1,4 +1,5 @@
 // src/wxhl-cygf/index.ts
+import { installBall } from './ball';
 import { installBridge } from './bridge';
 import { installAuthRelay } from './discord';
 import { BUTTON_NAME, closePanel, togglePanel, workshopOrigin } from './panel';
@@ -13,6 +14,8 @@ function init() {
 
   const teardownBridge = installBridge(workshopOrigin());
   const teardownAuth = installAuthRelay();
+  // 悬浮球是主要入口（脚本库按钮太隐蔽）；两者并存，都指向同一个面板
+  const teardownBall = installBall();
 
   eventOn(getButtonEvent(BUTTON_NAME), errorCatched(togglePanel));
   console.info(`[wxhl创意工坊] 已绑定按钮事件: ${BUTTON_NAME}`);
@@ -20,6 +23,7 @@ function init() {
   $(window).off('pagehide.wxhlCygf').on('pagehide.wxhlCygf', () => {
     teardownBridge();
     teardownAuth();
+    teardownBall();
     closePanel();
   });
 }
