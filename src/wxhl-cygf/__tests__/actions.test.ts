@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { dispatchAction, ensureWorkshopWorldbook, queued, resetQueueForTest, WORKSHOP_WORLDBOOK_NAME } from '../actions';
+import { dispatchAction, ensureWorkshopWorldbook, MUTATING_ACTIONS, queued, resetQueueForTest, WORKSHOP_WORLDBOOK_NAME } from '../actions';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -104,5 +104,9 @@ describe('dispatchAction · 动作分发', () => {
 
   it('未知动作 → 响亮报错', async () => {
     await expect(dispatchAction('hack-the-planet', {})).rejects.toThrow('未知桥接动作');
+  });
+
+  it('getContext 含 ensure 写操作 → 必须走互斥队列', () => {
+    expect(MUTATING_ACTIONS.has('getContext')).toBe(true);
   });
 });

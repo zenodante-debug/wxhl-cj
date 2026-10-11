@@ -77,7 +77,11 @@ export async function ensureWorkshopWorldbook(): Promise<{ created: boolean; bou
 }
 
 // ==================== 动作分发 ====================
+// getContext 虽名为读动作，但内部 ensureWorkshopWorldbook 会 createWorldbook / rebindCharWorldbooks 写世界书；
+// 与队列中的 upsertWorkshopEntries 并发会出现"检查不存在 → 别的写操作刚写入 → createWorldbook 用空数组覆盖"的清空窗口，
+// 故整体入队（不要在 ensure 内部再套 queued —— 将来嵌套入队会死锁）。
 export const MUTATING_ACTIONS: ReadonlySet<string> = new Set([
+  'getContext',
   'createWorldbook',
   'createEntries',
   'updateEntry',
@@ -128,10 +132,14 @@ async function handleAction(action: string, payload: Record<string, any>): Promi
       const name = requireString(payload, 'worldbookName');
       return { entries: await getWorldbook(name) };
     }
-    case 'createWorldbook':
-      return { created: await createWorldbook(requireString(payload, 'worldbookName'), []) };
-    case 'createEntries':
-      return await createWorldbookEntries(requireString(payload, 'worldbookName'), requireEntries(payload), { render: 'immediate' });
+    case 'createWorldbook': {
+      const name = requireString(payload, 'worldbookName');
+      return { created: await createWorldbook(name, []) };
+    }
+    case 'createEntries': {
+      const name = requireString(payload, 'worldbookName');
+      return await createWorldbookEntries(name, requireEntries(payload), { render: 'immediate' });
+    }
     case 'updateEntry': {
       const name = requireString(payload, 'worldbookName');
       const uid = Number(payload.uid);
