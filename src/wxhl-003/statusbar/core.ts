@@ -16,7 +16,7 @@ import { deposit, loadStorage, saveStorage, withdraw, type StorageRoom } from '.
 import { 位阶修正值系数, 位阶属性软上限, 位阶档位, 位阶等级上限 } from './tier';
 import { editSpan, editText, escapeAttr } from './editable';
 import { canUseHubFacility, HUB_GATE_HINT } from '../hubGate';
-import { renderSpecialStatusList } from './render';
+import { renderResourceTree, renderSpecialStatusList } from './render';
 
 /** 挂载状态栏到 root 元素，返回卸载函数 */
 export function mountStatusbar(root: HTMLElement): () => void {
@@ -1874,6 +1874,9 @@ export function mountStatusbar(root: HTMLElement): () => void {
       $c.find('#industry-info').html(shopHtml);
 
       $c.find('#state-special').html(renderSpecialStatusList(d('契约者.状态.特殊状态', {}), '契约者.状态.特殊状态'));
+      $c.find('#state-resources').html(
+        renderResourceTree(d('契约者.特殊资源', {}), '契约者.特殊资源', _ui.expand_subs, '契约者.特殊资源'),
+      );
 
       $c.find('#season-num').text(d('契约者.赛季信息.当前赛季', 21));
       $c.find('#season-cycle').text(d('契约者.赛季信息.当前副本周期', 0) + ' / 10');
