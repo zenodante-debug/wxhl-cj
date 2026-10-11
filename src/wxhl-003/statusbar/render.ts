@@ -11,11 +11,16 @@
 import { editableKey, editSpan, editText, escapeAttr } from './editable';
 
 /**
- * 拼 lodash 路径。键名里的 `.` 会被 lodash 当成分隔符，
- * 于是「魔能.爆裂」会读写到 魔能 → 爆裂 这一层而非原名的那一条 —— 故转义成 `\.`。
+ * 拼 lodash 路径。键名里的 `.`（以及 `[` `]`）会被 lodash 当成路径语法，
+ * 于是「魔能.爆裂」会读写到 魔能 → 爆裂 那一层，而不是名叫「魔能.爆裂」的那一条。
+ *
+ * 注意：lodash 4 的**反斜杠转义无效**（`_.toPath('a\\.b')` 仍按点切分，实测 4.18.1），
+ * 所以必须走方括号写法 `['魔能.爆裂']`。常规键保持 `a.b` 形式不变。
  */
 export function joinPath(parent: string, key: string): string {
-  return parent + '.' + String(key).replace(/\./g, '\\.');
+  const k = String(key);
+  if (!/[.[\]]/.test(k)) return parent + '.' + k;
+  return parent + "['" + k.replace(/\\/g, '\\\\').replace(/'/g, "\\'") + "']";
 }
 
 const 增益词 = /增益|强化|buff/i;

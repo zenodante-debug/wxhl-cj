@@ -6,8 +6,8 @@ describe('joinPath', () => {
   it('普通键直接拼', () => {
     expect(joinPath('契约者.特殊资源', '职业')).toBe('契约者.特殊资源.职业');
   });
-  it('键里的点被转义，免得 lodash 把它当分隔符', () => {
-    expect(joinPath('契约者.特殊资源', '魔能.爆裂')).toBe('契约者.特殊资源.魔能\\.爆裂');
+  it('键里的点走方括号写法', () => {
+    expect(joinPath('契约者.特殊资源', '魔能.爆裂')).toBe("契约者.特殊资源['魔能.爆裂']");
   });
   it('round-trip：转义后的路径能被 lodash 读回同一条', () => {
     const obj: any = { 职业: { '魔能.爆裂': { 当前: 1 } } };
@@ -136,7 +136,7 @@ describe('renderResourceTree', () => {
 
   it('键名含点：data-path 里被转义，且不产生错层', () => {
     const h = renderResourceTree({ 职业: { '魔能.爆裂': { 当前: 1, 上限: 1 } } }, '契约者.特殊资源', 无, 'k');
-    expect(h).toContain('data-path="契约者.特殊资源.职业.魔能\\.爆裂.当前"');
+    expect(h).toContain('data-path="契约者.特殊资源.职业[\'魔能.爆裂\'].当前"');
   });
 
   it('默认折叠：未展开时带 collapsed / hidden', () => {
