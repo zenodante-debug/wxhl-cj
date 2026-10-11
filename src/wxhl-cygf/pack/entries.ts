@@ -1,7 +1,6 @@
 import { z } from 'zod';
-import { PackManifest } from './manifest';
 
-export const ExtensionEntry = z
+export const EntrySchema = z
   .object({
     name: z.string().min(1).describe('条目名'),
     content: z.string().min(1).describe('条目正文'),
@@ -22,8 +21,3 @@ export const ExtensionEntry = z
   .refine(entry => entry.constant || entry.keys.length > 0, {
     message: '绿灯条目至少需要一个主关键词（或设 constant: true 为蓝灯）',
   });
-
-export const ExtensionPack = PackManifest.extend({
-  type: z.literal('extension'),
-  worldbookEntries: z.array(ExtensionEntry).min(1, '内容包至少要有一条世界书条目'),
-});
