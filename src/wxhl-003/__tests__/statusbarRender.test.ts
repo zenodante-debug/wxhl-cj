@@ -159,20 +159,25 @@ describe('renderResourceTree', () => {
 describe('renderCareerSection', () => {
   const 无 = new Set<string>();
 
+  // 技能渲染由 core.ts 注入（避免 render.ts 反向依赖 core.ts）；
+  // 这里只验证「哪张技能表被交给了渲染器、路径对不对」，技能长什么样归 core.ts 的 renderSkillsHtml 管。
+  const 假技能渲染 = (skills: any, path: string) =>
+    '<div data-skills="' + Object.keys(skills || {}).join('|') + '" data-path="' + path + '"></div>';
+
   it('职业简介：渲染成一行且可编辑', () => {
-    const h = renderCareerSection({ 职业简介: '以短休换爆发' }, '契约者.职业', 无, 'k');
+    const h = renderCareerSection({ 职业简介: '以短休换爆发' }, '契约者.职业', 无, 'k', 假技能渲染);
     expect(h).toContain('职业简介');
     expect(h).toContain('以短休换爆发');
     expect(h).toContain('data-path="契约者.职业.职业简介"');
   });
 
   it('职业简介缺省时显示「无」', () => {
-    const h = renderCareerSection({}, '契约者.职业', 无, 'k');
+    const h = renderCareerSection({}, '契约者.职业', 无, 'k', 假技能渲染);
     expect(h).toContain('职业简介');
   });
 
   it('扁平职业特性：文字叶节点直接显示', () => {
-    const h = renderCareerSection({ 职业特性: { 坚韧: '受到的伤害 -1' } }, '契约者.职业', 无, 'k');
+    const h = renderCareerSection({ 职业特性: { 坚韧: '受到的伤害 -1' } }, '契约者.职业', 无, 'k', 假技能渲染);
     expect(h).toContain('坚韧');
     expect(h).toContain('受到的伤害 -1');
   });
@@ -180,7 +185,7 @@ describe('renderCareerSection', () => {
   it('嵌套职业特性：分组折叠，递归出子节点', () => {
     const h = renderCareerSection(
       { 职业特性: { 龙裔系: { 龙鳞: '防御 +2', 龙息: '每场一次' } } },
-      '契约者.职业', 无, 'k',
+      '契约者.职业', 无, 'k', 假技能渲染,
     );
     expect(h).toContain('mate-sub');
     expect(h).toContain('龙裔系');
@@ -189,23 +194,25 @@ describe('renderCareerSection', () => {
   });
 
   it('兼容旧写法 {效果: "..."}', () => {
-    const h = renderCareerSection({ 职业特性: { 坚韧: { 效果: '减伤 1' } } }, '契约者.职业', 无, 'k');
+    const h = renderCareerSection({ 职业特性: { 坚韧: { 效果: '减伤 1' } } }, '契约者.职业', 无, 'k', 假技能渲染);
     expect(h).toContain('减伤 1');
   });
 
-  it('职业技能与传承技能各自成块', () => {
+  it('职业技能与传承技能各自成块，并把各自的技能表交给注入的渲染器', () => {
     const h = renderCareerSection(
       { 职业技能: { 斩击: { 名称: '斩击', 等级: 1 } }, 传承技能: { 祖传: { 名称: '祖传' } } },
-      '契约者.职业', 无, 'k',
+      '契约者.职业', 无, 'k', 假技能渲染,
     );
     expect(h).toContain('职业技能');
-    expect(h).toContain('斩击');
     expect(h).toContain('传承技能');
-    expect(h).toContain('祖传');
+    expect(h).toContain('data-skills="斩击"');
+    expect(h).toContain('data-path="契约者.职业.职业技能"');
+    expect(h).toContain('data-skills="祖传"');
+    expect(h).toContain('data-path="契约者.职业.传承技能"');
   });
 
   it('空职业不抛异常', () => {
-    expect(() => renderCareerSection(null, 'p', 无, 'k')).not.toThrow();
-    expect(() => renderCareerSection({}, 'p', 无, 'k')).not.toThrow();
+    expect(() => renderCareerSection(null, 'p', 无, 'k', 假技能渲染)).not.toThrow();
+    expect(() => renderCareerSection({}, 'p', 无, 'k', 假技能渲染)).not.toThrow();
   });
 });

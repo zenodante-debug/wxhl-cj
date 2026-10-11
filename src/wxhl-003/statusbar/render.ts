@@ -213,34 +213,21 @@ function 渲染特性(name: string, value: any, 路径: string, 键: string, 集
   return '';
 }
 
-/** 精简技能列表：名称 + 等级 + 其余标量字段，全部可编辑 */
-function 渲染技能列表(skills: any, 路径: string): string {
-  const keys = Object.keys(skills || {});
-  if (keys.length === 0) return '<span class="empty-hint">无或未知</span>';
-  return keys
-    .map(function (k) {
-      const s = skills[k] || {};
-      const p = joinPath(路径, k);
-      let h = '<div class="skill-line"><span style="color:#e0c080;font-weight:bold;font-size:15px;">' +
-        editText(_.get(s, '名称', '') || k, joinPath(p, '名称')) + '</span>';
-      const lv = _.get(s, '等级', '');
-      if (!空值(lv) && lv !== '无') h += ' <span style="color:#a09080;font-size:12px;">Lv.' + editSpan(lv, joinPath(p, '等级')) + '</span>';
-      ['分类', '类型', '阶位', '消耗', '冷却'].forEach(function (f) {
-        const v = _.get(s, f, '');
-        if (空值(v) || v === '无') return;
-        h += '<div style="margin-top:2px;font-size:13px;color:#a09080;">' + f + '：' + editText(String(v), joinPath(p, f)) + '</div>';
-      });
-      return h + '</div>';
-    })
-    .join('');
-}
-
 /**
  * 职业区主体：职业简介 + 职业特性（递归）+ 职业技能 + 传承技能。
  * 个人面板与实体卡片共用 —— 上方「名称/稀有度/职业等级/PEXP/主副属性加成」是静态行，
  * 各自保留在原地，本函数只负责需要逻辑的那几块。
+ *
+ * 技能块由调用方注入 `渲染技能`（core.ts 传 renderSkillsHtml）—— 既保住「技能渲染单一来源」，
+ * 又避免 render.ts 反向 import core.ts 成环。本模块仍只依赖 ./editable。
  */
-export function renderCareerSection(career: any, basePath: string, expanded: Set<string>, keyBase: string): string {
+export function renderCareerSection(
+  career: any,
+  basePath: string,
+  expanded: Set<string>,
+  keyBase: string,
+  渲染技能: (skills: any, path: string) => string,
+): string {
   const 集合 = expanded instanceof Set ? expanded : new Set<string>();
   const c = career || {};
   let h = '';
@@ -263,13 +250,13 @@ export function renderCareerSection(career: any, basePath: string, expanded: Set
   /* 职业技能 */
   h +=
     '<div style="margin-top:6px;"><span class="mate-sub-title" style="color:#a09080;font-size:13px;">职业技能</span>' +
-    渲染技能列表(_.get(c, '职业技能', {}), joinPath(basePath, '职业技能')) +
+    渲染技能(_.get(c, '职业技能', {}), joinPath(basePath, '职业技能')) +
     '</div>';
 
   /* 传承技能 */
   h +=
     '<div style="margin-top:6px;"><span class="mate-sub-title" style="color:#a09080;font-size:13px;">传承技能</span>' +
-    渲染技能列表(_.get(c, '传承技能', {}), joinPath(basePath, '传承技能')) +
+    渲染技能(_.get(c, '传承技能', {}), joinPath(basePath, '传承技能')) +
     '</div>';
 
   return h;
