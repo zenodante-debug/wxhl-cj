@@ -1,7 +1,7 @@
 // 无限回廊 · 创意工坊 Worker（存储层：Cloudflare D1）
 // 部署见同目录 README.md。包格式契约共享自 src/wxhl-cygf/pack/（单一真源，勿另写）。
 import { z } from 'zod';
-import { ContentPack } from '../../src/wxhl-cygf/pack';
+import { ContentPack, PACK_TYPE_LABEL } from '../../src/wxhl-cygf/pack';
 import WORKSHOP_HTML from './workshop.html';
 import PAGE_LIB from './page-lib.js';
 
@@ -23,6 +23,7 @@ export interface PackRow {
   status: string;
   downloads: number;
   entry_count: number;
+  cover: string;
   created: string;
   updated: string;
 }
@@ -47,6 +48,7 @@ export interface PackListRow {
   description: string;
   downloads: number;
   entry_count: number;
+  cover: string;
   updated: string;
 }
 
@@ -78,6 +80,9 @@ export async function ensureSchema(db: D1Database): Promise<void> {
       )`,
     )
     .run();
+  // 迁移：给已存在的旧表补 cover 列（CREATE TABLE IF NOT EXISTS 不会改老表结构）。
+  // 列已存在时 ALTER 会报错，属预期，吞掉即可（market 惯例）。
+  await db.prepare(`ALTER TABLE packs ADD COLUMN cover TEXT NOT NULL DEFAULT ''`).run().catch(() => {});
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_packs_type ON packs(type)`).run();
   await db.prepare(`CREATE INDEX IF NOT EXISTS idx_packs_updated ON packs(updated DESC)`).run();
 }
@@ -85,10 +90,10 @@ export async function ensureSchema(db: D1Database): Promise<void> {
 export async function insertPack(db: D1Database, row: PackRow): Promise<void> {
   await db
     .prepare(
-      `INSERT INTO packs (id, name, type, version, author_name, author_discord, tags_json, description, pack_json, manage_hash, status, downloads, entry_count, created, updated)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', 0, ?, ?, ?)`,
+      `INSERT INTO packs (id, name, type, version, author_name, author_discord, tags_json, description, pack_json, manage_hash, status, downloads, entry_count, cover, created, updated)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'published', 0, ?, ?, ?, ?)`,
     )
-    .bind(row.id, row.name, row.type, row.version, row.author_name, row.author_discord, row.tags_json, row.description, row.pack_json, row.manage_hash, row.entry_count, row.created, row.updated)
+    .bind(row.id, row.name, row.type, row.version, row.author_name, row.author_discord, row.tags_json, row.description, row.pack_json, row.manage_hash, row.entry_count, row.cover, row.created, row.updated)
     .run();
 }
 
@@ -120,7 +125,7 @@ export async function listPacks(db: D1Database, query: ListQuery): Promise<{ row
     .first()) as { total: number } | null;
   const rows = (await db
     .prepare(
-      `SELECT id, name, type, version, author_name, tags_json, description, downloads, entry_count, updated FROM packs WHERE ${whereSql} ${orderSql} LIMIT ? OFFSET ?`,
+      `SELECT id, name, type, version, author_name, tags_json, description, downloads, entry_count, cover, updated FROM packs WHERE ${whereSql} ${orderSql} LIMIT ? OFFSET ?`,
     )
     .bind(...args, query.limit, query.offset)
     .all()) as { results: PackListRow[] };
@@ -131,16 +136,16 @@ export async function updatePackByKey(
   db: D1Database,
   id: string,
   manageHash: string,
-  fields: Partial<Pick<PackRow, 'name' | 'type' | 'version' | 'author_name' | 'author_discord' | 'tags_json' | 'description' | 'pack_json' | 'entry_count' | 'updated'>>,
+  fields: Partial<Pick<PackRow, 'name' | 'type' | 'version' | 'author_name' | 'author_discord' | 'tags_json' | 'description' | 'pack_json' | 'entry_count' | 'cover' | 'updated'>>,
 ): Promise<boolean> {
   const current = await getPackById(db, id);
   if (!current || current.manage_hash !== manageHash) return false;
   const next = { ...current, ...fields };
   const result = await db
     .prepare(
-      `UPDATE packs SET name = ?, type = ?, version = ?, author_name = ?, author_discord = ?, tags_json = ?, description = ?, pack_json = ?, entry_count = ?, updated = ? WHERE id = ? AND manage_hash = ?`,
+      `UPDATE packs SET name = ?, type = ?, version = ?, author_name = ?, author_discord = ?, tags_json = ?, description = ?, pack_json = ?, entry_count = ?, cover = ?, updated = ? WHERE id = ? AND manage_hash = ?`,
     )
-    .bind(next.name, next.type, next.version, next.author_name, next.author_discord, next.tags_json, next.description, next.pack_json, next.entry_count, next.updated, id, manageHash)
+    .bind(next.name, next.type, next.version, next.author_name, next.author_discord, next.tags_json, next.description, next.pack_json, next.entry_count, next.cover, next.updated, id, manageHash)
     .run();
   return (result.meta?.changes ?? 0) > 0;
 }
@@ -198,14 +203,26 @@ function validatePack(pack: unknown): { ok: true; pack: any } | { ok: false; err
   }
   const parsed = result.data as any;
   if (parsed.name.length > MAX_NAME_LEN) return { ok: false, error: `名称过长（上限 ${MAX_NAME_LEN} 字符）` };
-  if (parsed.type === 'extension' && parsed.worldbookEntries.length > MAX_ENTRIES) {
+  if (entriesOverLimit(parsed)) {
     return { ok: false, error: `条目数过多（上限 ${MAX_ENTRIES} 条）` };
   }
   return { ok: true, pack: parsed };
 }
 
+/** 一个包最终会落地成几条世界书条目（与 page-lib 的 packToWorldbookEntries 口径一致） */
 function entryCountOf(pack: any): number {
-  return pack.type === 'extension' ? pack.worldbookEntries.length : 1;
+  if (pack.type === 'mechanism') return pack.条目.length;
+  if (pack.type === 'event') return pack.事件条目.length + (pack.控制器条目 ? 1 : 0);
+  if (pack.type === 'dungeon') return 1 + (pack.额外条目?.length ?? 0);
+  return 1; // build / persona 各渲染成一条
+}
+
+/** 只对「条目列表型」的包限条数；结构化类型天然只有 1~数条 */
+function entriesOverLimit(pack: any): boolean {
+  if (pack.type === 'mechanism') return pack.条目.length > MAX_ENTRIES;
+  if (pack.type === 'event') return pack.事件条目.length > MAX_ENTRIES;
+  if (pack.type === 'dungeon') return (pack.额外条目?.length ?? 0) > MAX_ENTRIES;
+  return false;
 }
 
 function toRow(pack: any, id: string, manageHash: string, now: string, existing?: PackRow): PackRow {
@@ -223,6 +240,7 @@ function toRow(pack: any, id: string, manageHash: string, now: string, existing?
     status: 'published',
     downloads: existing?.downloads ?? 0,
     entry_count: entryCountOf(pack),
+    cover: pack.cover ?? '',
     created: existing?.created ?? now,
     updated: now,
   };
@@ -234,10 +252,12 @@ function toMeta(row: PackListRow) {
     id: row.id,
     name: row.name,
     type: row.type,
+    typeLabel: PACK_TYPE_LABEL[row.type as keyof typeof PACK_TYPE_LABEL] ?? '内容',
     version: row.version,
     authorName: row.author_name,
     tags: JSON.parse(row.tags_json || '[]'),
     description: row.description,
+    cover: row.cover ?? '',
     downloads: row.downloads,
     entryCount: row.entry_count,
     updated: row.updated,

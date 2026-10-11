@@ -5,7 +5,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 vi.mock('./workshop.html', () => ({ default: '<!doctype html><title>stub</title>' }));
 vi.mock('./page-lib.js', () => ({ default: '// stub' }));
 
-import worker from './worker.ts';
+import worker, { insertPack } from './worker.ts';
 import { makeFakeD1 } from './fake-d1.mjs';
 
 let db;
@@ -19,15 +19,25 @@ const postJson = (p, b, method = 'POST') =>
   new Request('https://t.local' + p, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(b) });
 
 const validPack = () => ({
-  format: 'wxhl-mod@1',
+  format: 'wxhl-mod@2',
   id: '将被服务端覆写',
   name: '雾中列车',
-  type: 'extension',
+  type: 'mechanism',
   version: '1.0.0',
   author: { name: '测试作者' },
   tags: ['副本'],
   description: '一列永远到不了站的列车',
-  worldbookEntries: [{ name: '列车时刻表', content: '……正文……', keys: ['雾中列车'] }],
+  条目: [{ name: '列车时刻表', content: '……正文……', keys: ['雾中列车'] }],
+});
+
+/** 直接落库用的行（db.test.js 同名 helper 的最小内联版）：老包@1 用例要绕过上传校验。 */
+const row = (over = {}) => ({
+  id: 'a1b2c3d4', name: '雾中列车', type: 'mechanism', version: '1.0.0',
+  author_name: '测试作者', author_discord: '', tags_json: '["副本"]',
+  description: '一列永远到不了站的列车', pack_json: '{}', manage_hash: 'h1',
+  status: 'published', downloads: 0, entry_count: 2, cover: '',
+  created: '2026-10-11T00:00:00Z', updated: '2026-10-11T00:00:00Z',
+  ...over,
 });
 
 async function upload(pack = validPack()) {
@@ -66,7 +76,7 @@ describe('上传', () => {
 
   it('非法包 → 422 + 人话错误（绿灯条目没给关键词）', async () => {
     const bad = validPack();
-    bad.worldbookEntries = [{ name: 'x', content: 'y' }];
+    bad.条目 = [{ name: 'x', content: 'y' }];
     const { res, body } = await upload(bad);
     expect(res.status).toBe(422);
     expect(body.error).toContain('关键词');
@@ -80,7 +90,7 @@ describe('上传', () => {
   it('超长名称（>100）→ 422；条目超 100 条 → 422（Review Focus #3）', async () => {
     expect((await upload({ ...validPack(), name: 'x'.repeat(101) })).res.status).toBe(422);
     const many = validPack();
-    many.worldbookEntries = Array.from({ length: 101 }, (_, i) => ({ name: `e${i}`, content: 'c', keys: ['k'] }));
+    many.条目 = Array.from({ length: 101 }, (_, i) => ({ name: `e${i}`, content: 'c', keys: ['k'] }));
     expect((await upload(many)).res.status).toBe(422);
   });
 
@@ -101,7 +111,7 @@ describe('浏览', () => {
     expect(list.packs[0].entryCount).toBe(1);
 
     const detail = await (await worker.fetch(get(`/api/packs/${list.packs[0].id}`), env())).json();
-    expect(detail.pack.worldbookEntries[0].name).toBe('列车时刻表');
+    expect(detail.pack.条目[0].name).toBe('列车时刻表');
     expect(detail.pack.id).toBe(list.packs[0].id);
   });
 
@@ -182,5 +192,45 @@ describe('管理端点（工坊主万能通道）', () => {
     const { manageKey: newKey } = await reset.json();
     expect((await worker.fetch(postJson(`/api/packs/${body.id}`, { manageKey: body.manageKey, pack: validPack() }, 'PUT'), env())).status).toBe(403);
     expect((await worker.fetch(postJson(`/api/packs/${body.id}`, { manageKey: newKey, pack: { ...validPack(), version: '1.0.1' } }, 'PUT'), env())).status).toBe(200);
+  });
+});
+
+describe('cover 与五类型', () => {
+  const v2 = (over = {}) => ({
+    format: 'wxhl-mod@2', id: 'x', name: '雾中列车', version: '1.0.0', author: { name: 'a' },
+    description: '简介', cover: 'https://x.test/c.png', tags: [], requires: {},
+    type: 'mechanism', 条目: [{ name: 'n', content: 'c', keys: ['k'] }], ...over,
+  });
+
+  it('上传 @2 包 → 201，列表/详情都带 cover', async () => {
+    const up = await worker.fetch(postJson('/api/packs', v2()), env());
+    expect(up.status).toBe(201);
+    const { id } = await up.json();
+    const list = await (await worker.fetch(get('/api/packs'), env())).json();
+    expect(list.packs[0]).toMatchObject({ cover: 'https://x.test/c.png', type: 'mechanism', typeLabel: '机制拓展' });
+    const detail = await (await worker.fetch(get(`/api/packs/${id}`), env())).json();
+    expect(detail.pack.cover).toBe('https://x.test/c.png');
+  });
+
+  it('老库里的 @1 包（pack_json 是旧格式）不炸列表，cover 回退空串（Review Focus #4）', async () => {
+    await insertPack(db, { ...row(), type: 'extension', pack_json: JSON.stringify({ format: 'wxhl-mod@1', type: 'extension' }), cover: '' });
+    const res = await worker.fetch(get('/api/packs'), env());
+    expect(res.status).toBe(200);
+    const list = await res.json();
+    expect(list.packs[0].cover).toBe('');
+    expect(list.packs[0].typeLabel).toBe('内容'); // 未知/旧 type 回退通用标签，不崩
+  });
+
+  it('entryCount 按新契约算：mechanism=条目数，event=事件条目+控制器', async () => {
+    const upM = await upload({ ...v2(), type: 'mechanism', 条目: [{ name: 'a', content: 'c', keys: ['k'] }, { name: 'b', content: 'c', keys: ['k'] }] });
+    const upE = await upload({
+      ...v2(), type: 'event',
+      事件条目: [{ name: '事件_p_a', content: 'c', keys: ['k'] }],
+      控制器条目: { 名称: 'EJS/p控制器', 正文: '<% %>' },
+    });
+    const list = await (await worker.fetch(get('/api/packs'), env())).json();
+    const byId = Object.fromEntries(list.packs.map(p => [p.id, p.entryCount]));
+    expect(byId[upM.body.id]).toBe(2);
+    expect(byId[upE.body.id]).toBe(2);
   });
 });

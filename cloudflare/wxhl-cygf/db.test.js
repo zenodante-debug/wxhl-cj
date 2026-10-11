@@ -11,7 +11,7 @@ const row = (over = {}) => ({
   id: 'a1b2c3d4', name: '雾中列车', type: 'extension', version: '1.0.0',
   author_name: '测试作者', author_discord: '', tags_json: '["副本"]',
   description: '一列永远到不了站的列车', pack_json: '{}', manage_hash: 'h1',
-  status: 'published', downloads: 0, entry_count: 2,
+  status: 'published', downloads: 0, entry_count: 2, cover: '',
   created: '2026-10-11T00:00:00Z', updated: '2026-10-11T00:00:00Z',
   ...over,
 });

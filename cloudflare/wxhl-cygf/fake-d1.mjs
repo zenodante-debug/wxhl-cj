@@ -28,7 +28,7 @@ export function makeFakeD1() {
   /** packs 表真实存在的列；WHERE 引用白名单外的列名 = 真 SQLite 的 no such column，抛错。 */
   const PACK_COLUMNS = new Set([
     'id', 'name', 'type', 'version', 'author_name', 'author_discord', 'tags_json', 'description',
-    'pack_json', 'manage_hash', 'status', 'downloads', 'entry_count', 'created', 'updated',
+    'pack_json', 'manage_hash', 'status', 'downloads', 'entry_count', 'cover', 'created', 'updated',
   ]);
 
   /** 校验列名在白名单内（真 SQLite 对未知列报 no such column），返回该列名。 */
@@ -92,14 +92,16 @@ export function makeFakeD1() {
           return {
             async run() {
               if (/^CREATE (TABLE|INDEX)/i.test(flat)) return { success: true, meta: { changes: 0 } };
+              // 迁移语句：假件的行本来就带全部列，ALTER 对它恒为 no-op —— 但要是改了别的形态照样炸
+              if (/^ALTER TABLE packs ADD COLUMN cover TEXT NOT NULL DEFAULT ''$/i.test(flat)) return { success: true, meta: { changes: 0 } };
 
               let m;
               if ((m = flat.match(/^INSERT INTO packs \([^)]*\) VALUES \(([^)]*)\)$/i))) {
-                const [id, name, type, version, author_name, author_discord, tags_json, description, pack_json, manage_hash, entry_count, created, updated] = args;
+                const [id, name, type, version, author_name, author_discord, tags_json, description, pack_json, manage_hash, entry_count, cover, created, updated] = args;
                 if (packs.has(id)) throw new Error(`UNIQUE constraint failed: packs.id`);
                 packs.set(id, {
                   id, name, type, version, author_name, author_discord, tags_json, description, pack_json, manage_hash,
-                  status: 'published', downloads: 0, entry_count, created, updated,
+                  status: 'published', downloads: 0, entry_count, cover, created, updated,
                 });
                 return { success: true, meta: { changes: 1 } };
               }
@@ -110,11 +112,11 @@ export function makeFakeD1() {
                 return { success: true, meta: { changes: row ? 1 : 0 } };
               }
 
-              if ((m = flat.match(/^UPDATE packs SET name = \?, type = \?, version = \?, author_name = \?, author_discord = \?, tags_json = \?, description = \?, pack_json = \?, entry_count = \?, updated = \? WHERE id = \? AND manage_hash = \?$/i))) {
-                const [name, type, version, author_name, author_discord, tags_json, description, pack_json, entry_count, updated, id, manage_hash] = args;
+              if ((m = flat.match(/^UPDATE packs SET name = \?, type = \?, version = \?, author_name = \?, author_discord = \?, tags_json = \?, description = \?, pack_json = \?, entry_count = \?, cover = \?, updated = \? WHERE id = \? AND manage_hash = \?$/i))) {
+                const [name, type, version, author_name, author_discord, tags_json, description, pack_json, entry_count, cover, updated, id, manage_hash] = args;
                 const row = packs.get(id);
                 if (!row || row.manage_hash !== manage_hash) return { success: true, meta: { changes: 0 } };
-                packs.set(id, { ...row, name, type, version, author_name, author_discord, tags_json, description, pack_json, entry_count, updated });
+                packs.set(id, { ...row, name, type, version, author_name, author_discord, tags_json, description, pack_json, entry_count, cover, updated });
                 return { success: true, meta: { changes: 1 } };
               }
 
@@ -159,8 +161,8 @@ export function makeFakeD1() {
                 rows.sort((a, b) => (b[key] > a[key] ? 1 : b[key] < a[key] ? -1 : 0));
                 const picked = rows.slice(offset, offset + limit).map(row => {
                   // SELECT 列表只含元数据列；照真 D1 只回这些列
-                  const { id, name, type, version, author_name, tags_json, description, downloads, entry_count, updated } = row;
-                  return { id, name, type, version, author_name, tags_json, description, downloads, entry_count, updated };
+                  const { id, name, type, version, author_name, tags_json, description, downloads, entry_count, cover, updated } = row;
+                  return { id, name, type, version, author_name, tags_json, description, downloads, entry_count, cover, updated };
                 });
                 return { results: picked };
               }
