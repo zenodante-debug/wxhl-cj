@@ -141,6 +141,16 @@ CREATE INDEX IF NOT EXISTS idx_packs_updated ON packs(updated DESC);
 | PUT | `/api/packs/:id` | body = 完整包 JSON + `manageKey`；校验密钥哈希一致才更新，`updated` 刷新 |
 | DELETE | `/api/packs/:id` | body `{ manageKey }`；校验通过则下架 |
 
+**管理端点（工坊主万能通道，market 惯例）**：`/api/admin/*` 用 Worker secret `WORKSHOP_ADMIN_KEY` 鉴权（`wrangler secret put` 配置；**没配就一律 403**，fail-closed）。密钥错误与包不存在统一 403，不泄露存在性。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| POST | `/api/admin/list` | `{ key }` → 全量元数据列表（审计用） |
+| POST | `/api/admin/delete` | `{ key, ids: [] }` → 无视管理密钥强制下架 |
+| POST | `/api/admin/reset-key` | `{ key, id }` → 重置管理密钥并返回新密钥（玩家丢密钥时的找回通道；二期接 Discord 前的兜底） |
+
+另有终极兜底：`npx wrangler d1 execute wxhl-cygf-db --command "…"` 直接对库跑 SQL，不受任何密钥约束。
+
 - 搜索：`name / description / author_name` 的 LIKE，加 `type` 过滤、按 `updated` 排序，LIMIT/OFFSET 分页
 - 密钥校验：`SHA-256(manageKey)` 与 `manage_hash` 恒时比较
 - 不开放 CORS（页面与 API 同源；宿主脚本不直接调 API）

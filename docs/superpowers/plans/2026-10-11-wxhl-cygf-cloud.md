@@ -153,6 +153,8 @@ bash scripts/push-cygf.sh
   - `listPacks(db, query: ListQuery): Promise<{ rows: PackRow[]; total: number }>`；`ListQuery = { q?: string; type?: string; tag?: string; sort?: 'updated' | 'downloads'; limit: number; offset: number }`
   - `updatePackByKey(db, id, manageHash, fields): Promise<boolean>`
   - `deletePackByKey(db, id, manageHash): Promise<boolean>`
+  - `deletePackById(db, id): Promise<boolean>`（管理端点用，无视密钥）
+  - `resetManageKey(db, id, newHash): Promise<boolean>`（玩家丢密钥时工坊主找回用）
   - `bumpDownloads(db, id): Promise<void>`
   - `likeEscape(s: string): string`
 
@@ -162,7 +164,7 @@ bash scripts/push-cygf.sh
 // cloudflare/wxhl-cygf/db.test.js
 import { describe, expect, it } from 'vitest';
 import { makeFakeD1 } from './fake-d1.mjs';
-import { bumpDownloads, deletePackByKey, ensureSchema, getPackById, insertPack, likeEscape, listPacks, updatePackByKey } from './worker.ts';
+import { bumpDownloads, deletePackById, deletePackByKey, ensureSchema, getPackById, insertPack, likeEscape, listPacks, resetManageKey, updatePackByKey } from './worker.ts';
 
 const row = (over = {}) => ({
   id: 'a1b2c3d4', name: '雾中列车', type: 'extension', version: '1.0.0',
@@ -237,6 +239,16 @@ describe('数据层', () => {
     await bumpDownloads(db, 'a1b2c3d4');
     await bumpDownloads(db, 'a1b2c3d4');
     expect((await getPackById(db, 'a1b2c3d4'))?.downloads).toBe(2);
+  });
+
+  it('deletePackById / resetManageKey：管理端点专用，不看旧密钥', async () => {
+    const db = await freshDb();
+    await insertPack(db, row());
+    expect(await resetManageKey(db, 'a1b2c3d4', 'h2')).toBe(true);
+    expect((await getPackById(db, 'a1b2c3d4'))?.manage_hash).toBe('h2');
+    expect(await resetManageKey(db, 'zzzzzzzz', 'h3')).toBe(false);
+    expect(await deletePackById(db, 'a1b2c3d4')).toBe(true);
+    expect(await deletePackById(db, 'a1b2c3d4')).toBe(false);
   });
 });
 ```
@@ -390,6 +402,18 @@ export async function deletePackByKey(db: D1Database, id: string, manageHash: st
   return (result.meta?.changes ?? 0) > 0;
 }
 
+/** 管理端点专用：无视密钥按 id 删除 */
+export async function deletePackById(db: D1Database, id: string): Promise<boolean> {
+  const result = await db.prepare(`DELETE FROM packs WHERE id = ?`).bind(id).run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
+/** 管理端点专用：重置管理密钥（玩家丢密钥时工坊主找回） */
+export async function resetManageKey(db: D1Database, id: string, newHash: string): Promise<boolean> {
+  const result = await db.prepare(`UPDATE packs SET manage_hash = ?, updated = ? WHERE id = ?`).bind(newHash, new Date().toISOString(), id).run();
+  return (result.meta?.changes ?? 0) > 0;
+}
+
 export async function bumpDownloads(db: D1Database, id: string): Promise<void> {
   await db.prepare(`UPDATE packs SET downloads = downloads + 1 WHERE id = ?`).bind(id).run();
 }
@@ -503,6 +527,18 @@ export function makeFakeD1() {
                 const row = packs.get(args[0]);
                 if (!row || row.manage_hash !== args[1]) return { success: true, meta: { changes: 0 } };
                 packs.delete(args[0]);
+                return { success: true, meta: { changes: 1 } };
+              }
+
+              if ((m = flat.match(/^DELETE FROM packs WHERE id = \?$/i))) {
+                const existed = packs.delete(args[0]);
+                return { success: true, meta: { changes: existed ? 1 : 0 } };
+              }
+
+              if ((m = flat.match(/^UPDATE packs SET manage_hash = \?, updated = \? WHERE id = \?$/i))) {
+                const row = packs.get(args[2]);
+                if (!row) return { success: true, meta: { changes: 0 } };
+                packs.set(args[2], { ...row, manage_hash: args[0], updated: args[1] });
                 return { success: true, meta: { changes: 1 } };
               }
 
@@ -727,6 +763,40 @@ describe('更新与下架（管理密钥）', () => {
     expect((await worker.fetch(postJson(`/api/packs/${body.id}`, { manageKey: body.manageKey }, 'DELETE'), env())).status).toBe(403);
   });
 });
+
+describe('管理端点（工坊主万能通道）', () => {
+  const adminEnv = key => ({ WORKSHOP_DB: db, WORKSHOP_ADMIN_KEY: key });
+
+  it('未配置 WORKSHOP_ADMIN_KEY → 一律 403（fail-closed，market 惯例）', async () => {
+    const res = await worker.fetch(postJson('/api/admin/list', { key: 'x' }), env());
+    expect(res.status).toBe(403);
+  });
+
+  it('密钥错误 → 403；正确 → list 返回元数据', async () => {
+    await upload();
+    expect((await worker.fetch(postJson('/api/admin/list', { key: 'wrong' }), adminEnv('s3cret'))).status).toBe(403);
+    const res = await worker.fetch(postJson('/api/admin/list', { key: 's3cret' }), adminEnv('s3cret'));
+    expect(res.status).toBe(200);
+    expect((await res.json()).total).toBe(1);
+  });
+
+  it('admin/delete 无视管理密钥强制下架', async () => {
+    const { body } = await upload();
+    const res = await worker.fetch(postJson('/api/admin/delete', { key: 's3cret', ids: [body.id] }), adminEnv('s3cret'));
+    expect(res.status).toBe(200);
+    expect((await res.json()).deleted).toBe(1);
+    expect((await worker.fetch(get(`/api/packs/${body.id}`), env())).status).toBe(404);
+  });
+
+  it('admin/reset-key 重置密钥：旧密钥失效，新密钥可用', async () => {
+    const { body } = await upload();
+    const reset = await worker.fetch(postJson('/api/admin/reset-key', { key: 's3cret', id: body.id }), adminEnv('s3cret'));
+    expect(reset.status).toBe(200);
+    const { manageKey: newKey } = await reset.json();
+    expect((await worker.fetch(postJson(`/api/packs/${body.id}`, { manageKey: body.manageKey, pack: validPack() }, 'PUT'), env())).status).toBe(403);
+    expect((await worker.fetch(postJson(`/api/packs/${body.id}`, { manageKey: newKey, pack: { ...validPack(), version: '1.0.1' } }, 'PUT'), env())).status).toBe(200);
+  });
+});
 ```
 
 - [ ] **Step 2: Run test to verify it fails**
@@ -825,7 +895,7 @@ function toMeta(row: PackRow) {
 }
 
 export default {
-  async fetch(request: Request, env: { WORKSHOP_DB: D1Database }): Promise<Response> {
+  async fetch(request: Request, env: { WORKSHOP_DB: D1Database; WORKSHOP_ADMIN_KEY?: string }): Promise<Response> {
     const url = new URL(request.url);
     try {
       if (url.pathname === '/' && request.method === 'GET') {
@@ -837,6 +907,41 @@ export default {
 
       await ensureSchema(env.WORKSHOP_DB);
       const db = env.WORKSHOP_DB;
+
+      // 管理端点（/api/admin/*）：Worker secret WORKSHOP_ADMIN_KEY；没配就一律 403（fail-closed，market 惯例）
+      if (url.pathname.startsWith('/api/admin/')) {
+        if (request.method !== 'POST') return err('管理端点只接受 POST', 405);
+        let body: any;
+        try {
+          body = await request.json();
+        } catch {
+          return err('请求体不是合法 JSON', 400);
+        }
+        const adminKey = env.WORKSHOP_ADMIN_KEY;
+        if (!adminKey || body?.key !== adminKey) return err('管理密钥不正确或未配置', 403);
+
+        if (url.pathname === '/api/admin/list') {
+          const { rows, total } = await listPacks(db, { limit: 200, offset: 0 });
+          return json({ total, rows: rows.map(toMeta) });
+        }
+        if (url.pathname === '/api/admin/delete') {
+          const ids = Array.isArray(body.ids) ? body.ids.filter((x: unknown) => typeof x === 'string') : [];
+          if (ids.length === 0) return err('缺少 ids', 400);
+          let deleted = 0;
+          for (const id of ids) {
+            if (await deletePackById(db, id)) deleted++;
+          }
+          return json({ ok: true, deleted });
+        }
+        if (url.pathname === '/api/admin/reset-key') {
+          if (typeof body.id !== 'string' || !body.id) return err('缺少 id', 400);
+          const manageKey = crypto.randomUUID().replaceAll('-', '');
+          const manageHash = await sha256Hex(manageKey);
+          if (!(await resetManageKey(db, body.id, manageHash))) return err('内容包不存在', 404);
+          return json({ ok: true, id: body.id, manageKey });
+        }
+        return err('没有这个管理端点', 404);
+      }
 
       if (url.pathname === '/api/packs' && request.method === 'GET') {
         const limit = Math.min(Math.max(Number(url.searchParams.get('limit')) || 20, 1), 50);
@@ -1534,7 +1639,7 @@ process.exit(failed === 0 ? 0 : 1);
 
 - [ ] **Step 3: README.md**
 
-照 `cloudflare/wxhl-market/README.md` 的格式写：项目一句话、数据表、接口表、部署步骤（`npx wrangler login` → `npx wrangler d1 create wxhl-cygf-db` → 填 database_id → `npx wrangler deploy` → `node smoke.mjs`）、与宿主仓的同步约定（包格式契约共享自 `src/wxhl-cygf/pack/`，桥协议常量两边一致）、管理密钥机制、一期边界（无登录/无审核/无限流，二期接 Discord 绑定密钥 + 审核队列）。
+照 `cloudflare/wxhl-market/README.md` 的格式写：项目一句话、数据表、接口表（含 `/api/admin/*` 管理端点）、部署步骤（`npx wrangler login` → `npx wrangler d1 create wxhl-cygf-db` → 填 database_id → `npx wrangler secret put WORKSHOP_ADMIN_KEY` → `npx wrangler deploy` → `node smoke.mjs`）、与宿主仓的同步约定（包格式契约共享自 `src/wxhl-cygf/pack/`，桥协议常量两边一致）、**管理密钥机制**（玩家管理密钥 vs 工坊主 `WORKSHOP_ADMIN_KEY`，后者没配就一律 403；另有 `wrangler d1 execute` 直改库的终极兜底）、一期边界（无登录/无审核/无限流，二期接 Discord 绑定密钥 + 审核队列）。
 
 - [ ] **Step 4: 全量验证**
 
@@ -1552,13 +1657,13 @@ bash scripts/push-cygf.sh
 
 - [ ] **Step 6: 部署（需用户在场）**
 
-`npx wrangler login` 需要浏览器授权——**停下来交给用户**。用户授权后：`npx wrangler d1 create wxhl-cygf-db` → 把 database_id 填进 wrangler.toml → `npx wrangler deploy`（在 `cloudflare/wxhl-cygf/` 目录下）→ `node cloudflare/wxhl-cygf/smoke.mjs` 全绿 → 把 database_id 的填写也提交。
+`npx wrangler login` 需要浏览器授权——**停下来交给用户**。用户授权后：`npx wrangler d1 create wxhl-cygf-db` → 把 database_id 填进 wrangler.toml → `npx wrangler secret put WORKSHOP_ADMIN_KEY`（工坊主管理密钥，没配则 `/api/admin/*` 一律 403）→ `npx wrangler deploy`（在 `cloudflare/wxhl-cygf/` 目录下）→ `node cloudflare/wxhl-cygf/smoke.mjs` 全绿 → 把 database_id 的填写也提交。
 
 ---
 
 ## Self-Review 记录
 
-- **Spec 覆盖**：§2 结构→各任务文件；§3 契约→Task 1（deleteWorkshopEntries + 显式 zod）+ Task 4（桥客户端/映射/sourceMeta 带 version）；§4 数据模型→Task 2（比 spec 多 `entry_count` 列——列表要回 entryCount，避免每行解析 pack_json，spec 已隐式要求）；§5 API→Task 3；§6 页面→Task 5；§7 上传归属→Task 3；§8 测试部署→Task 6
+- **Spec 覆盖**：§2 结构→各任务文件；§3 契约→Task 1（deleteWorkshopEntries + 显式 zod）+ Task 4（桥客户端/映射/sourceMeta 带 version）；§4 数据模型→Task 2（比 spec 多 `entry_count` 列——列表要回 entryCount，避免每行解析 pack_json，spec 已隐式要求）；§5 API→Task 3（含 `/api/admin/*` 管理端点：list / delete / reset-key，`WORKSHOP_ADMIN_KEY` 未配置即 403）；§6 页面→Task 5；§7 上传归属→Task 3；§8 测试部署→Task 6
 - **Placeholder 扫描**：无 TBD/TODO；workshop.html 给的是结构要求+交互逻辑清单（DOM 代码体量大，但每项行为都有明确规定，不含"适当处理"式描述）
 - **类型一致性**：`PackRow`/`ListQuery`（T2）→ worker fetch 层（T3）一致；`createBridgeClient`/`packToWorldbookEntries`/`sourceMetaOf`/`computeInstalled`（T4）→ 页面（T5）一致；宿主 `deleteWorkshopEntries` 的 payload 形状（T1）→ 页面调用（T5）一致
 - **Review Focus**：5 条全部钉入（#1→T2 likeEscape 测试、#2→T3 403 同口径测试、#3→T3 超限测试、#4→T4 超时测试、#5→T3 撞车重试）
