@@ -1,0 +1,21 @@
+name = "wxhl-cygf"
+main = "worker.ts"
+compatibility_date = "2026-10-11"
+
+# 文本资源：worker.ts 里 import 了 workshop.html 和 page-lib.js 两个文本模块。
+# 两个 glob **缺一不可**：只写 "**/*.html" 的话，`import PAGE_LIB from './page-lib.js'`
+# 会被当作普通 JS 模块、默认导出并不存在，打包出的 /page-lib.js 就是字符串 "undefined"，
+# 线上页面直接崩——而单测把这两个 import mock 掉了，抓不到这个错。
+[[rules]]
+type = "Text"
+globs = ["**/*.html", "**/page-lib.js"]
+
+# D1 免费版：每天 500 万行读 / 10 万行写（别用 KV——market 踩过 list() 每日配额坑）
+[[d1_databases]]
+binding = "WORKSHOP_DB"
+database_name = "wxhl-cygf-db"
+database_id = "PENDING_CREATE"   # npx wrangler d1 create wxhl-cygf-db 后替换
+
+# 国内直连 workers.dev 不通，必须绑自定义域（market 的既有教训）
+# 注意：TOML 注释行末尾不能有反斜杠——会被当续行符把下一行吞掉。
+routes = [{ pattern = "cygf.657868.xyz", custom_domain = true }]

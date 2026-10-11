@@ -141,7 +141,7 @@ export function makeFakeD1() {
             },
             async first() {
               let m;
-              if ((m = flat.match(/^SELECT \* FROM packs WHERE id = \?$/i))) {
+              if (flat.match(/^SELECT \* FROM packs WHERE id = \?$/i)) {
                 return packs.get(args[0]) ?? null;
               }
               if ((m = flat.match(/^SELECT COUNT\(\*\) AS total FROM packs WHERE (.+)$/i))) {
@@ -154,7 +154,7 @@ export function makeFakeD1() {
               if ((m = flat.match(/^SELECT [\w, ]+ FROM packs WHERE (.+?) (ORDER BY (updated|downloads) DESC) LIMIT \? OFFSET \?$/i))) {
                 const whereArgs = args.slice(0, -2);
                 const [limit, offset] = args.slice(-2);
-                let rows = selectRows(m[1], whereArgs);
+                const rows = selectRows(m[1], whereArgs);
                 const key = m[3];
                 rows.sort((a, b) => (b[key] > a[key] ? 1 : b[key] < a[key] ? -1 : 0));
                 const picked = rows.slice(offset, offset + limit).map(row => {
