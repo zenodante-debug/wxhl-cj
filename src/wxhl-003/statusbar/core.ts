@@ -14,6 +14,7 @@ import imgCon from './assets/cons.webp?url';
 import imgPer from './assets/per.webp?url';
 import { deposit, loadStorage, saveStorage, withdraw, type StorageRoom } from './storage';
 import { 位阶修正值系数, 位阶属性软上限, 位阶档位, 位阶等级上限 } from './tier';
+import { editSpan, editText, escapeAttr } from './editable';
 import { canUseHubFacility, HUB_GATE_HINT } from '../hubGate';
 
 /** 挂载状态栏到 root 元素，返回卸载函数 */
@@ -63,11 +64,6 @@ export function mountStatusbar(root: HTMLElement): () => void {
     } catch (e) {
       /* localStorage 不可用时放弃持久化 */
     }
-  }
-
-  /* HTML属性转义：防止实体名/物品名含引号时炸属性 */
-  function escapeAttr(str: any) {
-    return String(str === undefined || str === null ? '' : str).replace(/"/g, '&quot;');
   }
 
   /* 最新楼层 MVU 变量（楼内正则版与手机版共用同一数据源） */
@@ -185,13 +181,6 @@ export function mountStatusbar(root: HTMLElement): () => void {
       $(this).find('.mate-sub-toggle').first().toggleClass('collapsed', !expanded);
       $(this).next('.mate-sub-body').toggleClass('hidden', !expanded);
     });
-  }
-
-  function editSpan(val: any, path: string) {
-    return `<span class="editable-num" data-path="${path}" data-val="${val}" title="点击修改数字">${val}</span>`;
-  }
-  function editText(val: any, path: string) {
-    return `<span class="editable-text" contenteditable="true" spellcheck="false" data-path="${path}" data-val="${(val + '').replace(/"/g, '&quot;')}" title="点击修改文字，失去焦点自动保存">${val}</span>`;
   }
 
   /* ==================== 实体自动计算 ==================== */
