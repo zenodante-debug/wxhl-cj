@@ -18,9 +18,12 @@
     --warn-bg: #422006;
     --warn-line: #b45309;
     --warn-text: #fcd34d;
-    --blue: #38bdf8;   --blue-bg: rgba(56, 189, 248, .16);   --blue-line: rgba(56, 189, 248, .35);
-    --purple: #c4b5fd; --purple-bg: rgba(167, 139, 250, .18); --purple-line: rgba(167, 139, 250, .35);
-    --gold: #fbbf24;   --gold-bg: rgba(251, 191, 36, .16);   --gold-line: rgba(251, 191, 36, .35);
+    /* 五类徽章色：副本血红 / 事件琥珀 / 机制青蓝 / 构筑紫 / 人设金 */
+    --dungeon: #fca5a5;   --dungeon-bg: rgba(239, 68, 68, .16);   --dungeon-line: rgba(239, 68, 68, .42);
+    --event: #fcd34d;     --event-bg: rgba(245, 158, 11, .16);    --event-line: rgba(245, 158, 11, .42);
+    --mechanism: #67e8f9; --mechanism-bg: rgba(34, 211, 238, .16); --mechanism-line: rgba(34, 211, 238, .42);
+    --build: #c4b5fd;     --build-bg: rgba(167, 139, 250, .18);   --build-line: rgba(167, 139, 250, .42);
+    --persona: #fbbf24;   --persona-bg: rgba(251, 191, 36, .16);  --persona-line: rgba(251, 191, 36, .42);
     --radius: 10px;
   }
   * { box-sizing: border-box; }
@@ -36,7 +39,7 @@
   }
   h1, h2, h3 { font-weight: 600; }
   input, select, textarea, button { font: inherit; color: inherit; }
-  input[type=text], input[type=search], select, textarea {
+  input[type=text], input[type=search], input[type=number], select, textarea {
     background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
     padding: 7px 10px; width: 100%; color: var(--text);
   }
@@ -57,15 +60,18 @@
   /* 顶栏 */
   #topbar {
     position: sticky; top: 0; z-index: 20;
-    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
-    padding: 10px 16px;
+    padding: 10px 16px max(10px, env(safe-area-inset-bottom, 0px));
+    padding-top: calc(10px + env(safe-area-inset-top, 0px));
     background: rgba(15, 23, 42, .96);
     border-bottom: 1px solid var(--line);
     backdrop-filter: blur(6px);
   }
+  .topbar-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
   #topbar h1 { font-size: 18px; margin: 0 6px 0 0; white-space: nowrap; }
-  #topbar .grow { flex: 1 1 180px; min-width: 110px; }
-  #topbar .filter { flex: 0 0 auto; width: auto; }
+  #search { flex: 1 1 180px; min-width: 120px; }
+  .type-nav { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 8px; }
+  .type-btn { padding: 5px 12px; border-radius: 999px; font-size: 13px; }
+  .type-btn.active { background: var(--accent-strong); border-color: var(--accent-strong); color: #04222f; font-weight: 600; }
 
   /* 桥状态条 */
   #bridgeBanner {
@@ -77,38 +83,46 @@
   /* 列表 */
   #grid {
     display: grid; gap: 12px; padding: 16px;
-    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+    grid-template-columns: repeat(auto-fill, minmax(220px, 1fr));
   }
   .card {
     background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius);
-    padding: 12px; cursor: pointer; display: flex; flex-direction: column; gap: 6px;
+    padding: 12px; cursor: pointer; display: flex; flex-direction: column; gap: 8px;
     transition: border-color .15s;
   }
   .card:hover { border-color: var(--accent); }
   .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
-  .card-head { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
+  .card-cover { position: relative; aspect-ratio: 5 / 3; background: var(--bg-3); border-radius: 8px; overflow: hidden; }
+  .card-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
+  .card-badge { position: absolute; top: 8px; right: 8px; }
   .card-name { margin: 0; font-size: 15px; word-break: break-word; }
-  .card-meta, .card-foot { color: var(--muted); font-size: 12px; }
-  .card-desc { margin: 0; color: #cbd5e1; font-size: 13px; word-break: break-word; }
-  .card-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: auto; }
+  .card-desc {
+    margin: 0; color: #cbd5e1; font-size: 13px; word-break: break-word;
+    display: -webkit-box; -webkit-line-clamp: 2; line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden;
+  }
+  .card-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: auto; color: var(--muted); font-size: 12px; }
+  .card-author { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .center-note { text-align: center; color: var(--muted); padding: 32px 16px; }
   #loadMore { display: block; margin: 4px auto 28px; }
 
   /* 徽章 */
   .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; border: 1px solid transparent; }
-  .badge-extension { color: var(--blue);   background: var(--blue-bg);   border-color: var(--blue-line); }
-  .badge-build     { color: var(--purple); background: var(--purple-bg); border-color: var(--purple-line); }
-  .badge-character { color: var(--gold);   background: var(--gold-bg);   border-color: var(--gold-line); }
+  .badge-dungeon   { color: var(--dungeon);   background: var(--dungeon-bg);   border-color: var(--dungeon-line); }
+  .badge-event     { color: var(--event);     background: var(--event-bg);     border-color: var(--event-line); }
+  .badge-mechanism { color: var(--mechanism); background: var(--mechanism-bg); border-color: var(--mechanism-line); }
+  .badge-build     { color: var(--build);     background: var(--build-bg);     border-color: var(--build-line); }
+  .badge-persona   { color: var(--persona);   background: var(--persona-bg);   border-color: var(--persona-line); }
 
   /* 视图 */
   #uploadView { max-width: 880px; margin: 0 auto; padding: 16px; }
-  .view-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .view-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
   .view-head h2 { margin: 0; font-size: 17px; }
-  /* 详情是弹层：滚得动、内容高时不裁顶 */
   #detailView.overlay { display: block; padding: 24px 16px; }
   #detailView .card-box { max-width: 880px; margin: 0 auto; }
 
   /* 详情 */
+  .detail-cover { aspect-ratio: 16 / 7; background: var(--bg-3); border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
+  .detail-cover img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .detail-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
   .detail-name { margin: 0; font-size: 20px; word-break: break-word; }
   .detail-meta { color: var(--muted); font-size: 13px; margin-top: 4px; }
@@ -118,15 +132,15 @@
   .preview-entry { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 8px 0; }
   .preview-name { font-weight: 600; margin-bottom: 4px; word-break: break-word; }
   .preview-content { white-space: pre-wrap; color: #cbd5e1; word-break: break-word; margin: 0; }
-  pre.preview-content { font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 12px; max-height: 380px; overflow: auto; }
   .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
   .install-state { color: var(--muted); margin-right: auto; }
   .hint { color: var(--muted); font-size: 12px; }
+  .status-line { white-space: pre-wrap; overflow-wrap: anywhere; margin: 4px 0 0; }
   .error-text { color: var(--danger); font-size: 13px; }
   .loading, .empty { color: var(--muted); padding: 24px 0; }
 
   /* 上传表单 */
-  .form { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 6px; }
+  .form { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 6px; }
   .field { display: flex; flex-direction: column; gap: 4px; }
   .field-label { color: var(--muted); font-size: 12px; }
   .full { grid-column: 1 / -1; }
@@ -141,11 +155,7 @@
   .entry-index { color: var(--muted); font-size: 12px; }
   .section-title { margin: 18px 0 6px; font-size: 15px; }
   .row-between { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
-  #packPreview {
-    background: #0b1220; border: 1px solid var(--line); border-radius: 8px; padding: 12px;
-    font-family: ui-monospace, Consolas, "Courier New", monospace;
-    font-size: 12px; max-height: 360px; overflow: auto; white-space: pre; margin: 6px 0 0;
-  }
+  .type-section { margin-bottom: 8px; }
   #uploadView .actions { border-top: 1px solid var(--line); margin-top: 18px; }
 
   /* 弹层 */
@@ -176,9 +186,10 @@
 
   @media (max-width: 480px) {
     #topbar h1 { flex-basis: 100%; margin-right: 0; }
-    #topbar .grow { flex-basis: 100%; }
-    #topbar .filter { flex: 1 1 45%; width: auto; }
+    #search { flex-basis: 100%; }
     #grid { grid-template-columns: 1fr; padding: 12px; }
+    #uploadView { padding: 12px; }
+    .form, .entry-row { grid-template-columns: 1fr; }
   }
 </style>
 </head>
@@ -193,21 +204,14 @@
     </div>
   </div>
 
-  <!-- 2. 顶栏 -->
+  <!-- 2. 顶栏：标题 + 五类并列分类按钮 + 搜索 + 上传 -->
   <header id="topbar">
-    <h1>回廊创意工坊</h1>
-    <input id="search" class="grow" type="search" placeholder="搜索名称 / 简介 / 作者">
-    <select id="filterType" class="filter">
-      <option value="">全部</option>
-      <option value="extension">扩展包</option>
-      <option value="build">构筑</option>
-      <option value="character">同人角色</option>
-    </select>
-    <select id="sortBy" class="filter">
-      <option value="updated">最新</option>
-      <option value="downloads">最热</option>
-    </select>
-    <button id="uploadBtn" class="primary">上传</button>
+    <div class="topbar-row">
+      <h1>回廊创意工坊</h1>
+      <input id="search" type="search" placeholder="搜索名称 / 简介 / 作者">
+      <button id="uploadBtn" class="primary">上传</button>
+    </div>
+    <nav id="typeNav" class="type-nav" aria-label="分类"></nav>
   </header>
 
   <!-- 3. 桥状态条 -->
@@ -233,42 +237,22 @@
   <!-- 6. 上传视图 -->
   <section id="uploadView" class="view" hidden>
     <div class="view-head"><button id="uploadBack" class="ghost">← 返回列表</button><h2>上传内容包</h2></div>
-    <div>
-      <div class="form">
-        <label class="field"><span class="field-label">名称</span><input id="upName" type="text"></label>
-        <label class="field"><span class="field-label">版本</span><input id="upVersion" type="text" value="1.0.0"></label>
-        <label class="field"><span class="field-label">作者名</span><input id="upAuthor" type="text"></label>
-        <label class="field"><span class="field-label">Discord（选填）</span><input id="upDiscord" type="text"></label>
-        <label class="field"><span class="field-label">标签（逗号分隔）</span><input id="upTags" type="text"></label>
-        <label class="field"><span class="field-label">类型</span>
-          <select id="upType">
-            <option value="extension">扩展包</option>
-            <option value="build">构筑</option>
-            <option value="character">同人角色</option>
-          </select>
-        </label>
-        <label class="field full"><span class="field-label">简介</span><textarea id="upDesc" rows="3"></textarea></label>
-      </div>
+    <nav id="uploadTypeNav" class="type-nav" aria-label="上传类型"></nav>
+    <div class="form">
+      <label class="field"><span class="field-label">名称 *</span><input id="upName" type="text"></label>
+      <label class="field"><span class="field-label">版本 *</span><input id="upVersion" type="text" value="1.0.0"></label>
+      <label class="field"><span class="field-label">作者名 *</span><input id="upAuthor" type="text"></label>
+      <label class="field"><span class="field-label">Discord（选填）</span><input id="upDiscord" type="text"></label>
+      <label class="field"><span class="field-label">标签（逗号分隔）</span><input id="upTags" type="text"></label>
+      <label class="field full"><span class="field-label">封面图 URL（选填）</span><input id="upCover" type="text" placeholder="https://…/cover.png"></label>
+      <label class="field full"><span class="field-label">简介 *（列表卡片显示）</span><textarea id="upDesc" rows="3"></textarea></label>
+    </div>
 
-      <div id="extSection">
-        <div class="row-between">
-          <h3 class="section-title">世界书条目</h3>
-          <button id="addEntry" class="small">+ 添加条目</button>
-        </div>
-        <div id="entriesEditor"></div>
-        <h3 class="section-title">pack JSON 预览</h3>
-        <pre id="packPreview"></pre>
-      </div>
+    <div id="uploadSections"></div>
 
-      <div id="jsonSection" hidden>
-        <label class="field full"><span class="field-label">粘贴 JSON</span><textarea id="jsonPaste" rows="14"></textarea></label>
-        <p class="hint">字段规范见包格式契约（构筑需 构筑名/定位/属性基础…；角色另需 外貌/背景）</p>
-      </div>
-
-      <div class="actions">
-        <button id="upSubmit" class="primary">提交</button>
-        <span id="upError" class="error-text"></span>
-      </div>
+    <div class="actions">
+      <button id="upSubmit" class="primary">提交</button>
+      <span id="upError" class="error-text"></span>
     </div>
   </section>
 
@@ -293,9 +277,18 @@
 import * as W from '/page-lib.js';
 
 // ==================== 常量与状态 ====================
-const TYPE_LABEL = { extension: '扩展', build: '构筑', character: '角色' };
 const PAGE_SIZE = 20;
+const ENTRY_PAGE_SIZE = 20; // 条目编辑器每页渲染 20 条
 const PROBE_TIMEOUT_MS = 4000;
+
+const CATEGORIES = [
+  { value: '', label: '全部' },
+  { value: 'dungeon', label: W.PACK_TYPE_LABEL.dungeon },
+  { value: 'event', label: W.PACK_TYPE_LABEL.event },
+  { value: 'mechanism', label: W.PACK_TYPE_LABEL.mechanism },
+  { value: 'build', label: W.PACK_TYPE_LABEL.build },
+  { value: 'persona', label: W.PACK_TYPE_LABEL.persona },
+];
 
 const $ = selector => document.querySelector(selector);
 
@@ -303,14 +296,15 @@ const state = {
   bridgeOk: false,
   q: '',
   type: '',
-  sort: 'updated',
   offset: 0,
   limit: PAGE_SIZE,
   packs: [],
   total: 0,
   loading: false,
   draftId: '',
+  uploadType: 'dungeon',
   currentDetailId: '',
+  metaById: new Map(),
 };
 
 const bridge = W.createBridgeClient({ parentWindow: window.parent, selfWindow: window });
@@ -327,6 +321,39 @@ function button(label, className, onClick) {
   const node = el('button', className, label);
   if (onClick) node.addEventListener('click', onClick);
   return node;
+}
+
+function field(labelText, control, extraClass) {
+  const wrap = el('label', 'field' + (extraClass ? ' ' + extraClass : ''));
+  wrap.append(el('span', 'field-label', labelText));
+  wrap.append(control);
+  return wrap;
+}
+
+function textInput(placeholder) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  if (placeholder) input.placeholder = placeholder;
+  return input;
+}
+
+function textArea(rows, placeholder) {
+  const area = document.createElement('textarea');
+  area.rows = rows;
+  if (placeholder) area.placeholder = placeholder;
+  return area;
+}
+
+function selectInput(options, value) {
+  const select = document.createElement('select');
+  for (const [optionValue, label] of options) {
+    const option = document.createElement('option');
+    option.value = optionValue;
+    option.textContent = label;
+    select.append(option);
+  }
+  if (value !== undefined) select.value = value;
+  return select;
 }
 
 function truncate(value, max) {
@@ -358,15 +385,26 @@ function nullableInt(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function parseJsonObject(text, label) {
+  const raw = String(text ?? '').trim();
+  if (!raw) return {};
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error(`${label} 不是合法 JSON：${error.message}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`${label} 必须是 JSON 对象`);
+  }
+  return parsed;
+}
+
 function formatTime(iso) {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return String(iso ?? '');
   const pad = n => String(n).padStart(2, '0');
   return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
-}
-
-function typeLabel(type) {
-  return TYPE_LABEL[type] ?? type;
 }
 
 let toastTimer = 0;
@@ -391,6 +429,19 @@ function showUploadView() {
   $('#uploadView').hidden = false;
   $('#listView').hidden = true;
   window.scrollTo(0, 0);
+}
+
+// ==================== 封面：一律走 img.src + onerror 回退占位 ====================
+function coverImage(cover, className) {
+  const img = document.createElement('img');
+  if (className) img.className = className;
+  img.alt = '';
+  img.loading = 'lazy';
+  img.src = W.coverOrPlaceholder(cover);
+  img.addEventListener('error', () => {
+    if (img.src !== W.COVER_PLACEHOLDER) img.src = W.COVER_PLACEHOLDER;
+  });
+  return img;
 }
 
 // ==================== 1. 免责声明 ====================
@@ -445,28 +496,56 @@ function probeBridge() {
     });
 }
 
+// ==================== 2. 分类导航 ====================
+function renderTypeNav() {
+  const nav = $('#typeNav');
+  const buttons = [];
+  for (const category of CATEGORIES) {
+    const btn = button(category.label, 'type-btn');
+    btn.dataset.value = category.value;
+    btn.addEventListener('click', () => {
+      state.type = category.value;
+      for (const other of buttons) other.classList.toggle('active', other.dataset.value === state.type);
+      loadList({ reset: true }); // 点击分类即筛选并回到第一页
+    });
+    buttons.push(btn);
+    nav.append(btn);
+  }
+  for (const btn of buttons) btn.classList.toggle('active', btn.dataset.value === state.type);
+}
+
 // ==================== 4. 列表 ====================
+function typeBadge(type) {
+  const label = W.PACK_TYPE_LABEL[type] ?? type;
+  return el('span', `badge badge-${type}`, label);
+}
+
 function renderCard(meta) {
   const card = el('article', 'card');
   card.tabIndex = 0;
 
-  const head = el('div', 'card-head');
-  head.append(el('h3', 'card-name', meta.name));
-  head.append(el('span', `badge badge-${meta.type}`, typeLabel(meta.type)));
-  card.append(head);
+  const cover = el('div', 'card-cover');
+  cover.append(coverImage(meta.cover));
+  const badge = typeBadge(meta.type);
+  badge.classList.add('card-badge');
+  cover.append(badge);
+  card.append(cover);
 
-  card.append(el('div', 'card-meta', `${meta.authorName ?? ''} · v${meta.version ?? ''}`));
-  card.append(el('p', 'card-desc', truncate(meta.description || '（无简介）', 120)));
+  card.append(el('h3', 'card-name', meta.name));
+  card.append(el('p', 'card-desc', meta.description || '（无简介）'));
 
   const foot = el('div', 'card-foot');
+  foot.append(el('span', 'card-author', `@${meta.authorName ?? '匿名'}`));
   foot.append(el('span', null, `⬇ ${meta.downloads ?? 0}`));
-  foot.append(el('span', null, formatTime(meta.updated)));
   card.append(foot);
 
   const open = () => openDetail(meta.id);
   card.addEventListener('click', open);
   card.addEventListener('keydown', event => {
-    if (event.key === 'Enter') open();
+    if (event.key === 'Enter' || event.key === ' ') {
+      event.preventDefault();
+      open();
+    }
   });
   return card;
 }
@@ -485,16 +564,11 @@ async function loadList({ reset } = {}) {
     state.packs = [];
   }
   try {
-    const res = await W.api.list({
-      q: state.q,
-      type: state.type,
-      sort: state.sort,
-      limit: state.limit,
-      offset: state.offset,
-    });
+    const res = await W.api.list({ q: state.q, type: state.type, limit: state.limit, offset: state.offset });
     state.total = res.total ?? 0;
     const page = res.packs ?? [];
     state.packs = reset ? page : state.packs.concat(page);
+    for (const meta of page) state.metaById.set(meta.id, meta);
     state.offset = state.packs.length;
     renderGrid();
   } catch (error) {
@@ -504,39 +578,27 @@ async function loadList({ reset } = {}) {
   }
 }
 
-// ==================== 5. 详情 ====================
+// ==================== 5. 详情弹层 ====================
 function renderPreview(pack) {
   const box = el('div');
-
-  if (pack.type === 'extension') {
-    const entries = pack.worldbookEntries ?? [];
-    if (entries.length === 0) {
-      box.append(el('p', 'hint', '（无条目）'));
-      return box;
-    }
-    for (const entry of entries) {
-      const item = el('div', 'preview-entry');
-      item.append(el('div', 'preview-name', entry.name ?? ''));
-      item.append(el('div', 'preview-content', truncate(entry.content ?? '', 160)));
-      box.append(item);
-    }
-    return box;
-  }
-
-  let rendered;
+  let entries;
   try {
-    rendered = W.packToWorldbookEntries(pack);
+    entries = W.packToWorldbookEntries(pack);
   } catch {
-    rendered = null;
+    entries = null;
   }
-  if (!rendered) {
+  if (!entries) {
     box.append(el('p', 'hint', '无法渲染预览'));
     return box;
   }
-  for (const entry of rendered) {
+  if (entries.length === 0) {
+    box.append(el('p', 'hint', '（无条目）'));
+    return box;
+  }
+  for (const entry of entries) {
     const item = el('div', 'preview-entry');
     item.append(el('div', 'preview-name', entry.name ?? ''));
-    item.append(el('pre', 'preview-content', entry.content ?? ''));
+    item.append(el('div', 'preview-content', truncate(entry.content ?? '', 200)));
     box.append(item);
   }
   return box;
@@ -578,14 +640,20 @@ function renderDetail(pack, installed) {
   const body = $('#detailBody');
   body.replaceChildren();
 
+  const cover = el('div', 'detail-cover');
+  cover.append(coverImage(pack.cover));
+  body.append(cover);
+
   const head = el('div', 'detail-head');
   head.append(el('h2', 'detail-name', pack.name));
-  head.append(el('span', `badge badge-${pack.type}`, typeLabel(pack.type)));
+  head.append(typeBadge(pack.type));
   body.append(head);
 
   const author = pack.author ?? {};
   body.append(el('div', 'detail-meta', `作者：${author.name ?? ''}${author.discord ? `（Discord: ${author.discord}）` : ''}`));
   body.append(el('div', 'detail-meta', `版本：v${pack.version ?? ''}`));
+  const meta = state.metaById.get(pack.id);
+  if (meta) body.append(el('div', 'detail-meta', `下载数：${meta.downloads ?? 0}`));
 
   if (Array.isArray(pack.tags) && pack.tags.length) {
     const tagRow = el('div', 'tag-row');
@@ -595,7 +663,7 @@ function renderDetail(pack, installed) {
 
   body.append(el('p', 'detail-desc', pack.description || '（无简介）'));
 
-  body.append(el('h3', 'section-title', '条目预览'));
+  body.append(el('h3', 'section-title', '落地预览（写入世界书的条目）'));
   body.append(renderPreview(pack));
   body.append(renderActions(pack, installed));
 }
@@ -657,13 +725,12 @@ async function doUninstall(id) {
   }
 }
 
-// ==================== 6. 上传 ====================
-let entryDrafts = [];
-
+// ==================== 6. 上传：条目编辑器（世界书导入 + 逐条编辑 + 分页） ====================
 function newEntry() {
   return {
     name: '',
     content: '',
+    enabled: true,
     constant: false,
     keys: '',
     keysSecondary: '',
@@ -679,14 +746,31 @@ function newEntry() {
   };
 }
 
+/** 世界书条目 → 编辑器草稿：数值转字符串、关键词数组转逗号文本，并保留原数组防重新解析破坏正则/逗号 */
+function entryToDraft(entry) {
+  return {
+    ...entry,
+    keys: entry.keys.join(', '),
+    keysSecondary: entry.keysSecondary.join(', '),
+    importedKeys: [...entry.keys],
+    importedKeysSecondary: [...entry.keysSecondary],
+    depth: String(entry.depth),
+    order: String(entry.order),
+    probability: String(entry.probability),
+    sticky: entry.sticky === null ? '' : String(entry.sticky),
+    cooldown: entry.cooldown === null ? '' : String(entry.cooldown),
+    delay: entry.delay === null ? '' : String(entry.delay),
+  };
+}
+
 function buildEntryObject(draft) {
   return {
     name: draft.name.trim(),
     content: draft.content,
-    enabled: true,
+    enabled: draft.enabled !== false,
     constant: !!draft.constant,
-    keys: splitList(draft.keys),
-    keysSecondary: splitList(draft.keysSecondary),
+    keys: draft.importedKeys ? [...draft.importedKeys] : splitList(draft.keys),
+    keysSecondary: draft.importedKeysSecondary ? [...draft.importedKeysSecondary] : splitList(draft.keysSecondary),
     position: draft.position || 'after_char',
     depth: intOr(draft.depth, 0),
     order: intOr(draft.order, 100),
@@ -699,104 +783,8 @@ function buildEntryObject(draft) {
   };
 }
 
-function packBase() {
-  return {
-    format: 'wxhl-mod@1',
-    id: state.draftId,
-    name: $('#upName').value.trim(),
-    type: $('#upType').value,
-    version: $('#upVersion').value.trim(),
-    author: { name: $('#upAuthor').value.trim(), discord: $('#upDiscord').value.trim() },
-    tags: splitList($('#upTags').value),
-    description: $('#upDesc').value,
-    requires: { cardVersion: '' },
-  };
-}
-
-function buildPackForPreview() {
-  const pack = packBase();
-  pack.worldbookEntries = entryDrafts.map(buildEntryObject);
-  return pack;
-}
-
-function buildPackForSubmit() {
-  const pack = packBase();
-  if (pack.type === 'extension') {
-    pack.worldbookEntries = entryDrafts.map(buildEntryObject);
-    return pack;
-  }
-  const raw = $('#jsonPaste').value.trim();
-  let parsed;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (error) {
-    throw new Error('JSON 解析失败：' + error.message);
-  }
-  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
-    throw new Error('粘贴的内容必须是 JSON 对象');
-  }
-  if (pack.type === 'build') pack.build = parsed;
-  else pack.character = parsed;
-  return pack;
-}
-
-function validatePack(pack) {
-  if (!pack.name) return '请填写名称';
-  if (!/^\d+\.\d+\.\d+$/.test(pack.version)) return '版本号须为 x.y.z（如 1.0.0）';
-  if (!pack.author.name) return '请填写作者名';
-  if (pack.type === 'extension') {
-    if (pack.worldbookEntries.length === 0) return '内容包至少要有一条世界书条目';
-    for (const entry of pack.worldbookEntries) {
-      if (!entry.name) return '每条条目都要有名称';
-      if (!entry.content) return `条目「${entry.name || '（未命名）'}」缺少正文`;
-      if (!entry.constant && entry.keys.length === 0) return `条目「${entry.name}」是绿灯，至少要有一个主关键词`;
-    }
-  }
-  return '';
-}
-
-function updatePreview() {
-  const type = $('#upType').value;
-  $('#extSection').hidden = type !== 'extension';
-  $('#jsonSection').hidden = type === 'extension';
-  if (type !== 'extension') return;
-  try {
-    $('#packPreview').textContent = JSON.stringify(buildPackForPreview(), null, 2);
-  } catch (error) {
-    $('#packPreview').textContent = '（预览生成失败：' + error.message + '）';
-  }
-}
-
-function field(labelText, control, extraClass) {
-  const wrap = el('label', 'field' + (extraClass ? ' ' + extraClass : ''));
-  wrap.append(el('span', 'field-label', labelText));
-  wrap.append(control);
-  return wrap;
-}
-
-function draftTextInput(draft, key) {
-  const input = document.createElement('input');
-  input.type = 'text';
-  input.value = draft[key] ?? '';
-  input.addEventListener('input', () => {
-    draft[key] = input.value;
-    updatePreview();
-  });
-  return input;
-}
-
-function draftTextarea(draft, key, rows) {
-  const area = document.createElement('textarea');
-  area.rows = rows;
-  area.value = draft[key] ?? '';
-  area.addEventListener('input', () => {
-    draft[key] = area.value;
-    updatePreview();
-  });
-  return area;
-}
-
 const CHECK_LABEL = {
+  enabled: '启用此条目',
   constant: '蓝灯常驻（不靠关键词）',
   preventRecursion: '防止递归（prevent incoming）',
   excludeRecursion: '排除递归（prevent outgoing）',
@@ -806,72 +794,700 @@ function draftCheckbox(draft, key) {
   const input = document.createElement('input');
   input.type = 'checkbox';
   input.checked = !!draft[key];
-  input.addEventListener('change', () => {
-    draft[key] = input.checked;
-    updatePreview();
-  });
+  input.addEventListener('change', () => { draft[key] = input.checked; });
   const wrap = el('label', 'field check');
   wrap.append(input);
   wrap.append(el('span', 'field-label', CHECK_LABEL[key] ?? key));
   return wrap;
 }
 
-function draftPositionSelect(draft) {
-  const select = document.createElement('select');
-  const options = [
-    ['after_char', '角色定义后'],
-    ['before_char', '角色定义前'],
-    ['at_depth', '指定深度'],
-  ];
-  for (const [value, label] of options) {
-    const option = document.createElement('option');
-    option.value = value;
-    option.textContent = label;
-    select.append(option);
-  }
-  select.value = draft.position || 'after_char';
-  select.addEventListener('change', () => {
-    draft.position = select.value;
-    updatePreview();
+function draftTextInput(draft, key) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = draft[key] ?? '';
+  input.addEventListener('input', () => {
+    draft[key] = input.value;
+    if (key === 'keys') delete draft.importedKeys; // 改过输入框 → 按逗号重新解析
+    if (key === 'keysSecondary') delete draft.importedKeysSecondary;
   });
+  return input;
+}
+
+function draftTextarea(draft, key, rows) {
+  const area = document.createElement('textarea');
+  area.rows = rows;
+  area.value = draft[key] ?? '';
+  area.addEventListener('input', () => { draft[key] = area.value; });
+  return area;
+}
+
+function draftPositionSelect(draft) {
+  const select = selectInput(
+    [
+      ['after_char', '角色定义后'],
+      ['before_char', '角色定义前'],
+      ['at_depth', '指定深度'],
+    ],
+    draft.position || 'after_char',
+  );
+  select.addEventListener('change', () => { draft.position = select.value; });
   return select;
 }
 
-function entryRow(draft, index) {
-  const row = el('div', 'entry-row');
+function createEntryEditor({ listEl, pagerEl, prevBtn, nextBtn, pageInfo, addBtn, fileInput, statusEl }) {
+  let drafts = [];
+  let page = 0;
+  let busy = false;
+  let revision = 0;
 
-  const head = el('div', 'entry-head');
-  head.append(el('span', 'entry-index', `条目 ${index + 1}`));
-  head.append(
-    button('删除', 'danger small', () => {
-      entryDrafts.splice(index, 1);
-      if (entryDrafts.length === 0) entryDrafts.push(newEntry());
-      renderEntriesEditor();
-    }),
-  );
-  row.append(head);
+  function entryRow(draft, index) {
+    const row = el('div', 'entry-row');
+    const head = el('div', 'entry-head');
+    head.append(el('span', 'entry-index', `条目 ${index + 1}`));
+    head.append(
+      button('删除', 'danger small', () => {
+        drafts.splice(index, 1);
+        if (drafts.length === 0) drafts.push(newEntry());
+        render();
+      }),
+    );
+    row.append(head);
 
-  row.append(field('名称', draftTextInput(draft, 'name')));
-  row.append(field('正文', draftTextarea(draft, 'content', 4), 'full'));
-  row.append(draftCheckbox(draft, 'constant'));
-  row.append(field('绿灯关键词（逗号分隔）', draftTextInput(draft, 'keys')));
-  row.append(field('次要关键词（逗号分隔）', draftTextInput(draft, 'keysSecondary')));
-  row.append(field('插入位置', draftPositionSelect(draft)));
-  row.append(field('depth', draftTextInput(draft, 'depth')));
-  row.append(field('order', draftTextInput(draft, 'order')));
-  row.append(field('概率（0-100）', draftTextInput(draft, 'probability')));
-  row.append(draftCheckbox(draft, 'preventRecursion'));
-  row.append(draftCheckbox(draft, 'excludeRecursion'));
-  row.append(field('sticky（留空为无）', draftTextInput(draft, 'sticky')));
-  row.append(field('cooldown（留空为无）', draftTextInput(draft, 'cooldown')));
-  row.append(field('delay（留空为无）', draftTextInput(draft, 'delay')));
-  return row;
+    row.append(field('名称', draftTextInput(draft, 'name')));
+    row.append(field('正文', draftTextarea(draft, 'content', 4), 'full'));
+    row.append(draftCheckbox(draft, 'enabled'));
+    row.append(draftCheckbox(draft, 'constant'));
+    if (draft.importedKeys || draft.importedKeysSecondary) {
+      row.append(el('p', 'hint', '原关键词已完整保留；修改关键词输入框后，将按逗号分隔重新解析。'));
+    }
+    row.append(field('绿灯关键词（逗号分隔）', draftTextInput(draft, 'keys')));
+    row.append(field('次要关键词（逗号分隔）', draftTextInput(draft, 'keysSecondary')));
+    row.append(field('插入位置', draftPositionSelect(draft)));
+    row.append(field('depth', draftTextInput(draft, 'depth')));
+    row.append(field('order', draftTextInput(draft, 'order')));
+    row.append(field('概率（0-100）', draftTextInput(draft, 'probability')));
+    row.append(draftCheckbox(draft, 'preventRecursion'));
+    row.append(draftCheckbox(draft, 'excludeRecursion'));
+    row.append(field('sticky（留空为无）', draftTextInput(draft, 'sticky')));
+    row.append(field('cooldown（留空为无）', draftTextInput(draft, 'cooldown')));
+    row.append(field('delay（留空为无）', draftTextInput(draft, 'delay')));
+    return row;
+  }
+
+  function render() {
+    const pages = Math.max(1, Math.ceil(drafts.length / ENTRY_PAGE_SIZE));
+    page = Math.min(Math.max(0, page), pages - 1);
+    const start = page * ENTRY_PAGE_SIZE;
+    listEl.replaceChildren(...drafts.slice(start, start + ENTRY_PAGE_SIZE).map((draft, i) => entryRow(draft, start + i)));
+    pagerEl.hidden = pages <= 1;
+    prevBtn.disabled = page === 0;
+    nextBtn.disabled = page === pages - 1;
+    pageInfo.textContent = `第 ${page + 1} / ${pages} 页，共 ${drafts.length} 条`;
+  }
+
+  addBtn.addEventListener('click', () => {
+    drafts.push(newEntry());
+    page = Math.floor((drafts.length - 1) / ENTRY_PAGE_SIZE);
+    render();
+  });
+  prevBtn.addEventListener('click', () => { if (page > 0) { page -= 1; render(); } });
+  nextBtn.addEventListener('click', () => { page += 1; render(); });
+
+  async function importSelectedFile() {
+    const file = fileInput.files?.[0];
+    if (!file) return;
+    const current = ++revision;
+    busy = true;
+    statusEl.classList.remove('error-text');
+    statusEl.textContent = '正在读取世界书…';
+    try {
+      if (file.size > W.MAX_IMPORT_BYTES) throw new Error('文件过大，请使用 10 MB 以内的世界书 JSON');
+      const text = await file.text();
+      if (current !== revision) return;
+      const result = W.parseWorldbookJson(text, file.name);
+      drafts = result.entries.map(entryToDraft);
+      page = 0;
+      statusEl.textContent =
+        `已导入 ${result.summary.total} 条，其中 ${result.summary.disabled} 条禁用。` +
+        (result.summary.generatedNames ? `${result.summary.generatedNames} 条未命名条目已生成名称。` : '') +
+        '请检查条目并填写名称、作者，点击「提交」后才会上传。';
+      render();
+    } catch (error) {
+      if (current !== revision) return;
+      statusEl.classList.add('error-text');
+      statusEl.textContent = error.message || '读取失败，原草稿已保留';
+    } finally {
+      if (current === revision) {
+        fileInput.value = '';
+        busy = false;
+      }
+    }
+  }
+  fileInput.addEventListener('change', importSelectedFile);
+
+  return {
+    reset() {
+      revision += 1;
+      busy = false;
+      fileInput.value = '';
+      statusEl.textContent = '';
+      statusEl.classList.remove('error-text');
+      drafts = [newEntry()];
+      page = 0;
+      render();
+    },
+    getEntries() {
+      // 整行留空（名字与正文都空）的草稿不提交——默认那一行空草稿不该变成一条非法条目
+      return drafts.filter(draft => String(draft.name ?? '').trim() || String(draft.content ?? '').trim()).map(buildEntryObject);
+    },
+    isBusy() {
+      return busy;
+    },
+  };
 }
 
-function renderEntriesEditor() {
-  const box = $('#entriesEditor');
-  box.replaceChildren(...entryDrafts.map((draft, index) => entryRow(draft, index)));
-  updatePreview();
+function mountEntryEditor(mountEl, { title, hint }) {
+  const wrap = el('div');
+  const head = el('div', 'row-between');
+  head.append(el('h3', 'section-title', title));
+  const addBtn = button('+ 添加条目', 'small');
+  head.append(addBtn);
+  wrap.append(head);
+
+  const fileWrap = el('label', 'field full');
+  fileWrap.append(el('span', 'field-label', '从酒馆导出的世界书 JSON 导入'));
+  const fileInput = document.createElement('input');
+  fileInput.type = 'file';
+  fileInput.accept = '.json,application/json';
+  fileWrap.append(fileInput);
+  wrap.append(fileWrap);
+  if (hint) wrap.append(el('p', 'hint', hint));
+
+  const statusEl = el('p', 'hint status-line');
+  statusEl.setAttribute('role', 'status');
+  statusEl.setAttribute('aria-live', 'polite');
+  wrap.append(statusEl);
+
+  const listEl = el('div');
+  wrap.append(listEl);
+
+  const pagerEl = el('div', 'row-between');
+  const prevBtn = button('上一页', 'small');
+  const pageInfo = el('span', 'hint');
+  const nextBtn = button('下一页', 'small');
+  pagerEl.append(prevBtn, pageInfo, nextBtn);
+  wrap.append(pagerEl);
+
+  mountEl.append(wrap);
+  return createEntryEditor({ listEl, pagerEl, prevBtn, nextBtn, pageInfo, addBtn, fileInput, statusEl });
+}
+
+// ==================== 6. 上传：可增删的行列表（任务/成就） ====================
+function boundInput(obj, key) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = obj[key] ?? '';
+  input.addEventListener('input', () => { obj[key] = input.value; });
+  return input;
+}
+
+function createTaskList({ listEl, addBtn, label, fields }) {
+  const items = [];
+  function render() {
+    listEl.replaceChildren(
+      ...items.map((item, index) => {
+        const row = el('div', 'entry-row');
+        const head = el('div', 'entry-head');
+        head.append(el('span', 'entry-index', `${label} ${index + 1}`));
+        head.append(button('删除', 'danger small', () => { items.splice(index, 1); render(); }));
+        row.append(head);
+        for (const [key, text] of fields) row.append(field(text, boundInput(item, key)));
+        return row;
+      }),
+    );
+  }
+  addBtn.addEventListener('click', () => {
+    items.push(Object.fromEntries(fields.map(([key]) => [key, ''])));
+    render();
+  });
+  return {
+    get() {
+      return items
+        .map(item => Object.fromEntries(Object.entries(item).map(([key, value]) => [key, value.trim()])))
+        .filter(item => Object.values(item).some(value => value));
+    },
+    reset() {
+      items.length = 0;
+      render();
+    },
+  };
+}
+
+function mountTaskList(mountEl, { title, label, fields }) {
+  const wrap = el('div');
+  const head = el('div', 'row-between');
+  head.append(el('h3', 'section-title', title));
+  const addBtn = button('+ 添加', 'small');
+  head.append(addBtn);
+  wrap.append(head);
+  const listEl = el('div');
+  wrap.append(listEl);
+  mountEl.append(wrap);
+  return createTaskList({ listEl, addBtn, label, fields });
+}
+
+// ==================== 6. 上传：各类结构表单 ====================
+const TASK_FIELDS = [
+  ['名称', '名称'],
+  ['说明', '说明'],
+  ['奖励', '奖励（选填）'],
+];
+const ACHIEVEMENT_FIELDS = [
+  ['名称', '名称'],
+  ['说明', '说明'],
+  ['难度', '难度（选填）'],
+  ['奖励', '奖励（选填）'],
+];
+
+function commonEntryProblems(entries) {
+  if (entries.length === 0) return '至少要有一条世界书条目';
+  for (const entry of entries) {
+    if (!entry.name) return '每条条目都要有名称';
+    if (!entry.content) return `条目「${entry.name || '（未命名）'}」缺少正文`;
+    if (!entry.constant && entry.keys.length === 0) return `条目「${entry.name}」是绿灯，至少要有一个主关键词（或设为蓝灯）`;
+  }
+  return '';
+}
+
+function createMechanismSection() {
+  const root = el('section', 'type-section');
+  root.append(el('p', 'hint', '机制拓展 = 世界书条目集合；渲染为绿灯条目并加上 [回廊mod][机制拓展] 前缀。'));
+  const editor = mountEntryEditor(root, {
+    title: '世界书条目',
+    hint: '也可以直接导入一份从酒馆导出的世界书 JSON 覆盖当前条目。',
+  });
+  return {
+    el: root,
+    reset: () => editor.reset(),
+    build: () => ({ 条目: editor.getEntries() }),
+    validate: () => commonEntryProblems(editor.getEntries()),
+    isBusy: () => editor.isBusy(),
+  };
+}
+
+function createEventSection() {
+  const root = el('section', 'type-section');
+  const editor = mountEntryEditor(root, {
+    title: '事件条目',
+    hint: '每个事件条目名必须以 事件_ 开头（推荐 事件_<包名>_<事件名>，避免与其他包撞名）。事件条目一律按绿灯装填，关键词由你写。',
+  });
+
+  root.append(el('h3', 'section-title', '控制器条目（可选）'));
+  const grid = el('div', 'form');
+  const ctrlName = textInput('EJS/<包名>控制器');
+  const ctrlBody = textArea(5, "<% const 事件 = getwi('事件_<包名>_…'); %>");
+  grid.append(field('名称（须以 EJS/ 开头）', ctrlName), field('正文（EJS 模板）', ctrlBody, 'full'));
+  root.append(grid);
+  root.append(el('p', 'hint', "控制器与主卡控制器并行渲染；正文里用 getwi('事件_…') 挑事件。名称与正文都留空则不提交控制器。"));
+
+  function controller() {
+    const name = ctrlName.value.trim();
+    const body = ctrlBody.value;
+    if (!name && !body.trim()) return null;
+    if (!/^EJS\//.test(name)) throw new Error('控制器条目名必须以 EJS/ 开头');
+    if (!body.trim()) throw new Error('控制器正文不能为空');
+    return { 名称: name, 正文: body };
+  }
+
+  return {
+    el: root,
+    reset() {
+      editor.reset();
+      ctrlName.value = '';
+      ctrlBody.value = '';
+    },
+    build() {
+      const 控制器条目 = controller();
+      return 控制器条目 ? { 事件条目: editor.getEntries(), 控制器条目 } : { 事件条目: editor.getEntries() };
+    },
+    validate() {
+      const entries = editor.getEntries();
+      if (entries.length === 0) return '事件包至少要有一条事件条目';
+      for (const entry of entries) {
+        if (!entry.name) return '每条事件条目都要有名称';
+        if (!entry.name.startsWith('事件_')) return `事件条目名必须以 事件_ 开头：「${entry.name}」`;
+        if (!entry.content) return `条目「${entry.name}」缺少正文`;
+        if (!entry.constant && entry.keys.length === 0) return `条目「${entry.name}」是绿灯，至少要有一个主关键词（或设为蓝灯）`;
+      }
+      return '';
+    },
+    isBusy: () => editor.isBusy(),
+  };
+}
+
+function createDungeonSection() {
+  const root = el('section', 'type-section');
+  root.append(el('h3', 'section-title', '副本信息'));
+  const grid = el('div', 'form');
+  const name = textInput('雾中列车');
+  const category = selectInput([['和平', '和平'], ['阵营', '阵营'], ['血腥', '血腥']], '和平');
+  const level = document.createElement('input');
+  level.type = 'number';
+  level.min = '1';
+  level.step = '1';
+  level.value = '1';
+  const limit = textInput('三天');
+  grid.append(field('副本名称 *', name), field('副本类型', category), field('基准等级 *', level), field('时间限制', limit));
+  const background = textArea(3);
+  const map = textArea(3);
+  const enemies = textArea(3);
+  grid.append(field('背景设定 *', background, 'full'), field('地图与区域 *', map, 'full'), field('敌人配置 *', enemies, 'full'));
+  root.append(grid);
+
+  root.append(el('h3', 'section-title', '主线任务 *'));
+  const mainGrid = el('div', 'form');
+  const mainName = textInput();
+  const mainDesc = textArea(3);
+  const mainReward = textInput();
+  mainGrid.append(field('名称 *', mainName), field('说明 *', mainDesc, 'full'), field('奖励（选填）', mainReward));
+  root.append(mainGrid);
+
+  const sub = mountTaskList(root, { title: '支线任务', label: '支线任务', fields: TASK_FIELDS });
+  const world = mountTaskList(root, { title: '世界事件', label: '世界事件', fields: TASK_FIELDS });
+  const hidden = mountTaskList(root, { title: '隐藏任务', label: '隐藏任务', fields: TASK_FIELDS });
+  const achievements = mountTaskList(root, { title: '成就', label: '成就', fields: ACHIEVEMENT_FIELDS });
+
+  const gmGrid = el('div', 'form');
+  const gm = textArea(4);
+  gmGrid.append(field('GM 指导 *（主持话术与判定口径）', gm, 'full'));
+  root.append(gmGrid);
+
+  const editor = mountEntryEditor(root, {
+    title: '额外条目（可选）',
+    hint: '副本主体会渲染成 1 条绿灯条目（关键词 = 副本名称），这里再附加可选的世界书条目。',
+  });
+
+  return {
+    el: root,
+    reset() {
+      name.value = '';
+      category.value = '和平';
+      level.value = '1';
+      limit.value = '三天';
+      background.value = '';
+      map.value = '';
+      enemies.value = '';
+      mainName.value = '';
+      mainDesc.value = '';
+      mainReward.value = '';
+      gm.value = '';
+      sub.reset();
+      world.reset();
+      hidden.reset();
+      achievements.reset();
+      editor.reset();
+    },
+    build() {
+      return {
+        副本名称: name.value.trim(),
+        副本类型: category.value,
+        基准等级: intOr(level.value, 0),
+        时间限制: limit.value.trim() || '未指定',
+        背景设定: background.value,
+        地图与区域: map.value,
+        敌人配置: enemies.value,
+        主线任务: { 名称: mainName.value.trim(), 说明: mainDesc.value.trim(), 奖励: mainReward.value.trim() },
+        支线任务: sub.get(),
+        世界事件: world.get(),
+        隐藏任务: hidden.get(),
+        成就: achievements.get(),
+        GM指导: gm.value.trim(),
+        额外条目: editor.getEntries(),
+      };
+    },
+    validate() {
+      if (!name.value.trim()) return '请填写副本名称';
+      if (!(intOr(level.value, 0) >= 1)) return '基准等级须是不小于 1 的整数';
+      if (!background.value.trim()) return '请填写背景设定';
+      if (!map.value.trim()) return '请填写地图与区域';
+      if (!enemies.value.trim()) return '请填写敌人配置';
+      if (!mainName.value.trim()) return '主线任务需要名称';
+      if (!mainDesc.value.trim()) return '主线任务需要说明';
+      if (!gm.value.trim()) return 'GM 指导不能为空（主持话术与判定口径）';
+      return '';
+    },
+    isBusy: () => editor.isBusy(),
+  };
+}
+
+const EQUIP_SLOTS = ['主武器', '副武器', '头部', '躯干', '手部', '下装', '饰品'];
+const ATTRIBUTES = ['STR', 'AGI', 'CON', 'PER'];
+
+function createBuildSection() {
+  const root = el('section', 'type-section');
+  const grid = el('div', 'form');
+  const name = textInput('重装堡垒');
+  const role = textInput('物理破坏配合高容错换血');
+  const mainAttr = selectInput([['', '请选择'], ...ATTRIBUTES.map(a => [a, a])], '');
+  const subAttr = selectInput([['无', '无'], ...ATTRIBUTES.map(a => [a, a])], '无');
+  grid.append(field('构筑名 *', name), field('定位 *', role), field('主属性 *', mainAttr), field('副属性', subAttr));
+  root.append(grid);
+
+  // 头部组件（天赋 / 血统）
+  const headComponents = {};
+  for (const key of ['天赋', '血统']) {
+    const g = el('div', 'form');
+    const parts = { 名称: textInput('无'), 品质: textInput('无'), 属性加成: textInput('无'), 效果: textArea(2, '{ "力量+5": "始终生效" }') };
+    g.append(field(`${key}·名称`, parts.名称), field(`${key}·品质`, parts.品质), field(`${key}·属性加成`, parts.属性加成), field(`${key}·效果（JSON）`, parts.效果, 'full'));
+    headComponents[key] = parts;
+    root.append(el('h3', 'section-title', key));
+    root.append(g);
+  }
+
+  root.append(el('h3', 'section-title', '称号'));
+  const titleGrid = el('div', 'form');
+  const titleName = textInput('无');
+  const titleEffect = textArea(2, '{ "暴击率+5%": "常驻" }');
+  titleGrid.append(field('称号·名称', titleName), field('称号·效果（JSON）', titleEffect, 'full'));
+  root.append(titleGrid);
+
+  root.append(el('h3', 'section-title', '职业'));
+  const jobGrid = el('div', 'form');
+  const jobName = textInput('无');
+  const jobRarity = textInput('无');
+  const jobTreeName = textInput('无');
+  const jobTraits = textArea(2, '{ "特性名": "描述" }');
+  const jobSkills = textArea(3, '{ "职业技能名": { "类型": "主动", "效果": {} } }');
+  const jobInherited = textArea(3, '{ "传承技能名": { "类型": "被动", "效果": {} } }');
+  jobGrid.append(
+    field('职业·名称', jobName),
+    field('职业·稀有度', jobRarity),
+    field('转职树·名称', jobTreeName),
+    field('职业特性（JSON）', jobTraits, 'full'),
+    field('职业技能（JSON，技能名 → 技能）', jobSkills, 'full'),
+    field('传承技能（JSON，技能名 → 技能）', jobInherited, 'full'),
+  );
+  root.append(jobGrid);
+
+  root.append(el('h3', 'section-title', '通用技能（JSON，技能名 → 技能）'));
+  const commonSkills = textArea(3, '{ "重击": { "类型": "主动", "消耗": "10体力", "效果": { "伤害": "2d6" } } }');
+  const skillGrid = el('div', 'form');
+  skillGrid.append(field('通用技能', commonSkills, 'full'));
+  root.append(skillGrid);
+
+  root.append(el('h3', 'section-title', '主要装备（七槽，留空槽不提交）'));
+  const equipGrid = el('div', 'form');
+  const slots = {};
+  for (const slot of EQUIP_SLOTS) {
+    const parts = { 名称: textInput('无'), 品质: textInput('无'), 阶位: textInput('无'), 描述: textInput('无') };
+    slots[slot] = parts;
+    equipGrid.append(field(`${slot}·名称`, parts.名称), field(`${slot}·品质`, parts.品质), field(`${slot}·阶位`, parts.阶位), field(`${slot}·描述`, parts.描述));
+  }
+  root.append(equipGrid);
+
+  root.append(el('h3', 'section-title', '背包建议（JSON，物品名 → { 描述, 数量 }）'));
+  const bagGrid = el('div', 'form');
+  const bag = textArea(3, '{ "治疗药水": { "描述": "恢复 2d6 生命", "数量": 3 } }');
+  bagGrid.append(field('背包建议', bag, 'full'));
+  root.append(bagGrid);
+
+  function headPayload(key) {
+    const parts = headComponents[key];
+    return {
+      名称: parts.名称.value.trim() || '无',
+      品质: parts.品质.value.trim() || '无',
+      属性加成: parts.属性加成.value.trim() || '无',
+      效果: parseJsonObject(parts.效果.value, `${key}·效果`),
+    };
+  }
+
+  return {
+    el: root,
+    reset() {
+      name.value = '';
+      role.value = '';
+      mainAttr.value = '';
+      subAttr.value = '无';
+      for (const key of ['天赋', '血统']) {
+        const parts = headComponents[key];
+        parts.名称.value = '无';
+        parts.品质.value = '无';
+        parts.属性加成.value = '无';
+        parts.效果.value = '';
+      }
+      titleName.value = '无';
+      titleEffect.value = '';
+      jobName.value = '无';
+      jobRarity.value = '无';
+      jobTreeName.value = '无';
+      jobTraits.value = '';
+      jobSkills.value = '';
+      jobInherited.value = '';
+      commonSkills.value = '';
+      for (const slot of EQUIP_SLOTS) {
+        const parts = slots[slot];
+        parts.名称.value = '';
+        parts.品质.value = '无';
+        parts.阶位.value = '无';
+        parts.描述.value = '无';
+      }
+      bag.value = '';
+    },
+    build() {
+      const 主要装备 = {};
+      for (const slot of EQUIP_SLOTS) {
+        const parts = slots[slot];
+        const slotName = parts.名称.value.trim();
+        if (!slotName) continue;
+        主要装备[slot] = {
+          名称: slotName,
+          品质: parts.品质.value.trim() || '无',
+          阶位: parts.阶位.value.trim() || '无',
+          描述: parts.描述.value.trim() || '无',
+        };
+      }
+      return {
+        build: {
+          构筑名: name.value.trim(),
+          定位: role.value.trim(),
+          属性分配方向: { 主属性: mainAttr.value, 副属性: subAttr.value },
+          天赋: headPayload('天赋'),
+          血统: headPayload('血统'),
+          称号: { 名称: titleName.value.trim() || '无', 效果: parseJsonObject(titleEffect.value, '称号·效果') },
+          职业: {
+            名称: jobName.value.trim() || '无',
+            稀有度: jobRarity.value.trim() || '无',
+            职业特性: parseJsonObject(jobTraits.value, '职业特性'),
+            职业技能: parseJsonObject(jobSkills.value, '职业技能'),
+            传承技能: parseJsonObject(jobInherited.value, '传承技能'),
+            转职树: { 名称: jobTreeName.value.trim() || '无', 分支: {} },
+          },
+          通用技能: parseJsonObject(commonSkills.value, '通用技能'),
+          主要装备,
+          背包建议: parseJsonObject(bag.value, '背包建议'),
+        },
+      };
+    },
+    validate() {
+      if (!name.value.trim()) return '请填写构筑名';
+      if (!role.value.trim()) return '请填写定位';
+      if (!mainAttr.value) return '请选择主属性';
+      return '';
+    },
+    isBusy: () => false,
+  };
+}
+
+function createPersonaSection() {
+  const root = el('section', 'type-section');
+  const grid = el('div', 'form');
+  const name = textInput('雾中剑客');
+  const personality = textArea(2);
+  const likes = textInput('剑术, 雨夜');
+  const dislikes = textInput('噪音, 背叛');
+  const background = textArea(4);
+  const direction = textInput('敏捷双持 ➜ 影袭');
+  grid.append(
+    field('角色名 *', name),
+    field('性格', personality, 'full'),
+    field('爱好（逗号分隔）', likes),
+    field('厌恶（逗号分隔）', dislikes),
+    field('背景故事 *', background, 'full'),
+    field('构筑方向（选填）', direction, 'full'),
+  );
+  root.append(grid);
+  root.append(el('h3', 'section-title', '可选：粘贴构筑 JSON'));
+  const buildGrid = el('div', 'form');
+  const buildJson = textArea(5, '{ "构筑名": "…", "定位": "…", "属性分配方向": { "主属性": "AGI" } }');
+  buildGrid.append(field('构筑（完整 BuildPayload JSON，留空则不嵌入）', buildJson, 'full'));
+  root.append(buildGrid);
+
+  return {
+    el: root,
+    reset() {
+      name.value = '';
+      personality.value = '';
+      likes.value = '';
+      dislikes.value = '';
+      background.value = '';
+      direction.value = '';
+      buildJson.value = '';
+    },
+    build() {
+      const raw = buildJson.value.trim();
+      const persona = {
+        角色名: name.value.trim(),
+        性格: personality.value,
+        爱好: splitList(likes.value),
+        厌恶: splitList(dislikes.value),
+        背景故事: background.value,
+        构筑方向: direction.value.trim(),
+      };
+      if (raw) persona.构筑 = parseJsonObject(raw, '构筑');
+      return { persona };
+    },
+    validate() {
+      if (!name.value.trim()) return '请填写角色名';
+      if (!background.value.trim()) return '请填写背景故事';
+      return '';
+    },
+    isBusy: () => false,
+  };
+}
+
+// ==================== 6. 上传：装配 ====================
+const SECTIONS = {
+  mechanism: createMechanismSection(),
+  event: createEventSection(),
+  dungeon: createDungeonSection(),
+  build: createBuildSection(),
+  persona: createPersonaSection(),
+};
+const UPLOAD_TYPES = ['dungeon', 'event', 'mechanism', 'build', 'persona'];
+
+function renderUploadTypeNav() {
+  const nav = $('#uploadTypeNav');
+  const buttons = [];
+  for (const type of UPLOAD_TYPES) {
+    const btn = button(W.PACK_TYPE_LABEL[type], 'type-btn');
+    btn.dataset.value = type;
+    btn.addEventListener('click', () => setUploadType(type));
+    buttons.push(btn);
+    nav.append(btn);
+  }
+  nav.__buttons = buttons;
+}
+
+function setUploadType(type) {
+  state.uploadType = type;
+  const buttons = $('#uploadTypeNav').__buttons ?? [];
+  for (const btn of buttons) btn.classList.toggle('active', btn.dataset.value === type);
+  for (const [key, section] of Object.entries(SECTIONS)) section.el.hidden = key !== type;
+  $('#upError').textContent = '';
+}
+
+function packBase() {
+  return {
+    format: 'wxhl-mod@2',
+    id: state.draftId,
+    name: $('#upName').value.trim(),
+    type: state.uploadType,
+    version: $('#upVersion').value.trim(),
+    author: { name: $('#upAuthor').value.trim(), discord: $('#upDiscord').value.trim() },
+    tags: splitList($('#upTags').value),
+    description: $('#upDesc').value,
+    cover: $('#upCover').value.trim(),
+    requires: { cardVersion: '' },
+  };
+}
+
+function validateCommon(pack) {
+  if (!pack.name) return '请填写名称';
+  if (!/^\d+\.\d+\.\d+$/.test(pack.version)) return '版本号须为 x.y.z（如 1.0.0）';
+  if (!pack.author.name) return '请填写作者名';
+  if (!pack.description.trim()) return '请填写简介（列表卡片要显示）';
+  if (pack.cover && !/^https?:\/\/[^\s"'<>\\]+$/.test(pack.cover)) return '封面须是 http(s) 图片链接，且不含空白 / 引号 / 尖括号';
+  return '';
 }
 
 function genId() {
@@ -886,25 +1502,31 @@ function openUpload() {
   $('#upAuthor').value = '';
   $('#upDiscord').value = '';
   $('#upTags').value = '';
+  $('#upCover').value = '';
   $('#upDesc').value = '';
-  $('#upType').value = 'extension';
-  $('#jsonPaste').value = '';
   $('#upError').textContent = '';
-  entryDrafts = [newEntry()];
-  renderEntriesEditor();
+  for (const section of Object.values(SECTIONS)) section.reset();
+  // 若列表正筛选在某个类型，上传默认跟随该类型
+  setUploadType(W.PACK_TYPE_LABEL[state.type] ? state.type : 'dungeon');
 }
 
 async function submitUpload() {
   const errorBox = $('#upError');
   errorBox.textContent = '';
-  let pack;
+  const section = SECTIONS[state.uploadType];
+  if (section.isBusy()) {
+    errorBox.textContent = '世界书仍在读取，请稍候';
+    return;
+  }
+  let fragment;
   try {
-    pack = buildPackForSubmit();
+    fragment = section.build();
   } catch (error) {
     errorBox.textContent = error.message;
     return;
   }
-  const problem = validatePack(pack);
+  const pack = { ...packBase(), ...fragment };
+  const problem = validateCommon(pack) || section.validate();
   if (problem) {
     errorBox.textContent = problem;
     return;
@@ -915,7 +1537,7 @@ async function submitUpload() {
     const res = await W.api.upload(pack);
     showManageKey(res.id, res.manageKey);
   } catch (error) {
-    errorBox.textContent = error.message;
+    errorBox.textContent = error.message; // 服务端权威校验错误原样显示
   } finally {
     submit.disabled = false;
   }
@@ -951,33 +1573,20 @@ let searchTimer = 0;
 function init() {
   initAgreement();
 
+  renderTypeNav();
+  renderUploadTypeNav();
+  for (const section of Object.values(SECTIONS)) $('#uploadSections').append(section.el);
+
   $('#search').addEventListener('input', event => {
     state.q = event.target.value.trim();
     clearTimeout(searchTimer);
     searchTimer = setTimeout(() => loadList({ reset: true }), 300);
-  });
-  $('#filterType').addEventListener('change', event => {
-    state.type = event.target.value;
-    loadList({ reset: true });
-  });
-  $('#sortBy').addEventListener('change', event => {
-    state.sort = event.target.value;
-    loadList({ reset: true });
   });
   $('#loadMore').addEventListener('click', () => loadList({ reset: false }));
 
   $('#uploadBtn').addEventListener('click', openUpload);
   $('#uploadBack').addEventListener('click', showListView);
   $('#detailBack').addEventListener('click', showListView);
-
-  $('#addEntry').addEventListener('click', () => {
-    entryDrafts.push(newEntry());
-    renderEntriesEditor();
-  });
-  $('#upType').addEventListener('change', updatePreview);
-  for (const id of ['upName', 'upVersion', 'upAuthor', 'upDiscord', 'upTags', 'upDesc']) {
-    $('#' + id).addEventListener('input', updatePreview);
-  }
   $('#upSubmit').addEventListener('click', submitUpload);
 
   loadList({ reset: true });
