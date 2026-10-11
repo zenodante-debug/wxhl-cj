@@ -1181,6 +1181,8 @@ export function mountStatusbar(root: HTMLElement): () => void {
       const safeSubSkill = escapeAttr(subKeyBase + '.通用技能');
       const safeSubEquip = escapeAttr(subKeyBase + '.装备');
       const safeSubBag = escapeAttr(subKeyBase + '.背包');
+      const subResExpanded = _ui.expand_subs.has(subKeyBase + '.特殊资源');
+      const safeSubRes = escapeAttr(subKeyBase + '.特殊资源');
 
       h += '<div class="mate-sub">';
       h +=
@@ -1418,6 +1420,24 @@ export function mountStatusbar(root: HTMLElement): () => void {
         (subBagExpanded ? '' : ' hidden') +
         '">' +
         renderBagHtml(_.get(m, '背包', {}), targetPath + '.背包', false) +
+        '</div>';
+      h += '</div>';
+
+      /* ---------- 特殊资源子区块 ---------- */
+      h += '<div class="mate-sub" style="margin-top:4px;">';
+      h +=
+        '<div class="mate-sub-header" data-sub-key="' +
+        safeSubRes +
+        '"><span class="mate-sub-title" style="color:' +
+        subTitleColor +
+        ';">特殊资源</span><span class="mate-sub-toggle' +
+        (subResExpanded ? '' : ' collapsed') +
+        '">▼</span></div>';
+      h +=
+        '<div class="mate-sub-body' +
+        (subResExpanded ? '' : ' hidden') +
+        '">' +
+        renderResourceTree(_.get(m, '特殊资源', {}), targetPath + '.特殊资源', _ui.expand_subs, subKeyBase + '.特殊资源') +
         '</div>';
       h += '</div>';
 
