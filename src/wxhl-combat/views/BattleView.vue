@@ -231,6 +231,14 @@
               <option v-for="c in 技能候选(u)" :key="c.值" :value="c.值">{{ c.标签 }}</option>
             </select>
           </label>
+          <label class="slot slot-target" title="这次攻击用哪把武器：主武器 / 副武器 / 徒手">
+            <span class="slot-label">武器</span>
+            <select v-model="填写表[u.键].主要.武器来源">
+              <option value="">主武器（默认）</option>
+              <option v-if="u.副武器" value="副武器">副武器（{{ u.副武器.伤害骰 }}）</option>
+              <option value="徒手">徒手（{{ 徒手骰文本(u) }}）</option>
+            </select>
+          </label>
           <label class="slot">
             <span class="slot-label">次要</span>
             <select v-model="填写表[u.键].次要.值">
@@ -243,6 +251,14 @@
             <select v-model="填写表[u.键].次要.选择技能">
               <option value="">（先选一个）</option>
               <option v-for="c in 技能候选(u)" :key="c.值" :value="c.值">{{ c.标签 }}</option>
+            </select>
+          </label>
+          <label class="slot slot-target" title="这次攻击用哪把武器：主武器 / 副武器 / 徒手">
+            <span class="slot-label">武器</span>
+            <select v-model="填写表[u.键].次要.武器来源">
+              <option value="">主武器（默认）</option>
+              <option v-if="u.副武器" value="副武器">副武器（{{ u.副武器.伤害骰 }}）</option>
+              <option value="徒手">徒手（{{ 徒手骰文本(u) }}）</option>
             </select>
           </label>
           <label class="slot slot-target">
@@ -371,6 +387,7 @@ import { 可提交, 构造行动声明, type 行动槽填写 } from '../engine/a
 import { 造我方条目, 造技能展示, 造场地条目, 布局分布, 选中行动预览, 显示名, type 我方条目 } from '../engine/viewModel';
 import { 需要选技能, 技能候选 } from '../engine/actionOptions';
 import { 列行动选项 } from '../engine/actionOptions';
+import { 徒手伤害骰 } from '../engine/damage';
 import ShowLayer from './ShowLayer.vue';
 import { 演出开启 } from '../engine/showToggle';
 import type { 演出事件 } from '../engine/showEvents';
@@ -533,6 +550,12 @@ interface 界面条目 {
   目标: string;
   /** 本次释放**选中的技能**（`需要选技能` 的技能才有：规则里写了"选中技能"） */
   选择技能: string;
+  /**
+   * **释放来源**：这次攻击用哪把武器（主武器/副武器/徒手）—— 玩家实测：
+   * 「技能释放来源没有"选武器/徒手"这一栏 —— 武器骰该算哪一把，现在没得选」。
+   * 空串 = 主武器（老行为）。
+   */
+  武器来源: '' | '主武器' | '副武器' | '徒手';
 }
 
 /** 界面上的单位填写：主要/次要**各自**带目标，免费行动是"添加一条"的列表 */
@@ -544,7 +567,7 @@ interface 界面填写 {
   免费: 界面条目[];
 }
 
-const 空条目 = (): 界面条目 => ({ 值: '', 目标: '', 选择技能: '' });
+const 空条目 = (): 界面条目 => ({ 值: '', 目标: '', 选择技能: '', 武器来源: '' });
 const 空填写 = (): 界面填写 => ({ 主要: 空条目(), 次要: 空条目(), 反应: '', 免费: [] });
 
 /** 每个我方单位各自的槽位填写；键 = 状态.单位 的键 */
@@ -572,6 +595,7 @@ function 转引擎填写(u: 我方条目, 填: 界面填写, 默认目标: strin
       值: 条.值,
       目标: 有效目标(条.目标) ? 条.目标 : '',
       ...(选技能 ? { 选择技能: 选技能 } : {}),
+      ...(条.武器来源 ? { 武器来源: 条.武器来源 } : {}),
     };
   };
   if (填.主要.值.trim()) 出.主要 = 收(填.主要);
@@ -586,6 +610,11 @@ function 有效目标(键: string): boolean {
   if (!键) return false;
   const u = props.状态.单位[键];
   return !!u && u.HP_当前 > 0;
+}
+
+/** 徒手的骰子文本（下拉里显示"徒手（1d4）"） */
+function 徒手骰文本(u: 我方条目): string {
+  return 徒手伤害骰(u.阶位);
 }
 
 /** 我方的引擎填写（读界面填写 + 这个单位的默认目标） */
