@@ -16,7 +16,7 @@ import { deposit, loadStorage, saveStorage, withdraw, type StorageRoom } from '.
 import { 位阶修正值系数, 位阶属性软上限, 位阶档位, 位阶等级上限 } from './tier';
 import { editSpan, editText, escapeAttr } from './editable';
 import { canUseHubFacility, HUB_GATE_HINT } from '../hubGate';
-import { joinPath, renderResourceTree, renderSpecialStatusList } from './render';
+import { joinPath, renderCareerSection, renderResourceTree, renderSpecialStatusList } from './render';
 
 /** 挂载状态栏到 root 元素，返回卸载函数 */
 export function mountStatusbar(root: HTMLElement): () => void {
@@ -1396,25 +1396,7 @@ export function mountStatusbar(root: HTMLElement): () => void {
           editSpan(jPexpMax, targetPath + '.职业.PEXP_升级所需') +
           '</span></div>';
 
-        const jTraits = _.get(job, '职业特性', {}),
-          jtKeys = Object.keys(jTraits);
-        if (jtKeys.length > 0) {
-          h +=
-            '<div style="margin-top:6px;"><span class="mate-sub-title" style="color:#a09080;font-size:13px;">职业特性</span>';
-          jtKeys.forEach(function (k) {
-            h +=
-              '<div class="skill-line"><span style="color:#b8a070; font-weight:bold;">' +
-              k +
-              '</span> <br><span style="font-size:13px;color:#a09080;">' +
-              editText(_.get(jTraits[k], '效果', ''), targetPath + '.职业.职业特性.' + k + '.效果') +
-              '</span></div>';
-          });
-          h += '</div>';
-        }
-        h +=
-          '<div style="margin-top:6px;"><span class="mate-sub-title" style="color:#a09080;font-size:13px;">职业技能</span>' +
-          renderSkillsHtml(_.get(job, '职业技能', {}), targetPath + '.职业.职业技能') +
-          '</div>';
+        h += renderCareerSection(job, targetPath + '.职业', _ui.expand_subs, subKeyBase + '.职业', renderSkillsHtml);
 
         h += '</div>';
         h += '</div>';
@@ -1996,32 +1978,7 @@ export function mountStatusbar(root: HTMLElement): () => void {
           editSpan(_.get(subB, '值', 0), '契约者.职业.副属性加成.值'),
       );
 
-      $c.find('#job-skills').html(renderSkillsHtml(_.get(job, '职业技能', {}), '契约者.职业.职业技能'));
-      let jobTraits = _.get(job, '职业特性', {}),
-        jtHtml = '',
-        jtKeys = Object.keys(jobTraits);
-      if (jtKeys.length === 0) jtHtml = '<span class="empty-hint">暂无职业特性</span>';
-      else {
-        jtKeys.forEach(function (k) {
-          jtHtml +=
-            '<div class="skill-line"><span style="color:#b8a070; font-weight:bold;">' +
-            k +
-            '</span> <br><span style="font-size:13px;color:#a09080;">' +
-            editText(_.get(jobTraits[k], '效果', ''), '契约者.职业.职业特性.' + k + '.效果') +
-            '</span></div>';
-        });
-      }
-      $c.find('#job-traits').html(jtHtml);
-
-      const legacySkills = _.get(job, '传承技能', {});
-      const lsKeys = Object.keys(legacySkills);
-      let lsHtml = '';
-      if (lsKeys.length === 0) {
-        lsHtml = '<span class="empty-hint">暂无传承技能</span>';
-      } else {
-        lsHtml = renderSkillsHtml(legacySkills, '契约者.职业.传承技能');
-      }
-      $c.find('#job-legacy').html(lsHtml);
+      $c.find('#job-body').html(renderCareerSection(job, '契约者.职业', _ui.expand_subs, '契约者.职业', renderSkillsHtml));
 
       let genSkills = d('契约者.通用技能', {}),
         gsKeys = Object.keys(genSkills),
