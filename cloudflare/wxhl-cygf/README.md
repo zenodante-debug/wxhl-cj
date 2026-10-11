@@ -58,7 +58,27 @@ packs(id PK, name, type, version, author_name, author_discord, tags_json, descri
 
 ## 部署
 
-**Windows 双击运行（推荐，不用敲命令）**——在资源管理器里打开 `cloudflare/wxhl-cygf/`，**双击 `deploy.bat`**。
+### 方式一：Cloudflare 后台粘贴单文件（**2026-10-11 实际采用**，无需终端）
+
+参考 `wxhl-market` 的既有做法：它的 `worker.js` 是手写单文件，所以能直接在网页后台粘贴。
+工坊是 TS 多文件工程，先用 build-bundle 打成单文件再粘：
+
+```bash
+node cloudflare/wxhl-cygf/build-bundle.mjs   # 产出 worker.bundle.js（约 430KB，已随仓库提交）
+```
+
+然后：Workers & Pages → Create application → **Create Worker**（名字必须 `wxhl-cygf`）→ Deploy →
+**Edit code** → 全选 → 粘贴 `worker.bundle.js` 的内容 → Deploy。
+
+之后（可用 Wrangler 也可用 Cloudflare 后台 / API 完成）：
+- **D1 绑定**：Settings → Bindings → D1 database，变量名 `WORKSHOP_DB` → 选 `wxhl-cygf-db`
+- **管理密钥**：Settings → Variables → 添加**加密**变量 `WORKSHOP_ADMIN_KEY`；本地留存见 `.wxhl-cygf-admin-key.txt`（已在 .gitignore）
+- **自定义域**：Settings → Domains & Routes → 添加 `cygf.657868.xyz`（国内直连 workers.dev 不通，必须绑域名）
+- 冒烟：`node cloudflare/wxhl-cygf/smoke.mjs`
+
+### 方式二：Wrangler（脚本自动化）
+
+**Windows 双击运行**——在资源管理器里打开 `cloudflare/wxhl-cygf/`，**双击 `deploy.bat`**。
 它跟终端版做的是同一件事（检查登录 → 建 D1 并把 `database_id` 写回 `wrangler.toml` → 设管理密钥 → `deploy` → 跑冒烟），
 中途只需你：① 弹浏览器时点授权（未登录才会弹）② 把建库输出里的 `database_id` 整个粘进提示框 ③ 输入管理密钥。
 可重复运行（已建的库不重建、已填的 id 不覆盖）。
@@ -69,17 +89,13 @@ packs(id PK, name, type, version, author_name, author_discord, tags_json, descri
 bash cloudflare/wxhl-cygf/deploy.sh
 ```
 
-它依次做：检查登录 → 建 D1 并把 `database_id` **自动写回** `wrangler.toml` → 设管理密钥 → `deploy` → 跑冒烟。
-可重复运行（已建的库不重建、已填的 id 不覆盖）。中途只需你：未登录时先跑一次 `wrangler login`（弹浏览器），以及输入管理密钥。
-用 `WORKSHOP_ADMIN_KEY=xxx bash cloudflare/wxhl-cygf/deploy.sh` 可免去手输。
-
 **手动等价步骤**：
 
 ```bash
 npm install -g wrangler            # 或 npx wrangler
 wrangler login                     # ← 需要浏览器授权，交给用户操作
 wrangler d1 create wxhl-cygf-db
-# 把输出的 database_id 填进 wrangler.toml 的 [[d1_databases]].database_id（现在还是 PENDING_CREATE）
+# 把输出的 database_id 填进 wrangler.toml 的 [[d1_databases]].database_id
 wrangler secret put WORKSHOP_ADMIN_KEY   # 工坊主管理密钥（可留空，但那样 /api/admin/* 全 403）
 wrangler deploy                    # 在 cloudflare/wxhl-cygf/ 目录下执行
 node cloudflare/wxhl-cygf/smoke.mjs      # 部署后冒烟，全绿才算上线成功

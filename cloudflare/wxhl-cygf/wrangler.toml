@@ -14,7 +14,7 @@ globs = ["**/*.html", "**/page-lib.js"]
 [[d1_databases]]
 binding = "WORKSHOP_DB"
 database_name = "wxhl-cygf-db"
-database_id = "PENDING_CREATE"   # npx wrangler d1 create wxhl-cygf-db 后替换
+database_id = "0ee7b441-428d-4f4f-8be6-d8904dbb033b"   # npx wrangler d1 create wxhl-cygf-db 后替换
 
 # 国内直连 workers.dev 不通，必须绑自定义域（market 的既有教训）
 # 注意：TOML 注释行末尾不能有反斜杠——会被当续行符把下一行吞掉。
