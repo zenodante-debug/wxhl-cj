@@ -16,14 +16,14 @@ describe('桥客户端', () => {
     };
     const respond = (id, payload, ok = true) => {
       const data = { channel: 'wxhl-workshop:worldbook', kind: 'response', id, ok, ...(ok ? { payload } : { error: payload }) };
-      listeners.forEach(l => l({ data }));
+      listeners.forEach(l => l({ data, source: parentWindow }));
     };
     /** 用别的 channel 发一条同 id 的响应 */
     const respondChannel = (channel, id, payload) => {
-      listeners.forEach(l => l({ data: { channel, kind: 'response', id, ok: true, payload } }));
+      listeners.forEach(l => l({ data: { channel, kind: 'response', id, ok: true, payload }, source: parentWindow }));
     };
-    /** 原样灌任意消息体 */
-    const respondRaw = data => listeners.forEach(l => l({ data }));
+    /** 原样灌任意消息体；source 默认父窗口，可传自定义来源（伪造回包测试） */
+    const respondRaw = (data, source = parentWindow) => listeners.forEach(l => l({ data, source }));
     return { posted, respond, respondChannel, respondRaw, parentWindow, selfWindow };
   }
 
@@ -74,6 +74,23 @@ describe('桥客户端', () => {
     promise.then(() => (settled = true));
     await Promise.resolve();
     expect(settled).toBe(false); // 三条无关消息都没能结算这个请求
+    w.respond(sentId, { ok: true });
+    await expect(promise).resolves.toEqual({ ok: true });
+    bridge.destroy();
+  });
+
+  it('来自非 parentWindow 的、id 与 channel 都正确的响应被忽略（防伪造回包）', async () => {
+    const w = fakeWindows();
+    const bridge = createBridgeClient({ parentWindow: w.parentWindow, selfWindow: w.selfWindow });
+    const promise = bridge.request('handshake');
+    const sentId = w.posted[0].id;
+    // 另开一个窗口当「别的脚本」，回一条 id/channel 全对的响应
+    const foreign = { postMessage: vi.fn() };
+    w.respondRaw({ channel: 'wxhl-workshop:worldbook', kind: 'response', id: sentId, ok: true, payload: { forged: true } }, foreign);
+    let settled = false;
+    promise.then(() => (settled = true));
+    await Promise.resolve();
+    expect(settled).toBe(false); // 伪造回包没被采信，请求仍未结算
     w.respond(sentId, { ok: true });
     await expect(promise).resolves.toEqual({ ok: true });
     bridge.destroy();

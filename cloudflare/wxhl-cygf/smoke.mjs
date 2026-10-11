@@ -33,7 +33,16 @@ let deleted = false;
 
 try {
   const home = await fetch(`${base}/`);
+  const homeBody = await home.text();
   check('GET / 返回 HTML', home.ok && (home.headers.get('content-type') ?? '').includes('text/html'));
+  check('GET / 页面引用 page-lib.js', homeBody.includes('page-lib.js'));
+
+  // 单测把两个文本资源 mock 掉了，wrangler Text 规则配错（/page-lib.js 变成字符串 "undefined"）只有线上才暴露。
+  // 冒烟是唯一自动化验收，因此必须查「真实源码」而非只查 200。
+  const lib = await fetch(`${base}/page-lib.js`);
+  const libBody = await lib.text();
+  check('GET /page-lib.js 返回 JS', lib.ok && (lib.headers.get('content-type') ?? '').includes('javascript'));
+  check('GET /page-lib.js 是真实源码（非字符串 "undefined"）', libBody.includes('BRIDGE_CHANNEL') || libBody.includes('export '));
 
   const emptyList = await (await fetch(`${base}/api/packs`)).json();
   check('GET /api/packs 返回列表', Array.isArray(emptyList.packs) && typeof emptyList.total === 'number', `total=${emptyList.total}`);

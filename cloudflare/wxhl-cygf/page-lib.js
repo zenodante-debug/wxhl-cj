@@ -11,6 +11,8 @@ export function createBridgeClient({ parentWindow, selfWindow, timeoutMs = 30000
   let seq = 0;
   const pending = new Map();
   const onMessage = event => {
+    // 只认宿主（父窗口）的回包：酒馆主框架里任何脚本都能 postMessage，不校验来源就会把页面骗成「已安装/安装成功」
+    if (event.source !== parentWindow) return;
     const d = event?.data;
     if (!d || d.channel !== BRIDGE_CHANNEL || d.kind !== 'response') return;
     const entry = pending.get(d.id);

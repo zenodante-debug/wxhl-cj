@@ -42,7 +42,7 @@ packs(id PK, name, type, version, author_name, author_discord, tags_json, descri
 
 | 方法/路径 | 说明 |
 |---|---|
-| POST `/api/admin/list` | `{ key }` → `{ total, rows }`，审计全库（上限 200 条） |
+| POST `/api/admin/list` | `{ key }` → `{ total, rows }`，已发布包（上限 200 条，无分页） |
 | POST `/api/admin/delete` | `{ key, ids: [] }` → `{ ok, deleted }`，无视玩家密钥定向删 |
 | POST `/api/admin/reset-key` | `{ key, id }` → `{ ok, id, manageKey }`，玩家丢密钥时找回（新密钥回一次） |
 
@@ -93,8 +93,9 @@ wrangler d1 execute wxhl-cygf-db --remote --command "SELECT id, name, author_nam
 
 - **内容包格式契约**是**单一真源**，在 `src/wxhl-cygf/pack/`（zod 4）。`worker.ts` 直接
   `import { ContentPack } from '../../src/wxhl-cygf/pack'`——**不要在本目录另写一份**，格式改动只改宿主仓、云端跟着重新部署即可。
-- **桥协议常量**两边一致：`page-lib.js` 的 `BRIDGE_CHANNEL`（`wxhl-workshop:worldbook`）、
-  `WORKSHOP_WORLDBOOK`（`无限回廊mod`）与 `src/wxhl-cygf/bridge.ts` 一一对应，**改协议两边同步**。
+- **桥协议常量**两边一致：`page-lib.js` 的 `BRIDGE_CHANNEL`（`wxhl-workshop:worldbook`）对应
+  `src/wxhl-cygf/bridge.ts` 的 `BRIDGE_CHANNEL`；`WORKSHOP_WORLDBOOK`（`无限回廊mod`）对应
+  `src/wxhl-cygf/actions.ts` 的 `WORKSHOP_WORLDBOOK_NAME`——**改协议两边同步**。
 - 页面逻辑层 `page-lib.js` 是纯 JS ES module，浏览器直接 import、vitest 直接测，与 `workshop.html` 分离。
 
 ## 本地验证（不需要网络）

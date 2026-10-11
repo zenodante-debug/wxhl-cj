@@ -5,6 +5,10 @@ import { ContentPack } from '../../src/wxhl-cygf/pack';
 import WORKSHOP_HTML from './workshop.html';
 import PAGE_LIB from './page-lib.js';
 
+// isolate 记忆化：spec 要求「首次请求自动建表」，DDL 每请求跑一遍会白烧三次 D1 往返（也计入免费版写配额）。
+// 失败即重置，下次请求重试；模块顶层只声明变量、不在导入时建表。
+let schemaReady: Promise<void> | null = null;
+
 export interface PackRow {
   id: string;
   name: string;
@@ -251,7 +255,11 @@ export default {
         return new Response(PAGE_LIB, { headers: { 'Content-Type': 'application/javascript; charset=utf-8' } });
       }
 
-      await ensureSchema(env.WORKSHOP_DB);
+      schemaReady ??= ensureSchema(env.WORKSHOP_DB).catch(e => {
+        schemaReady = null; // 建表失败 → 清掉缓存的 rejected promise，下次请求重试
+        throw e;
+      });
+      await schemaReady;
       const db = env.WORKSHOP_DB;
 
       // 管理端点（/api/admin/*）：Worker secret WORKSHOP_ADMIN_KEY；没配就一律 403（fail-closed，market 惯例）
