@@ -43,12 +43,14 @@ export function installAuthRelay(): () => void {
     ($(`#${PANEL_ID} iframe.wxhl-cygf-frame`)[0] as HTMLIFrameElement | undefined)?.contentWindow ?? null;
 
   const listener = (event: MessageEvent) => {
+    // 先归类：页面上其它跨域消息（广告、统计等）每天都有，先按内容筛掉再查来源，
+    // 否则每条无关消息都会刷一条"拒绝来自…"告警（与 bridge.ts 的顺序一致）
+    const message = classifyAuthMessage(event.data);
+    if (!message) return;
     if (event.origin !== workshopOrigin()) {
       console.warn(`[wxhl创意工坊] 拒绝来自 ${event.origin} 的登录消息`);
       return;
     }
-    const message = classifyAuthMessage(event.data);
-    if (!message) return;
     switch (message.kind) {
       case 'open': {
         if (loginWindow && !loginWindow.closed) loginWindow.close();

@@ -106,6 +106,7 @@ async function handleAction(action: string, payload: Record<string, any>): Promi
       return {
         label: 'wxhl创意工坊宿主',
         workshopWorldbook: WORKSHOP_WORLDBOOK_NAME,
+        hostVersion: typeof __WXHL_BUILD__ !== 'undefined' ? __WXHL_BUILD__ : 'dev',
         capabilities: {
           getWorldbookNames: typeof getWorldbookNames === 'function',
           getCharWorldbookNames: typeof getCharWorldbookNames === 'function',
@@ -145,12 +146,17 @@ async function handleAction(action: string, payload: Record<string, any>): Promi
       const uid = Number(payload.uid);
       if (!Number.isFinite(uid)) throw new Error('updateEntry 缺少合法 uid');
       const nextEntry = (payload.nextEntry ?? {}) as Partial<WorldbookEntry>;
-      await updateWorldbookWith(name, worldbook => worldbook.map(entry => (Number(entry.uid) === uid ? { ...entry, ...nextEntry } : entry)), { render: 'immediate' });
+      // 先读全量确认 uid 存在再写：不能靠 updater 里的命中标记，uid 打错时必须响亮报错而不是假报成功
+      const worldbook = await getWorldbook(name);
+      if (!worldbook.some(entry => Number(entry.uid) === uid)) throw new Error(`updateEntry 未找到 uid ${uid}`);
+      await updateWorldbookWith(name, entries => entries.map(entry => (Number(entry.uid) === uid ? { ...entry, ...nextEntry } : entry)), { render: 'immediate' });
       return { updated: true };
     }
     case 'deleteEntries': {
       const name = requireString(payload, 'worldbookName');
-      const uids = new Set(((payload.uids ?? []) as unknown[]).map(Number));
+      // 丢掉非有限值后为空（缺参 / 全非法）就报错：空集合匹配不到任何条目，静默"成功"会掩盖调用方的 bug
+      const uids = new Set(((payload.uids ?? []) as unknown[]).map(Number).filter(Number.isFinite));
+      if (uids.size === 0) throw new Error('deleteEntries 缺少 uids');
       return await deleteWorldbookEntries(name, entry => uids.has(Number(entry.uid)), { render: 'immediate' });
     }
     case 'upsertWorkshopEntries': {
@@ -160,8 +166,17 @@ async function handleAction(action: string, payload: Record<string, any>): Promi
         throw new Error('upsertWorkshopEntries 缺少 sourceMeta.sourceId');
       }
       const newEntries = requireEntries(payload);
+      // 宿主补把手：云端漏打标记的条目会变得不可管理（后续 upsert/卸载都匹配不到），
+      // 而卸载不干净比报错更糟 —— 所以由宿主以 payload 的 sourceMeta 为准盖章
+      const stamped = newEntries.map(entry => ({
+        ...entry,
+        extra: {
+          ...(entry.extra ?? {}),
+          [WORKSHOP_EXTRA_KEY]: { ...((entry.extra ?? {})[WORKSHOP_EXTRA_KEY] ?? {}), ...sourceMeta },
+        },
+      }));
       const worldbook = await getWorldbook(name);
-      const next = computeUpsertWorldbook(worldbook, sourceMeta, newEntries);
+      const next = computeUpsertWorldbook(worldbook, sourceMeta, stamped);
       await replaceWorldbook(name, next, { render: 'immediate' });
       return { total: next.length, installed: newEntries.length };
     }

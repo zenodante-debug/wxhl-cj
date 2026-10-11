@@ -5,7 +5,8 @@ export const URL_OVERRIDE_KEY = 'wxhl_cygf_workshop_url';
 
 const TOGGLE_DEBOUNCE_MS = 150;
 let _lastToggleAt = 0;
-let _escHandler: ((event: KeyboardEvent) => void) | null = null;
+/** 挂在酒馆主窗口上的运行时键：热重载时用它找到并拆掉上一实例的 ESC 监听 */
+const PANEL_ESC_RUNTIME_KEY = '__wxhlCygfPanelEscTeardown';
 
 /** 工坊页面地址：脚本变量可覆盖；仅接受无凭据、无危险字符的 https 地址，其余回退默认 */
 export function resolveWorkshopUrl(): string {
@@ -48,7 +49,10 @@ function buildPanel(): JQuery {
   const $panel = $('<div>').attr('id', PANEL_ID).css({
     position: 'fixed',
     inset: '0',
-    zIndex: 2147483646,
+    // 必须低于 toastr 容器（z-index 999999）：遮罩若盖在 toastr 之上，
+    // 面板打开期间所有提示（登录成败、弹出窗口被拦截的告警）都会被遮住看不见。
+    // 999980 低于 toastr、又高于酒馆主界面，与 wxhl-003 遮罩（99998）同思路。
+    zIndex: 999980,
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
@@ -116,16 +120,26 @@ export function togglePanel(): void {
   $panel.on('click', event => {
     if (event.target === $panel[0]) closePanel();
   });
-  _escHandler = onEsc;
-  window.parent.addEventListener('keydown', _escHandler);
+  // 热重载不触发 pagehide：用运行时键先拆上一实例的 ESC 监听，否则每次重载后按 ESC 会叠一层关面板
+  const parent = window.parent;
+  const previous = (parent as any)[PANEL_ESC_RUNTIME_KEY];
+  if (typeof previous === 'function') previous();
+
+  parent.addEventListener('keydown', onEsc);
+  const teardown = () => {
+    parent.removeEventListener('keydown', onEsc);
+    if ((parent as any)[PANEL_ESC_RUNTIME_KEY] === teardown) delete (parent as any)[PANEL_ESC_RUNTIME_KEY];
+  };
+  (parent as any)[PANEL_ESC_RUNTIME_KEY] = teardown;
+
   console.info('[wxhl创意工坊] 面板已打开:', resolveWorkshopUrl());
 }
 
 /** 关面板不依赖闭包：直接查 DOM 移除，兼容脚本重载/重复实例（范例二的教训） */
 export function closePanel(): void {
   $(`#${PANEL_ID}`).remove();
-  if (_escHandler) {
-    window.parent.removeEventListener('keydown', _escHandler);
-    _escHandler = null;
-  }
+  const parent = window.parent;
+  const teardown = (parent as any)[PANEL_ESC_RUNTIME_KEY];
+  if (typeof teardown === 'function') teardown();
+  delete (parent as any)[PANEL_ESC_RUNTIME_KEY];
 }

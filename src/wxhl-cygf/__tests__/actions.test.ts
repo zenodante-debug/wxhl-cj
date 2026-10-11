@@ -79,19 +79,75 @@ describe('dispatchAction · 动作分发', () => {
     expect(result.ensured).toEqual({ created: false, bound: false });
   });
 
-  it('upsertWorkshopEntries：读全量→纯逻辑→replaceWorldbook 写回', async () => {
-    const entry = { uid: 1, name: '旧', position: { order: 1 }, extra: { wxhlWorkshop: { sourceId: 'p' } } };
+  it('upsertWorkshopEntries：读全量→宿主补把手→纯逻辑→replaceWorldbook 写回', async () => {
+    const entry = { uid: 1, name: '旧', position: { order: 1 }, extra: { wxhlWorkshop: { sourceId: 'p', sourceType: 'mod' } } };
     const replace = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal('getWorldbookNames', vi.fn().mockReturnValue([]));
     vi.stubGlobal('getWorldbook', vi.fn().mockResolvedValue([entry]));
     vi.stubGlobal('replaceWorldbook', replace);
+    const sourceMeta = { sourceId: 'p', sourceType: 'mod' };
     const newEntry = { uid: 0, name: '新', position: { order: 1 }, extra: { wxhlWorkshop: { sourceId: 'p' } } };
 
     const result = (await dispatchAction('upsertWorkshopEntries', {
-      worldbookName: '无限回廊mod', sourceMeta: { sourceId: 'p' }, entries: [newEntry],
+      worldbookName: '无限回廊mod', sourceMeta, entries: [newEntry],
     })) as any;
     expect(result).toEqual({ total: 1, installed: 1 });
-    expect(replace).toHaveBeenCalledWith('无限回廊mod', [newEntry], { render: 'immediate' });
+    // 宿主以 sourceMeta 为准盖章：原把手保留、sourceType 并入（不再是原样条目）
+    expect(replace).toHaveBeenCalledWith('无限回廊mod', [
+      { ...newEntry, extra: { wxhlWorkshop: { sourceId: 'p', sourceType: 'mod' } } },
+    ], { render: 'immediate' });
+  });
+
+  it('upsertWorkshopEntries 给缺把手的条目盖章', async () => {
+    const replace = vi.fn().mockResolvedValue(undefined);
+    vi.stubGlobal('getWorldbook', vi.fn().mockResolvedValue([]));
+    vi.stubGlobal('replaceWorldbook', replace);
+    const sourceMeta = { sourceId: 'pack-1' };
+    const bare = { uid: 0, name: '新', position: { order: 1 } }; // 云端漏打 extra
+
+    await dispatchAction('upsertWorkshopEntries', { worldbookName: '无限回廊mod', sourceMeta, entries: [bare] });
+    const written = replace.mock.calls[0][1] as WorldbookEntry[];
+    expect(written[0].extra?.wxhlWorkshop?.sourceId).toBe('pack-1');
+  });
+
+  it('updateEntry 未匹配 uid → 响亮报错', async () => {
+    vi.stubGlobal('getWorldbook', vi.fn().mockResolvedValue([
+      { uid: 1, name: '甲', position: { order: 1 } },
+      { uid: 2, name: '乙', position: { order: 2 } },
+    ]));
+    const update = vi.fn();
+    vi.stubGlobal('updateWorldbookWith', update);
+
+    await expect(dispatchAction('updateEntry', { worldbookName: 'x', uid: 999, nextEntry: {} }))
+      .rejects.toThrow(/未找到 uid/);
+    expect(update).not.toHaveBeenCalled();
+  });
+
+  it('updateEntry 命中 uid → 更新并返回 updated', async () => {
+    const existing = { uid: 1, name: '甲', position: { order: 1 }, content: '旧' };
+    vi.stubGlobal('getWorldbook', vi.fn().mockResolvedValue([existing]));
+    let applied: WorldbookEntry[] | null = null;
+    vi.stubGlobal('updateWorldbookWith', vi.fn(async (_name: string, updater: (entries: WorldbookEntry[]) => WorldbookEntry[]) => {
+      applied = updater([{ uid: 1, name: '甲', position: { order: 1 }, content: '旧' }]);
+    }));
+
+    const result = await dispatchAction('updateEntry', { worldbookName: 'x', uid: 1, nextEntry: { content: '新' } });
+    expect(result).toEqual({ updated: true });
+    expect(applied).toEqual([{ uid: 1, name: '甲', position: { order: 1 }, content: '新' }]);
+  });
+
+  it('deleteEntries 空 uids → 响亮报错', async () => {
+    const del = vi.fn();
+    vi.stubGlobal('deleteWorldbookEntries', del);
+
+    await expect(dispatchAction('deleteEntries', { worldbookName: 'x', uids: [] }))
+      .rejects.toThrow(/缺少 uids/);
+    expect(del).not.toHaveBeenCalled();
+  });
+
+  it('handshake 上报宿主版本', async () => {
+    const result = (await dispatchAction('handshake', {})) as any;
+    expect(result).toHaveProperty('hostVersion');
   });
 
   it('upsertWorkshopEntries 缺 sourceMeta.sourceId → 响亮报错', async () => {
