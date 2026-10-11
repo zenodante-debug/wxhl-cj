@@ -42,3 +42,127 @@ export function computeUpsertWorldbook(
   });
   return merged;
 }
+
+// ==================== 互斥队列（写操作读改写不可并发，范例二的教训） ====================
+let _queue: Promise<unknown> = Promise.resolve();
+
+export function queued<T>(fn: () => Promise<T>): Promise<T> {
+  const run = _queue.then(fn, fn);
+  _queue = run.then(
+    () => {},
+    () => {},
+  );
+  return run;
+}
+
+export function resetQueueForTest(): void {
+  _queue = Promise.resolve();
+}
+
+// ==================== 世界书 ensure ====================
+export async function ensureWorkshopWorldbook(): Promise<{ created: boolean; bound: boolean }> {
+  let created = false;
+  if (!getWorldbookNames().includes(WORKSHOP_WORLDBOOK_NAME)) {
+    await createWorldbook(WORKSHOP_WORLDBOOK_NAME, []);
+    created = true;
+  }
+  const charBooks = getCharWorldbookNames('current');
+  const additional = charBooks.additional ?? [];
+  let bound = false;
+  if (charBooks.primary !== WORKSHOP_WORLDBOOK_NAME && !additional.includes(WORKSHOP_WORLDBOOK_NAME)) {
+    await rebindCharWorldbooks('current', { primary: charBooks.primary, additional: [...additional, WORKSHOP_WORLDBOOK_NAME] });
+    bound = true;
+  }
+  return { created, bound };
+}
+
+// ==================== 动作分发 ====================
+export const MUTATING_ACTIONS: ReadonlySet<string> = new Set([
+  'createWorldbook',
+  'createEntries',
+  'updateEntry',
+  'deleteEntries',
+  'upsertWorkshopEntries',
+]);
+
+function requireString(payload: Record<string, any>, key: string): string {
+  const value = payload[key];
+  if (typeof value !== 'string' || value === '') throw new Error(`缺少必要参数: ${key}`);
+  return value;
+}
+
+function requireEntries(payload: Record<string, any>): WorldbookEntry[] {
+  if (!Array.isArray(payload.entries)) throw new Error('缺少必要参数: entries（数组）');
+  return payload.entries as WorldbookEntry[];
+}
+
+async function handleAction(action: string, payload: Record<string, any>): Promise<unknown> {
+  switch (action) {
+    case 'handshake':
+      return {
+        label: 'wxhl创意工坊宿主',
+        workshopWorldbook: WORKSHOP_WORLDBOOK_NAME,
+        capabilities: {
+          getWorldbookNames: typeof getWorldbookNames === 'function',
+          getCharWorldbookNames: typeof getCharWorldbookNames === 'function',
+          rebindCharWorldbooks: typeof rebindCharWorldbooks === 'function',
+          getWorldbook: typeof getWorldbook === 'function',
+          createWorldbook: typeof createWorldbook === 'function',
+          replaceWorldbook: typeof replaceWorldbook === 'function',
+          updateWorldbookWith: typeof updateWorldbookWith === 'function',
+          createWorldbookEntries: typeof createWorldbookEntries === 'function',
+          deleteWorldbookEntries: typeof deleteWorldbookEntries === 'function',
+        },
+      };
+    case 'getContext': {
+      const ensured = await ensureWorkshopWorldbook();
+      return {
+        worldbookNames: getWorldbookNames(),
+        charWorldbooks: getCharWorldbookNames('current'),
+        workshopWorldbook: WORKSHOP_WORLDBOOK_NAME,
+        ensured,
+      };
+    }
+    case 'getEntries': {
+      // 先校验参数再引用全局：未打桩时 getWorldbook 未定义，若内联调用会先抛 ReferenceError 而掩盖缺参错误
+      const name = requireString(payload, 'worldbookName');
+      return { entries: await getWorldbook(name) };
+    }
+    case 'createWorldbook':
+      return { created: await createWorldbook(requireString(payload, 'worldbookName'), []) };
+    case 'createEntries':
+      return await createWorldbookEntries(requireString(payload, 'worldbookName'), requireEntries(payload), { render: 'immediate' });
+    case 'updateEntry': {
+      const name = requireString(payload, 'worldbookName');
+      const uid = Number(payload.uid);
+      if (!Number.isFinite(uid)) throw new Error('updateEntry 缺少合法 uid');
+      const nextEntry = (payload.nextEntry ?? {}) as Partial<WorldbookEntry>;
+      await updateWorldbookWith(name, worldbook => worldbook.map(entry => (Number(entry.uid) === uid ? { ...entry, ...nextEntry } : entry)), { render: 'immediate' });
+      return { updated: true };
+    }
+    case 'deleteEntries': {
+      const name = requireString(payload, 'worldbookName');
+      const uids = new Set(((payload.uids ?? []) as unknown[]).map(Number));
+      return await deleteWorldbookEntries(name, entry => uids.has(Number(entry.uid)), { render: 'immediate' });
+    }
+    case 'upsertWorkshopEntries': {
+      const name = requireString(payload, 'worldbookName');
+      const sourceMeta = payload.sourceMeta as SourceMeta | undefined;
+      if (!sourceMeta || typeof sourceMeta.sourceId !== 'string' || sourceMeta.sourceId === '') {
+        throw new Error('upsertWorkshopEntries 缺少 sourceMeta.sourceId');
+      }
+      const newEntries = requireEntries(payload);
+      const worldbook = await getWorldbook(name);
+      const next = computeUpsertWorldbook(worldbook, sourceMeta, newEntries);
+      await replaceWorldbook(name, next, { render: 'immediate' });
+      return { total: next.length, installed: newEntries.length };
+    }
+    default:
+      throw new Error(`未知桥接动作: ${action}`);
+  }
+}
+
+/** 写动作进互斥队列，读动作直接执行 */
+export function dispatchAction(action: string, payload: Record<string, any>): Promise<unknown> {
+  return MUTATING_ACTIONS.has(action) ? queued(() => handleAction(action, payload)) : handleAction(action, payload);
+}
