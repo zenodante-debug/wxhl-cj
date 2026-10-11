@@ -11,8 +11,11 @@ export function createBridgeClient({ parentWindow, selfWindow, timeoutMs = 30000
   let seq = 0;
   const pending = new Map();
   const onMessage = event => {
-    // 只认宿主（父窗口）的回包：酒馆主框架里任何脚本都能 postMessage，不校验来源就会把页面骗成「已安装/安装成功」
-    if (event.source !== parentWindow) return;
+    // 这里**故意不校验 event.source / event.origin**：
+    // 宿主脚本跑在酒馆页面的**兄弟 iframe** 里，它回包时 event.source 是那个脚本 iframe，
+    // 永远不会等于本页面的 window.parent（酒馆主窗口）—— 加这个守卫会把所有合法回包拦死
+    // （2026-10-11 踩过：页面永远显示「未检测到宿主脚本」）。
+    // 配对只靠 channel + kind + 每次请求唯一的 id；两份参考实现也都是这么做的。
     const d = event?.data;
     if (!d || d.channel !== BRIDGE_CHANNEL || d.kind !== 'response') return;
     const entry = pending.get(d.id);

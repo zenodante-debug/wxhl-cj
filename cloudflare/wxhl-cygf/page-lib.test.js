@@ -10,21 +10,25 @@ describe('桥客户端', () => {
     const posted = [];
     const listeners = new Set();
     const parentWindow = { postMessage: vi.fn(m => posted.push(m)) };
+    // 线上真实来源：宿主脚本跑在酒馆页面的**兄弟 iframe** 里，回包的 sender 是它，
+    // 而不是本页面的 window.parent —— 夹具必须照这个来，否则会像 2026-10-11 那样
+    // 把「页面永远收不到回包」的 bug 测成绿的。
+    const scriptFrame = { postMessage: vi.fn(), name: 'wxhl-cygf-host-script-iframe' };
     const selfWindow = {
       addEventListener: (_t, l) => listeners.add(l),
       removeEventListener: (_t, l) => listeners.delete(l),
     };
     const respond = (id, payload, ok = true) => {
       const data = { channel: 'wxhl-workshop:worldbook', kind: 'response', id, ok, ...(ok ? { payload } : { error: payload }) };
-      listeners.forEach(l => l({ data, source: parentWindow }));
+      listeners.forEach(l => l({ data, source: scriptFrame }));
     };
     /** 用别的 channel 发一条同 id 的响应 */
     const respondChannel = (channel, id, payload) => {
-      listeners.forEach(l => l({ data: { channel, kind: 'response', id, ok: true, payload }, source: parentWindow }));
+      listeners.forEach(l => l({ data: { channel, kind: 'response', id, ok: true, payload }, source: scriptFrame }));
     };
-    /** 原样灌任意消息体；source 默认父窗口，可传自定义来源（伪造回包测试） */
-    const respondRaw = (data, source = parentWindow) => listeners.forEach(l => l({ data, source }));
-    return { posted, respond, respondChannel, respondRaw, parentWindow, selfWindow };
+    /** 原样灌任意消息体；source 默认为**宿主脚本的 iframe**（线上真实来源），可传自定义来源 */
+    const respondRaw = (data, source = scriptFrame) => listeners.forEach(l => l({ data, source }));
+    return { posted, respond, respondChannel, respondRaw, parentWindow, selfWindow, scriptFrame };
   }
 
   it('request 发 request 信封，收到同 id 响应后 resolve payload', async () => {
@@ -79,18 +83,28 @@ describe('桥客户端', () => {
     bridge.destroy();
   });
 
-  it('来自非 parentWindow 的、id 与 channel 都正确的响应被忽略（防伪造回包）', async () => {
+  it('回包来自宿主脚本 iframe（兄弟 frame，而非 parentWindow）也必须被采信 —— 2026-10-11 回归', async () => {
+    const w = fakeWindows();
+    const bridge = createBridgeClient({ parentWindow: w.parentWindow, selfWindow: w.selfWindow });
+    const promise = bridge.request('getContext');
+    const sentId = w.posted[0].id;
+    // 关键：source 是脚本 iframe，不是 parentWindow
+    expect(w.scriptFrame).not.toBe(w.parentWindow);
+    w.respondRaw({ channel: 'wxhl-workshop:worldbook', kind: 'response', id: sentId, ok: true, payload: { worldbookNames: [] } }, w.scriptFrame);
+    await expect(promise).resolves.toEqual({ worldbookNames: [] });
+    bridge.destroy();
+  });
+
+  it('id 不匹配的响应不采信（配对唯一靠 id）', async () => {
     const w = fakeWindows();
     const bridge = createBridgeClient({ parentWindow: w.parentWindow, selfWindow: w.selfWindow });
     const promise = bridge.request('handshake');
     const sentId = w.posted[0].id;
-    // 另开一个窗口当「别的脚本」，回一条 id/channel 全对的响应
-    const foreign = { postMessage: vi.fn() };
-    w.respondRaw({ channel: 'wxhl-workshop:worldbook', kind: 'response', id: sentId, ok: true, payload: { forged: true } }, foreign);
+    w.respondRaw({ channel: 'wxhl-workshop:worldbook', kind: 'response', id: 'nobody', ok: true, payload: { forged: true } });
     let settled = false;
     promise.then(() => (settled = true));
     await Promise.resolve();
-    expect(settled).toBe(false); // 伪造回包没被采信，请求仍未结算
+    expect(settled).toBe(false); // 对不上 id → 不结算
     w.respond(sentId, { ok: true });
     await expect(promise).resolves.toEqual({ ok: true });
     bridge.destroy();
