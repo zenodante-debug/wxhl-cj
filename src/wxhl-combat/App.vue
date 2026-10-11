@@ -16,8 +16,16 @@
       ⚔
     </button>
 
-    <!-- 全屏覆盖层 -->
-    <div v-if="外壳.面板可见" class="combat-overlay">
+    <!-- 全屏覆盖层。
+         ⚠️ 用 `v-show`（不是 `v-if`）—— **关面板不销毁战斗视图**（plan §22.2）。
+         玩家口径：「战斗过程中的 ai 调用……我退出悬浮窗也能够进行才对」。
+         AI 调用本身不会被取消（全仓库没有 AbortController），真正断掉的是**组件**：
+         `v-if` 一销毁，在飞的 `await` 就往**死实例的 ref** 里写（日志丢、状态错位），
+         新实例的「忙碌」还是 false，玩家能再点一次「开始回合」→ 同一个回合被跑两遍。
+         `v-show` 只是 `display:none`，实例活着 ⇒ AI 调用 / 忙碌锁 / 日志 / 战斗状态全留在原地。
+         代价（明知故犯）：应用启动就会挂上战斗视图、跑一次 `读战斗状态()` —— 这正是我们要的，
+         上一场没打完的战斗本来就该在后台活着。 -->
+    <div v-show="外壳.面板可见" class="combat-overlay">
       <div class="combat-shell">
         <!-- 石檐顶栏 -->
         <div class="shell-topbar">
@@ -36,10 +44,11 @@
           <button class="shell-close" title="关闭" @click="外壳 = 切换外壳(外壳, '关闭')">✕</button>
         </div>
 
-        <!-- 内容 -->
+        <!-- 内容：两个页签都用 `v-show` —— **切页签也不销毁战斗视图**（同上）。
+             玩家实测过「切到设置页回来日志就没了」，根因就是这里的 `v-if` 重建了组件。 -->
         <div class="shell-body">
-          <CombatView v-if="外壳.页签 === '战斗'" />
-          <SettingsView v-else />
+          <CombatView v-show="外壳.页签 === '战斗'" />
+          <SettingsView v-show="外壳.页签 === '设置'" />
         </div>
       </div>
     </div>

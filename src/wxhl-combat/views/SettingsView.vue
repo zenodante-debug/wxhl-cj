@@ -31,12 +31,20 @@
       </label>
     </section>
 
-    <!-- 保存状态：设置改动会**立即写入脚本变量并回读对账**（开战读的就是那份）。
+    <!-- 保存状态：设置改动会**立即写入浏览器本地存储（localStorage）并回读对账**（开战读的就是那份）。
          没存进去必须让人看见 —— 以前失败只在 console 里，界面照旧显示已配置。 -->
     <div v-if="store.保存状态 && !store.保存状态.成功" class="save-alert">
-      设置**没有存进脚本变量**：{{ store.保存状态.原因 }} —— 开战会读不到，请再改一次或重载酒馆
+      设置没有存进浏览器本地存储：{{ store.保存状态.原因 }} —— 开战会读不到，请再改一次或重载酒馆
     </div>
     <div v-else-if="已保存提示" class="save-ok">设置已保存</div>
+
+    <!-- 直接回答玩家报的问题（「每次刷新酒馆后就要重填 API」）：说清存在哪儿、什么时候会丢。
+         顺带写明**与小手机隔离** —— 两个脚本同装一个酒馆，最怕的就是互相覆盖。 -->
+    <p class="save-note">
+      设置存在浏览器本地存储（localStorage，键 <span class="mono">wxhl-combat_settings</span>）——
+      刷新页面、切页签、换聊天文件都还在；换浏览器 / 清缓存才会重填。
+      与小手机（<span class="mono">wxhl003_settings</span>）各存各的，互不覆盖。
+    </p>
 
     <section v-for="路 in 路列表" :key="路" class="api-block">
       <h4>{{ 路 === '快路' ? '快路（意图 / 翻译，高频）' : '强路（收尾正文，文笔）' }}</h4>
@@ -302,6 +310,19 @@ async function 清缓存() {
   color: var(--cb-copper);
   font-size: 12px;
   letter-spacing: 1px;
+}
+
+/* 「设置存在哪儿」那一段说明 */
+.save-note {
+  margin: 0 0 14px;
+  color: var(--cb-dim);
+  font-size: 11px;
+  line-height: 1.7;
+
+  .mono {
+    font-family: var(--cb-font-mono);
+    color: var(--cb-amber-dim);
+  }
 }
 
 .sub-hint {
