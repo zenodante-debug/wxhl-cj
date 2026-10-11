@@ -58,7 +58,12 @@ packs(id PK, name, type, version, author_name, author_discord, tags_json, descri
 
 ## 部署
 
-**一键脚本（推荐）**——在你自己终端的 **Git Bash** 里跑：
+**Windows 双击运行（推荐，不用敲命令）**——在资源管理器里打开 `cloudflare/wxhl-cygf/`，**双击 `deploy.bat`**。
+它跟终端版做的是同一件事（检查登录 → 建 D1 并把 `database_id` 写回 `wrangler.toml` → 设管理密钥 → `deploy` → 跑冒烟），
+中途只需你：① 弹浏览器时点授权（未登录才会弹）② 把建库输出里的 `database_id` 整个粘进提示框 ③ 输入管理密钥。
+可重复运行（已建的库不重建、已填的 id 不覆盖）。
+
+**终端（Git Bash）**：
 
 ```bash
 bash cloudflare/wxhl-cygf/deploy.sh
