@@ -17,7 +17,7 @@ function init() {
   eventOn(getButtonEvent(BUTTON_NAME), errorCatched(togglePanel));
   console.info(`[wxhl创意工坊] 已绑定按钮事件: ${BUTTON_NAME}`);
 
-  $(window).on('pagehide', () => {
+  $(window).off('pagehide.wxhlCygf').on('pagehide.wxhlCygf', () => {
     teardownBridge();
     teardownAuth();
     closePanel();

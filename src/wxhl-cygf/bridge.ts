@@ -44,6 +44,9 @@ export function failureResponse(id: string, error: unknown): BridgeResponse {
 }
 
 // ==================== 监听器装配 ====================
+/** 挂在酒馆主窗口上的运行时键：热重载时用它找到并拆掉上一实例的监听 */
+const BRIDGE_RUNTIME_KEY = '__wxhlCygfBridgeTeardown';
+
 export interface BridgeDeps {
   allowedOrigin: string;
   dispatch: (action: string, payload: Record<string, any>) => Promise<unknown>;
@@ -74,9 +77,21 @@ export function createBridgeListener(deps: BridgeDeps): (event: MessageEvent) =>
 
 /** 挂到酒馆主页面窗口（工坊 iframe 的 postMessage 发往其父窗口）。返回拆卸函数。 */
 export function installBridge(allowedOrigin: string): () => void {
-  const listener = createBridgeListener({ allowedOrigin, dispatch: dispatchAction });
   const target = window.parent ?? window;
+  // 脚本热重载不会触发 pagehide：重载时必须先拆掉上一实例的监听，
+  // 否则一条请求会被处理两次（世界书写两遍、同一 id 回两个包）
+  const previous = (target as any)[BRIDGE_RUNTIME_KEY];
+  if (typeof previous === 'function') previous();
+
+  const listener = createBridgeListener({ allowedOrigin, dispatch: dispatchAction });
   target.addEventListener('message', listener);
+
+  const teardown = () => {
+    target.removeEventListener('message', listener);
+    if ((target as any)[BRIDGE_RUNTIME_KEY] === teardown) delete (target as any)[BRIDGE_RUNTIME_KEY];
+  };
+  (target as any)[BRIDGE_RUNTIME_KEY] = teardown;
+
   console.info('[wxhl创意工坊] 世界书桥接已启用, 允许来源:', allowedOrigin);
-  return () => target.removeEventListener('message', listener);
+  return teardown;
 }

@@ -1,5 +1,7 @@
-import { describe, expect, it, vi } from 'vitest';
-import { BRIDGE_CHANNEL, createBridgeListener } from '../bridge';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { BRIDGE_CHANNEL, createBridgeListener, installBridge } from '../bridge';
+
+afterEach(() => vi.unstubAllGlobals());
 
 const ORIGIN = 'https://cygf.657868.xyz';
 const request = (action: string, payload = {}) => ({ channel: BRIDGE_CHANNEL, kind: 'request', id: 'r1', action, payload });
@@ -47,5 +49,45 @@ describe('createBridgeListener · 桥接监听', () => {
     await listener(makeEvent({ hello: 'world' }).event);
     await listener(makeEvent({ channel: 'creative-workshop:worldbook', kind: 'request', id: 'x', action: 'y' }).event);
     expect(dispatch).not.toHaveBeenCalled();
+  });
+});
+
+describe('installBridge · 重载守卫', () => {
+  function makeTarget() {
+    const listeners: unknown[] = [];
+    return {
+      listeners,
+      target: {
+        addEventListener: vi.fn((_type: string, listener: unknown) => {
+          listeners.push(listener);
+        }),
+        removeEventListener: vi.fn((_type: string, listener: unknown) => {
+          const index = listeners.indexOf(listener);
+          if (index >= 0) listeners.splice(index, 1);
+        }),
+      },
+    };
+  }
+
+  it('重复安装先拆上一实例的监听：热重载不会把一条请求处理两次', () => {
+    const { listeners, target } = makeTarget();
+    vi.stubGlobal('window', { parent: target });
+    installBridge(ORIGIN);
+    const firstListener = listeners[0];
+    installBridge(ORIGIN);
+    expect(target.removeEventListener).toHaveBeenCalledWith('message', firstListener);
+    expect(listeners).toHaveLength(1);
+  });
+
+  it('teardown 幂等：重复调用不抛错，且不误删后续实例的键', () => {
+    const { target } = makeTarget();
+    vi.stubGlobal('window', { parent: target });
+    const teardown = installBridge(ORIGIN);
+    teardown();
+    expect(() => teardown()).not.toThrow();
+    const second = installBridge(ORIGIN);
+    teardown(); // 旧实例的 teardown 不该把新实例的守卫键删掉
+    expect((target as any).__wxhlCygfBridgeTeardown).toBe(second);
+    second();
   });
 });

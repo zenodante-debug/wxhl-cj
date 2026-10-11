@@ -1,6 +1,8 @@
 import { PANEL_ID, workshopOrigin } from './panel';
 
 export const AUTH_CHANNEL = 'wxhl-workshop:auth';
+/** 挂在酒馆主窗口上的运行时键：热重载时用它找到并拆掉上一实例的监听 */
+const AUTH_RUNTIME_KEY = '__wxhlCygfAuthTeardown';
 
 export type AuthMessage =
   | { kind: 'open'; url: string }
@@ -80,7 +82,18 @@ export function installAuthRelay(): () => void {
     }
   };
 
-  window.parent.addEventListener('message', listener);
+  const target = window.parent ?? window;
+  // 热重载不触发 pagehide：先拆上一实例的监听，否则一次登录请求会弹两个窗口、成功回执发两遍
+  const previous = (target as any)[AUTH_RUNTIME_KEY];
+  if (typeof previous === 'function') previous();
+
+  target.addEventListener('message', listener);
+  const teardown = () => {
+    target.removeEventListener('message', listener);
+    if ((target as any)[AUTH_RUNTIME_KEY] === teardown) delete (target as any)[AUTH_RUNTIME_KEY];
+  };
+  (target as any)[AUTH_RUNTIME_KEY] = teardown;
+
   console.info('[wxhl创意工坊] Discord 登录转发已启用');
-  return () => window.parent.removeEventListener('message', listener);
+  return teardown;
 }

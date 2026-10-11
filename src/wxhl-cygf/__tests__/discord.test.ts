@@ -1,5 +1,7 @@
-import { describe, expect, it } from 'vitest';
-import { AUTH_CHANNEL, classifyAuthMessage } from '../discord';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import { AUTH_CHANNEL, classifyAuthMessage, installAuthRelay } from '../discord';
+
+afterEach(() => vi.unstubAllGlobals());
 
 describe('classifyAuthMessage · 登录消息分类', () => {
   it('openDiscordLogin → open（带 url）', () => {
@@ -29,5 +31,35 @@ describe('classifyAuthMessage · 登录消息分类', () => {
     ['null', null],
   ])('%s → null', (_label, data) => {
     expect(classifyAuthMessage(data)).toBeNull();
+  });
+});
+
+describe('installAuthRelay · 重载守卫', () => {
+  function makeTarget() {
+    const listeners: unknown[] = [];
+    return {
+      listeners,
+      target: {
+        addEventListener: vi.fn((_type: string, listener: unknown) => {
+          listeners.push(listener);
+        }),
+        removeEventListener: vi.fn((_type: string, listener: unknown) => {
+          const index = listeners.indexOf(listener);
+          if (index >= 0) listeners.splice(index, 1);
+        }),
+      },
+    };
+  }
+
+  it('重复安装先拆上一实例的监听：热重载不会一次登录弹两个窗口', () => {
+    const { listeners, target } = makeTarget();
+    vi.stubGlobal('window', { parent: target });
+    vi.stubGlobal('getVariables', vi.fn().mockReturnValue({}));
+    vi.stubGlobal('getScriptId', vi.fn().mockReturnValue('x'));
+    installAuthRelay();
+    const firstListener = listeners[0];
+    installAuthRelay();
+    expect(target.removeEventListener).toHaveBeenCalledWith('message', firstListener);
+    expect(listeners).toHaveLength(1);
   });
 });
