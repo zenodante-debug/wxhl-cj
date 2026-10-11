@@ -16,6 +16,7 @@ import { deposit, loadStorage, saveStorage, withdraw, type StorageRoom } from '.
 import { 位阶修正值系数, 位阶属性软上限, 位阶档位, 位阶等级上限 } from './tier';
 import { editSpan, editText, escapeAttr } from './editable';
 import { canUseHubFacility, HUB_GATE_HINT } from '../hubGate';
+import { renderSpecialStatusList } from './render';
 
 /** 挂载状态栏到 root 元素，返回卸载函数 */
 export function mountStatusbar(root: HTMLElement): () => void {
@@ -1421,20 +1422,8 @@ export function mountStatusbar(root: HTMLElement): () => void {
       h += '</div>';
 
       /* ---------- 特殊状态 ---------- */
-      const specStates = _.get(state, '特殊状态', {}),
-        ssKeys = Object.keys(specStates);
-      if (ssKeys.length > 0) {
-        h += '<div style="margin-top:6px;">';
-        ssKeys.forEach(function (k) {
-          h +=
-            '<div class="state-line"><span class="tag tag-red">' +
-            k +
-            '</span> <span style="font-size:13px;color:#a09080;">' +
-            editText(specStates[k] || '', targetPath + '.状态.特殊状态.' + k) +
-            '</span></div>';
-        });
-        h += '</div>';
-      }
+      const ssHtml = renderSpecialStatusList(_.get(state, '特殊状态', {}), targetPath + '.状态.特殊状态');
+      if (!ssHtml.includes('class="empty-hint"')) h += '<div style="margin-top:6px;">' + ssHtml + '</div>';
 
       h += '</div>';
       h += '</div>';
@@ -1884,21 +1873,7 @@ export function mountStatusbar(root: HTMLElement): () => void {
       }
       $c.find('#industry-info').html(shopHtml);
 
-      let specStates = d('契约者.状态.特殊状态', {}),
-        ssHtml = '',
-        ssKeys = Object.keys(specStates);
-      if (ssKeys.length === 0) ssHtml = '<span class="empty-hint">无</span>';
-      else {
-        ssKeys.forEach(function (k) {
-          ssHtml +=
-            '<div class="state-line"><span class="tag tag-red">' +
-            k +
-            '</span> <span style="font-size:13px;color:#a09080;">' +
-            editText(specStates[k] || '', '契约者.状态.特殊状态.' + k) +
-            '</span></div>';
-        });
-      }
-      $c.find('#state-special').html(ssHtml);
+      $c.find('#state-special').html(renderSpecialStatusList(d('契约者.状态.特殊状态', {}), '契约者.状态.特殊状态'));
 
       $c.find('#season-num').text(d('契约者.赛季信息.当前赛季', 21));
       $c.find('#season-cycle').text(d('契约者.赛季信息.当前副本周期', 0) + ' / 10');
