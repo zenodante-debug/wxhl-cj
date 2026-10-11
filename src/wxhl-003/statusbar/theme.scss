@@ -1027,6 +1027,20 @@
     border-bottom-style: solid;
     color: var(--sb-chalk);
   }
+  .editable-key {
+    border-bottom: 1px dashed var(--sb-amber-dim);
+    cursor: text;
+    transition: all 0.2s;
+    outline: none;
+    display: inline-block;
+    min-width: 20px;
+  }
+  .editable-key:hover,
+  .editable-key:focus {
+    background: var(--sb-hover);
+    border-bottom-style: solid;
+    color: var(--sb-chalk);
+  }
 
   /* ============ 按钮 ============ */
   .btn-unequip {

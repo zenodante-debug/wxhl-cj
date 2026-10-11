@@ -109,6 +109,13 @@ describe('renderResourceTree', () => {
     expect(h).toContain('未记录');
   });
 
+  it('缺 上限 → 上限显示未记录，且不生成可编辑的上限路径', () => {
+    const h = renderResourceTree({ g: { r: { 当前: 2 } } }, 'p', 无, 'k');
+    expect(h).toContain('data-path="p.g.r.当前"');
+    expect(h).toContain('未记录');
+    expect(h).not.toContain('data-path="p.g.r.上限"');
+  });
+
   it('嵌套对象 → 折叠块，标题带条数', () => {
     const h = renderResourceTree({ 血统: { 龙裔: { 龙息: { 当前: 1, 上限: 1 } } } }, 'p', 无, 'k');
     expect(h).toContain('mate-sub');

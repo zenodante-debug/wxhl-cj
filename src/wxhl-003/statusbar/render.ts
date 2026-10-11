@@ -112,15 +112,18 @@ function 折叠块(标题Html: string, 内容: string, 键: string, 展开: bool
 export function renderResourceTree(data: any, basePath: string, expanded: Set<string>, keyBase: string): string {
   const 集合 = expanded instanceof Set ? expanded : new Set<string>();
 
-  /** 计数文本：`当前 / 上限 单位`，当前缺失显示「未记录」 */
+  /** 未记录标记：当前 或 上限 缺失/非有限数 时共用 */
+  const 未记录 = '<span class="empty-hint" style="padding:0;display:inline;">未记录</span>';
+  /** 计数文本：`当前 / 上限 单位`，当前或上限缺失都显示「未记录」 */
   const 计数 = (v: any, 路径: string): string => {
     const cur = v.当前, max = v.上限;
     const curHtml =
-      空值(cur) || !Number.isFinite(Number(cur))
-        ? '<span class="empty-hint" style="padding:0;display:inline;">未记录</span>'
-        : editSpan(cur, joinPath(路径, '当前'));
-    const unit = 空值(v.单位) ? '点' : v.单位;
-    return curHtml + ' / ' + editSpan(max ?? 0, joinPath(路径, '上限')) + ' ' + editText(String(unit), joinPath(路径, '单位'));
+      空值(cur) || !Number.isFinite(Number(cur)) ? 未记录 : editSpan(cur, joinPath(路径, '当前'));
+    const maxHtml =
+      空值(max) || !Number.isFinite(Number(max)) ? 未记录 : editSpan(max, joinPath(路径, '上限'));
+    /* 单位只有数据里真有时才可编辑；缺省只显示不可编辑的「点」兜底，不凭空造一个可编辑值 */
+    const unitHtml = 空值(v.单位) ? '点' : editText(String(v.单位), joinPath(路径, '单位'));
+    return curHtml + ' / ' + maxHtml + ' ' + unitHtml;
   };
 
   /** 叶子条目：名称（可改名）+ 计数 + 其余标量字段 */
@@ -157,6 +160,10 @@ export function renderResourceTree(data: any, basePath: string, expanded: Set<st
         if (是分组(值)) {
           const 内容 = 键们
             .filter(k => k !== '类型' && k !== '当前' && k !== '上限' && k !== '单位')
+            /* 折叠键（已知限制）：键里若字面含 '.'，会与兄弟节点的嵌套键撞车
+               （如 {龙:{鳞:…}} 与 {'龙.鳞':…} 生成同一条键），两个节点共用同一条
+               expand_subs 展开状态。项目裁定接受：修它要改模块级键方案、会作废玩家已存的
+               expand_subs 状态，得不偿失。 */
             .map(k => 渲染节点(k, 值[k], joinPath(路径, k), 键 + '.' + k, 路径))
             .join('');
           return 内容 === '' ? '' : 折叠块(名称 + 计Html, 内容, 键, 集合.has(键));
@@ -207,6 +214,8 @@ function 渲染特性(name: string, value: any, 路径: string, 键: string, 集
       );
     }
     if (keys.length === 0) return '';
+    /* 折叠键同上：键字面含 '.' 时会与兄弟节点撞车、共用 expand_subs 状态（已知限制，见
+       renderResourceTree 处的说明） */
     const 内容 = keys.map(k => 渲染特性(k, value[k], joinPath(路径, k), 键 + '.' + k, 集合)).join('');
     return 折叠块(name + ' (' + keys.length + ')', 内容, 键, 集合.has(键));
   }
