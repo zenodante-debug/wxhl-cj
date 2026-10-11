@@ -9,6 +9,12 @@ describe('joinPath', () => {
   it('键里的点被转义，免得 lodash 把它当分隔符', () => {
     expect(joinPath('契约者.特殊资源', '魔能.爆裂')).toBe('契约者.特殊资源.魔能\\.爆裂');
   });
+  it('round-trip：转义后的路径能被 lodash 读回同一条', () => {
+    const obj: any = { 职业: { '魔能.爆裂': { 当前: 1 } } };
+    expect(_.get(obj, joinPath('职业', '魔能.爆裂') + '.当前')).toBe(1);
+    _.set(obj, joinPath('职业', '魔能.爆裂') + '.当前', 7);
+    expect(obj.职业['魔能.爆裂'].当前).toBe(7);
+  });
 });
 
 describe('statusKind', () => {

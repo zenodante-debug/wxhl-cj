@@ -16,7 +16,7 @@ import { deposit, loadStorage, saveStorage, withdraw, type StorageRoom } from '.
 import { 位阶修正值系数, 位阶属性软上限, 位阶档位, 位阶等级上限 } from './tier';
 import { editSpan, editText, escapeAttr } from './editable';
 import { canUseHubFacility, HUB_GATE_HINT } from '../hubGate';
-import { renderResourceTree, renderSpecialStatusList } from './render';
+import { joinPath, renderResourceTree, renderSpecialStatusList } from './render';
 
 /** 挂载状态栏到 root 元素，返回卸载函数 */
 export function mountStatusbar(root: HTMLElement): () => void {
@@ -515,6 +515,46 @@ export function mountStatusbar(root: HTMLElement): () => void {
     }
   }
 
+  /** 删除某个键（清空名字 = 删除该条资源） */
+  async function removeKey(parentPath: string, key: string) {
+    try {
+      const data = Mvu.getMvuData({ type: 'message', message_id: 'latest' });
+      const 路径 = joinPath(parentPath, key);
+      appendSystemLog(data, `你删除了资源 [${key}]`);
+      _.unset(data.stat_data, 路径);
+      await Mvu.replaceMvuData(data, { type: 'message', message_id: 'latest' });
+    } catch (e) {
+      console.error('资源删除失败', e);
+    }
+    populateCharacterData();
+  }
+
+  /** 改名 = 删旧键 + 建新键；与兄弟键重名则提示并不执行 */
+  async function renameOrDeleteKey(parentPath: string, oldKey: string, newKey: string) {
+    try {
+      const data = Mvu.getMvuData({ type: 'message', message_id: 'latest' });
+      const parent = _.get(data.stat_data, parentPath, null);
+      if (!parent || typeof parent !== 'object') {
+        console.warn('[wxhl-statusbar] 找不到资源父对象', parentPath);
+        populateCharacterData();
+        return;
+      }
+      if (Object.prototype.hasOwnProperty.call(parent, newKey)) {
+        alert('已存在同名资源「' + newKey + '」，改名未执行。');
+        populateCharacterData();
+        return;
+      }
+      const 值 = _.get(data.stat_data, joinPath(parentPath, oldKey));
+      appendSystemLog(data, `你把资源 [${oldKey}] 改名为 [${newKey}]`);
+      _.unset(data.stat_data, joinPath(parentPath, oldKey));
+      _.set(data.stat_data, joinPath(parentPath, newKey), 值);
+      await Mvu.replaceMvuData(data, { type: 'message', message_id: 'latest' });
+    } catch (e) {
+      console.error('资源改名失败', e);
+    }
+    populateCharacterData();
+  }
+
   function bindEditable() {
     $c.off('click', '.editable-num').on('click', '.editable-num', function (this: HTMLElement, e: JQuery.Event) {
       if ($(this).find('input').length > 0) return;
@@ -542,6 +582,24 @@ export function mountStatusbar(root: HTMLElement): () => void {
         $(this).attr('data-val', newVal);
         saveVariableStr(path, currentVal, newVal);
       }
+    });
+    $c.off('blur', '.editable-key').on('blur', '.editable-key', function (this: HTMLElement) {
+      const parentPath = $(this).attr('data-path')!,
+        oldKey = $(this).attr('data-key')!,
+        newKey = $(this).text().trim();
+
+      if (newKey === oldKey) return;
+
+      if (newKey === '') {
+        if (!confirm('确认删除资源 [' + oldKey + '] 吗？此操作不可逆！')) {
+          populateCharacterData();
+          return;
+        }
+        void removeKey(parentPath, oldKey);
+        return;
+      }
+
+      void renameOrDeleteKey(parentPath, oldKey, newKey);
     });
   }
 
