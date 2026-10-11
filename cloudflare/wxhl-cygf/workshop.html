@@ -1,0 +1,990 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>回廊创意工坊</title>
+<style>
+  :root {
+    --bg: #0f172a;
+    --bg-2: #1e293b;
+    --bg-3: #172033;
+    --line: #334155;
+    --text: #e2e8f0;
+    --muted: #94a3b8;
+    --accent: #38bdf8;
+    --accent-strong: #0ea5e9;
+    --danger: #f87171;
+    --warn-bg: #422006;
+    --warn-line: #b45309;
+    --warn-text: #fcd34d;
+    --blue: #38bdf8;   --blue-bg: rgba(56, 189, 248, .16);   --blue-line: rgba(56, 189, 248, .35);
+    --purple: #c4b5fd; --purple-bg: rgba(167, 139, 250, .18); --purple-line: rgba(167, 139, 250, .35);
+    --gold: #fbbf24;   --gold-bg: rgba(251, 191, 36, .16);   --gold-line: rgba(251, 191, 36, .35);
+    --radius: 10px;
+  }
+  * { box-sizing: border-box; }
+  [hidden] { display: none !important; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    min-width: 320px;
+    background: var(--bg);
+    color: var(--text);
+    font-family: system-ui, -apple-system, "Segoe UI", "PingFang SC", "Microsoft YaHei", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+  }
+  h1, h2, h3 { font-weight: 600; }
+  input, select, textarea, button { font: inherit; color: inherit; }
+  input[type=text], input[type=search], select, textarea {
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 10px; width: 100%; color: var(--text);
+  }
+  input:focus, select:focus, textarea:focus { outline: none; border-color: var(--accent); }
+  textarea { resize: vertical; }
+  button {
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 7px 14px; cursor: pointer; white-space: nowrap;
+  }
+  button:hover:not(:disabled) { border-color: var(--accent); }
+  button:disabled { opacity: .45; cursor: not-allowed; }
+  button.primary { background: var(--accent-strong); border-color: var(--accent-strong); color: #04222f; font-weight: 600; }
+  button.primary:hover:not(:disabled) { filter: brightness(1.08); }
+  button.danger { background: transparent; border-color: var(--danger); color: var(--danger); }
+  button.ghost { background: transparent; border-color: transparent; color: var(--muted); }
+  button.small { padding: 3px 10px; font-size: 12px; }
+
+  /* 顶栏 */
+  #topbar {
+    position: sticky; top: 0; z-index: 20;
+    display: flex; flex-wrap: wrap; gap: 8px; align-items: center;
+    padding: 10px 16px;
+    background: rgba(15, 23, 42, .96);
+    border-bottom: 1px solid var(--line);
+    backdrop-filter: blur(6px);
+  }
+  #topbar h1 { font-size: 18px; margin: 0 6px 0 0; white-space: nowrap; }
+  #topbar .grow { flex: 1 1 180px; min-width: 110px; }
+  #topbar .filter { flex: 0 0 auto; width: auto; }
+
+  /* 桥状态条 */
+  #bridgeBanner {
+    margin: 12px 16px 0; padding: 10px 14px; border-radius: 8px;
+    background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-text);
+    font-size: 13px;
+  }
+
+  /* 列表 */
+  #grid {
+    display: grid; gap: 12px; padding: 16px;
+    grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  }
+  .card {
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: var(--radius);
+    padding: 12px; cursor: pointer; display: flex; flex-direction: column; gap: 6px;
+    transition: border-color .15s;
+  }
+  .card:hover { border-color: var(--accent); }
+  .card:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+  .card-head { display: flex; gap: 8px; align-items: flex-start; justify-content: space-between; }
+  .card-name { margin: 0; font-size: 15px; word-break: break-word; }
+  .card-meta, .card-foot { color: var(--muted); font-size: 12px; }
+  .card-desc { margin: 0; color: #cbd5e1; font-size: 13px; word-break: break-word; }
+  .card-foot { display: flex; justify-content: space-between; gap: 8px; margin-top: auto; }
+  .center-note { text-align: center; color: var(--muted); padding: 32px 16px; }
+  #loadMore { display: block; margin: 4px auto 28px; }
+
+  /* 徽章 */
+  .badge { display: inline-block; padding: 1px 8px; border-radius: 999px; font-size: 12px; white-space: nowrap; border: 1px solid transparent; }
+  .badge-extension { color: var(--blue);   background: var(--blue-bg);   border-color: var(--blue-line); }
+  .badge-build     { color: var(--purple); background: var(--purple-bg); border-color: var(--purple-line); }
+  .badge-character { color: var(--gold);   background: var(--gold-bg);   border-color: var(--gold-line); }
+
+  /* 视图 */
+  #uploadView { max-width: 880px; margin: 0 auto; padding: 16px; }
+  .view-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; }
+  .view-head h2 { margin: 0; font-size: 17px; }
+  /* 详情是弹层：滚得动、内容高时不裁顶 */
+  #detailView.overlay { display: block; padding: 24px 16px; }
+  #detailView .card-box { max-width: 880px; margin: 0 auto; }
+
+  /* 详情 */
+  .detail-head { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+  .detail-name { margin: 0; font-size: 20px; word-break: break-word; }
+  .detail-meta { color: var(--muted); font-size: 13px; margin-top: 4px; }
+  .detail-desc { white-space: pre-wrap; margin: 10px 0; word-break: break-word; }
+  .tag-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 8px 0; }
+  .tag { background: var(--bg-3); border: 1px solid var(--line); border-radius: 999px; padding: 1px 8px; font-size: 12px; color: var(--muted); }
+  .preview-entry { background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px; padding: 10px; margin: 8px 0; }
+  .preview-name { font-weight: 600; margin-bottom: 4px; word-break: break-word; }
+  .preview-content { white-space: pre-wrap; color: #cbd5e1; word-break: break-word; margin: 0; }
+  pre.preview-content { font-family: ui-monospace, Consolas, "Courier New", monospace; font-size: 12px; max-height: 380px; overflow: auto; }
+  .actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--line); }
+  .install-state { color: var(--muted); margin-right: auto; }
+  .hint { color: var(--muted); font-size: 12px; }
+  .error-text { color: var(--danger); font-size: 13px; }
+  .loading, .empty { color: var(--muted); padding: 24px 0; }
+
+  /* 上传表单 */
+  .form { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); margin-bottom: 6px; }
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field-label { color: var(--muted); font-size: 12px; }
+  .full { grid-column: 1 / -1; }
+  label.check { flex-direction: row; align-items: center; gap: 8px; }
+  label.check input { width: auto; }
+  .entry-row {
+    background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
+    padding: 12px; margin: 10px 0; display: grid; gap: 10px;
+    grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  }
+  .entry-head { grid-column: 1 / -1; display: flex; justify-content: space-between; align-items: center; }
+  .entry-index { color: var(--muted); font-size: 12px; }
+  .section-title { margin: 18px 0 6px; font-size: 15px; }
+  .row-between { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+  #packPreview {
+    background: #0b1220; border: 1px solid var(--line); border-radius: 8px; padding: 12px;
+    font-family: ui-monospace, Consolas, "Courier New", monospace;
+    font-size: 12px; max-height: 360px; overflow: auto; white-space: pre; margin: 6px 0 0;
+  }
+  #uploadView .actions { border-top: 1px solid var(--line); margin-top: 18px; }
+
+  /* 弹层 */
+  .overlay {
+    position: fixed; inset: 0; z-index: 50; overflow: auto;
+    background: rgba(2, 6, 23, .82);
+    display: flex; align-items: center; justify-content: center; padding: 16px;
+  }
+  .card-box { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 20px; max-width: 540px; width: 100%; }
+  #agreement .card-box { border-color: var(--warn-line); }
+  .card-box h2 { margin: 0 0 10px; font-size: 18px; }
+  .agreement-text { color: #cbd5e1; margin: 0 0 14px; }
+  .agreement-text strong { color: var(--warn-text); }
+  .key-value {
+    font-family: ui-monospace, Consolas, "Courier New", monospace;
+    background: #0b1220; border: 1px solid var(--line); border-radius: 8px;
+    padding: 10px; margin: 0 0 12px; word-break: break-all; white-space: pre-wrap; font-size: 13px;
+  }
+
+  /* 提示 */
+  .toast {
+    position: fixed; left: 50%; bottom: 24px; transform: translateX(-50%); z-index: 80;
+    background: var(--bg-2); border: 1px solid var(--line); color: var(--text);
+    padding: 10px 16px; border-radius: 8px; max-width: 90vw;
+    box-shadow: 0 8px 24px rgba(0, 0, 0, .45);
+  }
+  .toast.error { border-color: var(--danger); color: #fecaca; }
+
+  @media (max-width: 480px) {
+    #topbar h1 { flex-basis: 100%; margin-right: 0; }
+    #topbar .grow { flex-basis: 100%; }
+    #topbar .filter { flex: 1 1 45%; width: auto; }
+    #grid { grid-template-columns: 1fr; padding: 12px; }
+  }
+</style>
+</head>
+<body>
+
+  <!-- 1. 免责声明 -->
+  <div id="agreement" class="overlay" hidden>
+    <div class="card-box">
+      <h2>免责声明</h2>
+      <p class="agreement-text">内容包均由玩家自行上传、<strong>未经审核</strong>；安装第三方内容可能与角色卡冲突或影响游戏体验，请自行判断风险。安装前请确认你信任该内容包的作者。</p>
+      <button id="agreeBtn" class="primary">我已了解，进入工坊</button>
+    </div>
+  </div>
+
+  <!-- 2. 顶栏 -->
+  <header id="topbar">
+    <h1>回廊创意工坊</h1>
+    <input id="search" class="grow" type="search" placeholder="搜索名称 / 简介 / 作者">
+    <select id="filterType" class="filter">
+      <option value="">全部</option>
+      <option value="extension">扩展包</option>
+      <option value="build">构筑</option>
+      <option value="character">同人角色</option>
+    </select>
+    <select id="sortBy" class="filter">
+      <option value="updated">最新</option>
+      <option value="downloads">最热</option>
+    </select>
+    <button id="uploadBtn" class="primary">上传</button>
+  </header>
+
+  <!-- 3. 桥状态条 -->
+  <div id="bridgeBanner" hidden>⚠️ 未检测到宿主脚本——请从酒馆内的「创意工坊」按钮打开本页面</div>
+
+  <!-- 4. 列表视图 -->
+  <main id="listView" class="view">
+    <div id="grid"></div>
+    <div id="listEmpty" class="center-note" hidden>没有找到内容包</div>
+    <button id="loadMore" hidden>加载更多</button>
+  </main>
+
+  <!-- 5. 详情弹层 -->
+  <div id="detailView" class="overlay" hidden>
+    <div class="card-box">
+      <div class="row-between">
+        <button id="detailBack" class="ghost">← 返回列表</button>
+      </div>
+      <div id="detailBody"></div>
+    </div>
+  </div>
+
+  <!-- 6. 上传视图 -->
+  <section id="uploadView" class="view" hidden>
+    <div class="view-head"><button id="uploadBack" class="ghost">← 返回列表</button><h2>上传内容包</h2></div>
+    <div>
+      <div class="form">
+        <label class="field"><span class="field-label">名称</span><input id="upName" type="text"></label>
+        <label class="field"><span class="field-label">版本</span><input id="upVersion" type="text" value="1.0.0"></label>
+        <label class="field"><span class="field-label">作者名</span><input id="upAuthor" type="text"></label>
+        <label class="field"><span class="field-label">Discord（选填）</span><input id="upDiscord" type="text"></label>
+        <label class="field"><span class="field-label">标签（逗号分隔）</span><input id="upTags" type="text"></label>
+        <label class="field"><span class="field-label">类型</span>
+          <select id="upType">
+            <option value="extension">扩展包</option>
+            <option value="build">构筑</option>
+            <option value="character">同人角色</option>
+          </select>
+        </label>
+        <label class="field full"><span class="field-label">简介</span><textarea id="upDesc" rows="3"></textarea></label>
+      </div>
+
+      <div id="extSection">
+        <div class="row-between">
+          <h3 class="section-title">世界书条目</h3>
+          <button id="addEntry" class="small">+ 添加条目</button>
+        </div>
+        <div id="entriesEditor"></div>
+        <h3 class="section-title">pack JSON 预览</h3>
+        <pre id="packPreview"></pre>
+      </div>
+
+      <div id="jsonSection" hidden>
+        <label class="field full"><span class="field-label">粘贴 JSON</span><textarea id="jsonPaste" rows="14"></textarea></label>
+        <p class="hint">字段规范见包格式契约（构筑需 构筑名/定位/属性基础…；角色另需 外貌/背景）</p>
+      </div>
+
+      <div class="actions">
+        <button id="upSubmit" class="primary">提交</button>
+        <span id="upError" class="error-text"></span>
+      </div>
+    </div>
+  </section>
+
+  <!-- 管理密钥弹层 -->
+  <div id="keyModal" class="overlay" hidden>
+    <div class="card-box">
+      <h2>保存你的管理密钥</h2>
+      <p class="agreement-text">这是你的管理密钥，只显示这一次，请立即保存。凭它更新或下架本包。</p>
+      <pre id="keyValue" class="key-value"></pre>
+      <div class="actions">
+        <button id="keyCopy" class="primary">复制</button>
+        <button id="keyDetail">查看详情</button>
+        <button id="keyClose" class="ghost">返回列表</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 通用提示 -->
+  <div id="toast" class="toast" hidden></div>
+
+<script type="module">
+import * as W from '/page-lib.js';
+
+// ==================== 常量与状态 ====================
+const TYPE_LABEL = { extension: '扩展', build: '构筑', character: '角色' };
+const PAGE_SIZE = 20;
+const PROBE_TIMEOUT_MS = 4000;
+
+const $ = selector => document.querySelector(selector);
+
+const state = {
+  bridgeOk: false,
+  q: '',
+  type: '',
+  sort: 'updated',
+  offset: 0,
+  limit: PAGE_SIZE,
+  packs: [],
+  total: 0,
+  loading: false,
+  draftId: '',
+  currentDetailId: '',
+};
+
+const bridge = W.createBridgeClient({ parentWindow: window.parent, selfWindow: window });
+
+// ==================== 通用小工具 ====================
+function el(tag, className, text) {
+  const node = document.createElement(tag);
+  if (className) node.className = className;
+  if (text !== undefined && text !== null) node.textContent = String(text);
+  return node;
+}
+
+function button(label, className, onClick) {
+  const node = el('button', className, label);
+  if (onClick) node.addEventListener('click', onClick);
+  return node;
+}
+
+function truncate(value, max) {
+  const text = String(value ?? '');
+  return text.length > max ? text.slice(0, max) + '…' : text;
+}
+
+function splitList(value) {
+  return String(value ?? '')
+    .split(',')
+    .map(part => part.trim())
+    .filter(Boolean);
+}
+
+function intOr(value, fallback) {
+  const n = parseInt(value, 10);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function numOr(value, fallback) {
+  const n = parseFloat(value);
+  return Number.isFinite(n) ? n : fallback;
+}
+
+function nullableInt(value) {
+  const raw = String(value ?? '').trim();
+  if (!raw) return null;
+  const n = parseInt(raw, 10);
+  return Number.isFinite(n) ? n : null;
+}
+
+function formatTime(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso ?? '');
+  const pad = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
+}
+
+function typeLabel(type) {
+  return TYPE_LABEL[type] ?? type;
+}
+
+let toastTimer = 0;
+function toast(message, isError) {
+  const node = $('#toast');
+  node.textContent = message;
+  node.classList.toggle('error', !!isError);
+  node.hidden = false;
+  clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => { node.hidden = true; }, 3500);
+}
+
+function showListView() {
+  $('#detailView').hidden = true;
+  $('#uploadView').hidden = true;
+  $('#listView').hidden = false;
+  window.scrollTo(0, 0);
+}
+
+function showUploadView() {
+  $('#detailView').hidden = true;
+  $('#uploadView').hidden = false;
+  $('#listView').hidden = true;
+  window.scrollTo(0, 0);
+}
+
+// ==================== 1. 免责声明 ====================
+function initAgreement() {
+  let accepted = false;
+  try {
+    accepted = W.isAgreementAccepted(localStorage);
+  } catch {
+    accepted = false;
+  }
+  const gate = $('#agreement');
+  gate.hidden = accepted;
+  $('#agreeBtn').addEventListener('click', () => {
+    try {
+      W.acceptAgreement(localStorage);
+    } catch {
+      /* 隐私模式下写不进也放行 */
+    }
+    gate.hidden = true;
+  });
+}
+
+// ==================== 3. 桥状态 ====================
+function setBridgeUp() {
+  state.bridgeOk = true;
+  $('#bridgeBanner').hidden = true;
+  if (state.currentDetailId && !$('#detailView').hidden) openDetail(state.currentDetailId);
+}
+
+function setBridgeDown() {
+  state.bridgeOk = false;
+  $('#bridgeBanner').hidden = false;
+  if (state.currentDetailId && !$('#detailView').hidden) openDetail(state.currentDetailId);
+}
+
+function probeBridge() {
+  let settled = false;
+  const timer = setTimeout(() => {
+    if (!settled) setBridgeDown();
+  }, PROBE_TIMEOUT_MS);
+  bridge
+    .request('getContext')
+    .then(() => {
+      settled = true;
+      clearTimeout(timer);
+      setBridgeUp();
+    })
+    .catch(() => {
+      settled = true;
+      clearTimeout(timer);
+      setBridgeDown();
+    });
+}
+
+// ==================== 4. 列表 ====================
+function renderCard(meta) {
+  const card = el('article', 'card');
+  card.tabIndex = 0;
+
+  const head = el('div', 'card-head');
+  head.append(el('h3', 'card-name', meta.name));
+  head.append(el('span', `badge badge-${meta.type}`, typeLabel(meta.type)));
+  card.append(head);
+
+  card.append(el('div', 'card-meta', `${meta.authorName ?? ''} · v${meta.version ?? ''}`));
+  card.append(el('p', 'card-desc', truncate(meta.description || '（无简介）', 120)));
+
+  const foot = el('div', 'card-foot');
+  foot.append(el('span', null, `⬇ ${meta.downloads ?? 0}`));
+  foot.append(el('span', null, formatTime(meta.updated)));
+  card.append(foot);
+
+  const open = () => openDetail(meta.id);
+  card.addEventListener('click', open);
+  card.addEventListener('keydown', event => {
+    if (event.key === 'Enter') open();
+  });
+  return card;
+}
+
+function renderGrid() {
+  $('#grid').replaceChildren(...state.packs.map(renderCard));
+  $('#listEmpty').hidden = state.packs.length > 0;
+  $('#loadMore').hidden = state.packs.length >= state.total;
+}
+
+async function loadList({ reset } = {}) {
+  if (state.loading) return;
+  state.loading = true;
+  if (reset) {
+    state.offset = 0;
+    state.packs = [];
+  }
+  try {
+    const res = await W.api.list({
+      q: state.q,
+      type: state.type,
+      sort: state.sort,
+      limit: state.limit,
+      offset: state.offset,
+    });
+    state.total = res.total ?? 0;
+    const page = res.packs ?? [];
+    state.packs = reset ? page : state.packs.concat(page);
+    state.offset = state.packs.length;
+    renderGrid();
+  } catch (error) {
+    toast('列表加载失败：' + error.message, true);
+  } finally {
+    state.loading = false;
+  }
+}
+
+// ==================== 5. 详情 ====================
+function renderPreview(pack) {
+  const box = el('div');
+
+  if (pack.type === 'extension') {
+    const entries = pack.worldbookEntries ?? [];
+    if (entries.length === 0) {
+      box.append(el('p', 'hint', '（无条目）'));
+      return box;
+    }
+    for (const entry of entries) {
+      const item = el('div', 'preview-entry');
+      item.append(el('div', 'preview-name', entry.name ?? ''));
+      item.append(el('div', 'preview-content', truncate(entry.content ?? '', 160)));
+      box.append(item);
+    }
+    return box;
+  }
+
+  let rendered;
+  try {
+    rendered = W.packToWorldbookEntries(pack);
+  } catch {
+    rendered = null;
+  }
+  if (!rendered) {
+    box.append(el('p', 'hint', '无法渲染预览'));
+    return box;
+  }
+  for (const entry of rendered) {
+    const item = el('div', 'preview-entry');
+    item.append(el('div', 'preview-name', entry.name ?? ''));
+    item.append(el('pre', 'preview-content', entry.content ?? ''));
+    box.append(item);
+  }
+  return box;
+}
+
+function renderActions(pack, installed) {
+  const box = el('div', 'actions');
+
+  if (!state.bridgeOk) {
+    box.append(el('div', 'install-state', '未连接宿主脚本'));
+    const install = button('安装', 'primary');
+    const uninstall = button('卸载', 'danger');
+    install.disabled = true;
+    uninstall.disabled = true;
+    box.append(install, uninstall);
+    box.append(el('div', 'hint', '请从酒馆内的「创意工坊」按钮打开本页面后再安装或卸载'));
+    return box;
+  }
+
+  let label = '安装';
+  if (installed) {
+    if (installed.version === pack.version) {
+      box.append(el('div', 'install-state', `已安装 v${installed.version}`));
+      label = '重新安装';
+    } else {
+      box.append(el('div', 'install-state', `已安装 v${installed.version}，有新版 v${pack.version}`));
+      label = '更新';
+    }
+  } else {
+    box.append(el('div', 'install-state', '未安装'));
+  }
+
+  box.append(button(label, 'primary', () => doInstall(pack.id)));
+  if (installed) box.append(button('卸载', 'danger', () => doUninstall(pack.id)));
+  return box;
+}
+
+function renderDetail(pack, installed) {
+  const body = $('#detailBody');
+  body.replaceChildren();
+
+  const head = el('div', 'detail-head');
+  head.append(el('h2', 'detail-name', pack.name));
+  head.append(el('span', `badge badge-${pack.type}`, typeLabel(pack.type)));
+  body.append(head);
+
+  const author = pack.author ?? {};
+  body.append(el('div', 'detail-meta', `作者：${author.name ?? ''}${author.discord ? `（Discord: ${author.discord}）` : ''}`));
+  body.append(el('div', 'detail-meta', `版本：v${pack.version ?? ''}`));
+
+  if (Array.isArray(pack.tags) && pack.tags.length) {
+    const tagRow = el('div', 'tag-row');
+    for (const tag of pack.tags) tagRow.append(el('span', 'tag', tag));
+    body.append(tagRow);
+  }
+
+  body.append(el('p', 'detail-desc', pack.description || '（无简介）'));
+
+  body.append(el('h3', 'section-title', '条目预览'));
+  body.append(renderPreview(pack));
+  body.append(renderActions(pack, installed));
+}
+
+async function readInstalled(id) {
+  if (!state.bridgeOk) return null;
+  try {
+    const res = await bridge.request('getEntries', { worldbookName: W.WORKSHOP_WORLDBOOK });
+    return W.computeInstalled(res?.entries ?? []).get(id) ?? null;
+  } catch {
+    return null;
+  }
+}
+
+async function openDetail(id) {
+  state.currentDetailId = id;
+  $('#detailView').hidden = false;
+  const body = $('#detailBody');
+  body.replaceChildren(el('div', 'loading', '加载中…'));
+  try {
+    const res = await W.api.get(id);
+    const pack = res.pack;
+    const installed = await readInstalled(id);
+    renderDetail(pack, installed);
+  } catch (error) {
+    body.replaceChildren(el('div', 'error-text', '加载失败：' + error.message));
+  }
+}
+
+async function doInstall(id) {
+  try {
+    const res = await W.api.get(id);
+    const pack = res.pack;
+    const entries = W.packToWorldbookEntries(pack);
+    const sourceMeta = W.sourceMetaOf(pack);
+    const out = await bridge.request('upsertWorkshopEntries', {
+      worldbookName: W.WORKSHOP_WORLDBOOK,
+      sourceMeta,
+      entries,
+    });
+    toast(`已安装 ${out.installed} 条`);
+    await openDetail(id);
+  } catch (error) {
+    toast('安装失败：' + error.message, true);
+  }
+}
+
+async function doUninstall(id) {
+  try {
+    const out = await bridge.request('deleteWorkshopEntries', {
+      worldbookName: W.WORKSHOP_WORLDBOOK,
+      sourceMeta: { sourceId: id },
+    });
+    if (out.removed === 0) toast('没有找到该内容包的条目');
+    else toast(`已移除 ${out.removed} 条`);
+    await openDetail(id);
+  } catch (error) {
+    toast('卸载失败：' + error.message, true);
+  }
+}
+
+// ==================== 6. 上传 ====================
+let entryDrafts = [];
+
+function newEntry() {
+  return {
+    name: '',
+    content: '',
+    constant: false,
+    keys: '',
+    keysSecondary: '',
+    position: 'after_char',
+    depth: '0',
+    order: '100',
+    probability: '100',
+    preventRecursion: false,
+    excludeRecursion: false,
+    sticky: '',
+    cooldown: '',
+    delay: '',
+  };
+}
+
+function buildEntryObject(draft) {
+  return {
+    name: draft.name.trim(),
+    content: draft.content,
+    enabled: true,
+    constant: !!draft.constant,
+    keys: splitList(draft.keys),
+    keysSecondary: splitList(draft.keysSecondary),
+    position: draft.position || 'after_char',
+    depth: intOr(draft.depth, 0),
+    order: intOr(draft.order, 100),
+    probability: numOr(draft.probability, 100),
+    preventRecursion: !!draft.preventRecursion,
+    excludeRecursion: !!draft.excludeRecursion,
+    sticky: nullableInt(draft.sticky),
+    cooldown: nullableInt(draft.cooldown),
+    delay: nullableInt(draft.delay),
+  };
+}
+
+function packBase() {
+  return {
+    format: 'wxhl-mod@1',
+    id: state.draftId,
+    name: $('#upName').value.trim(),
+    type: $('#upType').value,
+    version: $('#upVersion').value.trim(),
+    author: { name: $('#upAuthor').value.trim(), discord: $('#upDiscord').value.trim() },
+    tags: splitList($('#upTags').value),
+    description: $('#upDesc').value,
+    requires: { cardVersion: '' },
+  };
+}
+
+function buildPackForPreview() {
+  const pack = packBase();
+  pack.worldbookEntries = entryDrafts.map(buildEntryObject);
+  return pack;
+}
+
+function buildPackForSubmit() {
+  const pack = packBase();
+  if (pack.type === 'extension') {
+    pack.worldbookEntries = entryDrafts.map(buildEntryObject);
+    return pack;
+  }
+  const raw = $('#jsonPaste').value.trim();
+  let parsed;
+  try {
+    parsed = JSON.parse(raw);
+  } catch (error) {
+    throw new Error('JSON 解析失败：' + error.message);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error('粘贴的内容必须是 JSON 对象');
+  }
+  if (pack.type === 'build') pack.build = parsed;
+  else pack.character = parsed;
+  return pack;
+}
+
+function validatePack(pack) {
+  if (!pack.name) return '请填写名称';
+  if (!/^\d+\.\d+\.\d+$/.test(pack.version)) return '版本号须为 x.y.z（如 1.0.0）';
+  if (!pack.author.name) return '请填写作者名';
+  if (pack.type === 'extension') {
+    if (pack.worldbookEntries.length === 0) return '内容包至少要有一条世界书条目';
+    for (const entry of pack.worldbookEntries) {
+      if (!entry.name) return '每条条目都要有名称';
+      if (!entry.content) return `条目「${entry.name || '（未命名）'}」缺少正文`;
+      if (!entry.constant && entry.keys.length === 0) return `条目「${entry.name}」是绿灯，至少要有一个主关键词`;
+    }
+  }
+  return '';
+}
+
+function updatePreview() {
+  const type = $('#upType').value;
+  $('#extSection').hidden = type !== 'extension';
+  $('#jsonSection').hidden = type === 'extension';
+  if (type !== 'extension') return;
+  try {
+    $('#packPreview').textContent = JSON.stringify(buildPackForPreview(), null, 2);
+  } catch (error) {
+    $('#packPreview').textContent = '（预览生成失败：' + error.message + '）';
+  }
+}
+
+function field(labelText, control, extraClass) {
+  const wrap = el('label', 'field' + (extraClass ? ' ' + extraClass : ''));
+  wrap.append(el('span', 'field-label', labelText));
+  wrap.append(control);
+  return wrap;
+}
+
+function draftTextInput(draft, key) {
+  const input = document.createElement('input');
+  input.type = 'text';
+  input.value = draft[key] ?? '';
+  input.addEventListener('input', () => {
+    draft[key] = input.value;
+    updatePreview();
+  });
+  return input;
+}
+
+function draftTextarea(draft, key, rows) {
+  const area = document.createElement('textarea');
+  area.rows = rows;
+  area.value = draft[key] ?? '';
+  area.addEventListener('input', () => {
+    draft[key] = area.value;
+    updatePreview();
+  });
+  return area;
+}
+
+const CHECK_LABEL = {
+  constant: '蓝灯常驻（不靠关键词）',
+  preventRecursion: '防止递归（prevent incoming）',
+  excludeRecursion: '排除递归（prevent outgoing）',
+};
+
+function draftCheckbox(draft, key) {
+  const input = document.createElement('input');
+  input.type = 'checkbox';
+  input.checked = !!draft[key];
+  input.addEventListener('change', () => {
+    draft[key] = input.checked;
+    updatePreview();
+  });
+  const wrap = el('label', 'field check');
+  wrap.append(input);
+  wrap.append(el('span', 'field-label', CHECK_LABEL[key] ?? key));
+  return wrap;
+}
+
+function draftPositionSelect(draft) {
+  const select = document.createElement('select');
+  const options = [
+    ['after_char', '角色定义后'],
+    ['before_char', '角色定义前'],
+    ['at_depth', '指定深度'],
+  ];
+  for (const [value, label] of options) {
+    const option = document.createElement('option');
+    option.value = value;
+    option.textContent = label;
+    select.append(option);
+  }
+  select.value = draft.position || 'after_char';
+  select.addEventListener('change', () => {
+    draft.position = select.value;
+    updatePreview();
+  });
+  return select;
+}
+
+function entryRow(draft, index) {
+  const row = el('div', 'entry-row');
+
+  const head = el('div', 'entry-head');
+  head.append(el('span', 'entry-index', `条目 ${index + 1}`));
+  head.append(
+    button('删除', 'danger small', () => {
+      entryDrafts.splice(index, 1);
+      if (entryDrafts.length === 0) entryDrafts.push(newEntry());
+      renderEntriesEditor();
+    }),
+  );
+  row.append(head);
+
+  row.append(field('名称', draftTextInput(draft, 'name')));
+  row.append(field('正文', draftTextarea(draft, 'content', 4), 'full'));
+  row.append(draftCheckbox(draft, 'constant'));
+  row.append(field('绿灯关键词（逗号分隔）', draftTextInput(draft, 'keys')));
+  row.append(field('次要关键词（逗号分隔）', draftTextInput(draft, 'keysSecondary')));
+  row.append(field('插入位置', draftPositionSelect(draft)));
+  row.append(field('depth', draftTextInput(draft, 'depth')));
+  row.append(field('order', draftTextInput(draft, 'order')));
+  row.append(field('概率（0-100）', draftTextInput(draft, 'probability')));
+  row.append(draftCheckbox(draft, 'preventRecursion'));
+  row.append(draftCheckbox(draft, 'excludeRecursion'));
+  row.append(field('sticky（留空为无）', draftTextInput(draft, 'sticky')));
+  row.append(field('cooldown（留空为无）', draftTextInput(draft, 'cooldown')));
+  row.append(field('delay（留空为无）', draftTextInput(draft, 'delay')));
+  return row;
+}
+
+function renderEntriesEditor() {
+  const box = $('#entriesEditor');
+  box.replaceChildren(...entryDrafts.map((draft, index) => entryRow(draft, index)));
+  updatePreview();
+}
+
+function genId() {
+  return Math.random().toString(36).slice(2, 10).padEnd(8, '0');
+}
+
+function openUpload() {
+  showUploadView();
+  state.draftId = genId();
+  $('#upName').value = '';
+  $('#upVersion').value = '1.0.0';
+  $('#upAuthor').value = '';
+  $('#upDiscord').value = '';
+  $('#upTags').value = '';
+  $('#upDesc').value = '';
+  $('#upType').value = 'extension';
+  $('#jsonPaste').value = '';
+  $('#upError').textContent = '';
+  entryDrafts = [newEntry()];
+  renderEntriesEditor();
+}
+
+async function submitUpload() {
+  const errorBox = $('#upError');
+  errorBox.textContent = '';
+  let pack;
+  try {
+    pack = buildPackForSubmit();
+  } catch (error) {
+    errorBox.textContent = error.message;
+    return;
+  }
+  const problem = validatePack(pack);
+  if (problem) {
+    errorBox.textContent = problem;
+    return;
+  }
+  const submit = $('#upSubmit');
+  submit.disabled = true;
+  try {
+    const res = await W.api.upload(pack);
+    showManageKey(res.id, res.manageKey);
+  } catch (error) {
+    errorBox.textContent = error.message;
+  } finally {
+    submit.disabled = false;
+  }
+}
+
+function showManageKey(id, manageKey) {
+  $('#keyValue').textContent = manageKey;
+  const copy = $('#keyCopy');
+  copy.textContent = '复制';
+  copy.onclick = async () => {
+    try {
+      await navigator.clipboard.writeText(manageKey);
+      copy.textContent = '已复制';
+    } catch {
+      copy.textContent = '复制失败，请手动选择复制';
+    }
+  };
+  $('#keyDetail').onclick = () => {
+    $('#keyModal').hidden = true;
+    openDetail(id);
+  };
+  $('#keyClose').onclick = () => {
+    $('#keyModal').hidden = true;
+    showListView();
+    loadList({ reset: true });
+  };
+  $('#keyModal').hidden = false;
+}
+
+// ==================== 装配 ====================
+let searchTimer = 0;
+
+function init() {
+  initAgreement();
+
+  $('#search').addEventListener('input', event => {
+    state.q = event.target.value.trim();
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => loadList({ reset: true }), 300);
+  });
+  $('#filterType').addEventListener('change', event => {
+    state.type = event.target.value;
+    loadList({ reset: true });
+  });
+  $('#sortBy').addEventListener('change', event => {
+    state.sort = event.target.value;
+    loadList({ reset: true });
+  });
+  $('#loadMore').addEventListener('click', () => loadList({ reset: false }));
+
+  $('#uploadBtn').addEventListener('click', openUpload);
+  $('#uploadBack').addEventListener('click', showListView);
+  $('#detailBack').addEventListener('click', showListView);
+
+  $('#addEntry').addEventListener('click', () => {
+    entryDrafts.push(newEntry());
+    renderEntriesEditor();
+  });
+  $('#upType').addEventListener('change', updatePreview);
+  for (const id of ['upName', 'upVersion', 'upAuthor', 'upDiscord', 'upTags', 'upDesc']) {
+    $('#' + id).addEventListener('input', updatePreview);
+  }
+  $('#upSubmit').addEventListener('click', submitUpload);
+
+  loadList({ reset: true });
+  probeBridge();
+}
+
+init();
+</script>
+</body>
+</html>
