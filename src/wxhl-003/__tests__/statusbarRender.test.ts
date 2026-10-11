@@ -1,6 +1,6 @@
 // 状态栏渲染器：纯函数，只吐 HTML 字符串。
 import { describe, expect, it } from 'vitest';
-import { joinPath, renderResourceTree, renderSpecialStatusList, statusKind } from '../statusbar/render';
+import { joinPath, renderCareerSection, renderResourceTree, renderSpecialStatusList, statusKind } from '../statusbar/render';
 
 describe('joinPath', () => {
   it('普通键直接拼', () => {
@@ -153,5 +153,59 @@ describe('renderResourceTree', () => {
   it('畸形值不抛异常', () => {
     expect(() => renderResourceTree({ a: new Date() } as any, 'p', 无, 'k')).not.toThrow();
     expect(() => renderResourceTree(null, 'p', 无, 'k')).not.toThrow();
+  });
+});
+
+describe('renderCareerSection', () => {
+  const 无 = new Set<string>();
+
+  it('职业简介：渲染成一行且可编辑', () => {
+    const h = renderCareerSection({ 职业简介: '以短休换爆发' }, '契约者.职业', 无, 'k');
+    expect(h).toContain('职业简介');
+    expect(h).toContain('以短休换爆发');
+    expect(h).toContain('data-path="契约者.职业.职业简介"');
+  });
+
+  it('职业简介缺省时显示「无」', () => {
+    const h = renderCareerSection({}, '契约者.职业', 无, 'k');
+    expect(h).toContain('职业简介');
+  });
+
+  it('扁平职业特性：文字叶节点直接显示', () => {
+    const h = renderCareerSection({ 职业特性: { 坚韧: '受到的伤害 -1' } }, '契约者.职业', 无, 'k');
+    expect(h).toContain('坚韧');
+    expect(h).toContain('受到的伤害 -1');
+  });
+
+  it('嵌套职业特性：分组折叠，递归出子节点', () => {
+    const h = renderCareerSection(
+      { 职业特性: { 龙裔系: { 龙鳞: '防御 +2', 龙息: '每场一次' } } },
+      '契约者.职业', 无, 'k',
+    );
+    expect(h).toContain('mate-sub');
+    expect(h).toContain('龙裔系');
+    expect(h).toContain('龙鳞');
+    expect(h).toContain('龙息');
+  });
+
+  it('兼容旧写法 {效果: "..."}', () => {
+    const h = renderCareerSection({ 职业特性: { 坚韧: { 效果: '减伤 1' } } }, '契约者.职业', 无, 'k');
+    expect(h).toContain('减伤 1');
+  });
+
+  it('职业技能与传承技能各自成块', () => {
+    const h = renderCareerSection(
+      { 职业技能: { 斩击: { 名称: '斩击', 等级: 1 } }, 传承技能: { 祖传: { 名称: '祖传' } } },
+      '契约者.职业', 无, 'k',
+    );
+    expect(h).toContain('职业技能');
+    expect(h).toContain('斩击');
+    expect(h).toContain('传承技能');
+    expect(h).toContain('祖传');
+  });
+
+  it('空职业不抛异常', () => {
+    expect(() => renderCareerSection(null, 'p', 无, 'k')).not.toThrow();
+    expect(() => renderCareerSection({}, 'p', 无, 'k')).not.toThrow();
   });
 });
