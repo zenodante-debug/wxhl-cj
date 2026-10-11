@@ -197,7 +197,7 @@ function placeBall(el: HTMLElement, dragging: boolean): void {
 
 /** 工坊面板打开时把球藏起来（球在最大 z-index，否则会浮在面板上面碍事） */
 function syncPanelVisibility(el: HTMLElement): void {
-  let open = false;
+  let open: boolean;
   try {
     open = Boolean(hostDocumentOf().getElementById(PANEL_ID));
   } catch {
@@ -320,8 +320,6 @@ export function installBall(): () => void {
 
   bindPointerDrag(el);
 
-  let syncTimer: number | undefined;
-
   const update = () => {
     placeBall(el, el.dataset.wxhlDragging === '1');
     syncPanelVisibility(el);
@@ -331,7 +329,7 @@ export function installBall(): () => void {
   const MutationObserverCtor = (host.MutationObserver ?? MutationObserver) as typeof MutationObserver;
   const observer = new MutationObserverCtor(update);
   observer.observe(doc.documentElement, { childList: true, subtree: true });
-  syncTimer = host.setInterval(update, 700);
+  const syncTimer = host.setInterval(update, 700);
   host.addEventListener('resize', update);
   host.visualViewport?.addEventListener('resize', update);
   host.visualViewport?.addEventListener('scroll', update);
@@ -339,7 +337,7 @@ export function installBall(): () => void {
 
   const teardown = () => {
     observer.disconnect();
-    if (syncTimer !== undefined) host.clearInterval(syncTimer);
+    host.clearInterval(syncTimer);
     host.removeEventListener('resize', update);
     host.visualViewport?.removeEventListener('resize', update);
     host.visualViewport?.removeEventListener('scroll', update);

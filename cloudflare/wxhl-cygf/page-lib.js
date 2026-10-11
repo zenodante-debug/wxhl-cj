@@ -176,7 +176,7 @@ function renderDungeonAchievement(成就) {
 export function renderDungeonEntry(dungeon) {
   return [
     `【副本】${dungeon.副本名称}`,
-    `类型：${dungeon.副本类型}　基准等级：${dungeon.基准等级}　时间限制：${dungeon.时间限制}`,
+    `类型：${dungeon.副本类型}\u3000基准等级：${dungeon.基准等级}\u3000时间限制：${dungeon.时间限制}`,
     `背景设定：\n${dungeon.背景设定}`,
     `地图与区域：\n${dungeon.地图与区域}`,
     `敌人配置：\n${dungeon.敌人配置}`,
