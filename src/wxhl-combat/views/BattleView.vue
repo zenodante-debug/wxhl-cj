@@ -106,6 +106,8 @@
         <div class="unit-dist">{{ u.距离 }}米（{{ 距离带(u.距离) }}）· 额度 {{ u.额度 }}</div>
         <div class="unit-slots">主{{ u.行动槽.主要 }} 次{{ u.行动槽.次要 }} 移{{ u.行动槽.移动 }} 反{{ u.行动槽.反应 }}</div>
         <div v-if="u.状态.length" class="unit-status">状态: {{ u.状态.map(st => st.名 + (st.层数 ? `×${st.层数}` : '')).join('，') }}</div>
+        <!-- 自定义资源（愤怒 / 环位…）：引擎真的会记，但以前界面一个字都不显示 → 玩家说"用不了" -->
+        <div v-if="资源文案(u.资源)" class="unit-res">资源: {{ 资源文案(u.资源) }}</div>
         <div v-if="u.护盾 > 0" class="unit-shield">护盾: {{ u.护盾 }}</div>
         <div v-if="冷却中(u)" class="unit-cd">冷却中: {{ 冷却中(u) }}</div>
 
@@ -127,7 +129,9 @@
               <span v-if="数值修正文案(st)">｜{{ 数值修正文案(st) }}</span>
               <span v-if="st.词条 && st.词条.length" class="dim2">｜词条 {{ st.词条.join('、') }}</span>
             </div>
-            <div v-if="!u.状态.length" class="ud-line dim2">（无状态）</div>
+            <div v-if="!u.状态.length && !资源文案(u.资源)" class="ud-line dim2">（无状态）</div>
+            <!-- 自定义资源与状态并列展示（玩家口径：特殊资源就住在"状态与增益"里） -->
+            <div v-if="资源文案(u.资源)" class="ud-line">资源：{{ 资源文案(u.资源) }}</div>
             <div v-if="u.词条 && [...u.词条].length" class="ud-line">词条：{{ [...u.词条].join('、') }}</div>
             <div v-if="u.护盾 > 0" class="ud-line">护盾：{{ u.护盾 }}</div>
           </div>
@@ -399,7 +403,7 @@
 import { computed, reactive, ref, watch } from 'vue';
 import { 距离带 } from '../engine/distance';
 import { 可提交, 构造行动声明, type 行动槽填写 } from '../engine/actionInput';
-import { 造我方条目, 造技能展示, 造场地条目, 布局分布, 选中行动预览, 显示名, type 我方条目 } from '../engine/viewModel';
+import { 造我方条目, 造技能展示, 造场地条目, 布局分布, 选中行动预览, 显示名, 资源文案, type 我方条目 } from '../engine/viewModel';
 import { 需要选技能, 技能候选 } from '../engine/actionOptions';
 import { 列行动选项 } from '../engine/actionOptions';
 import { 徒手伤害骰 } from '../engine/damage';

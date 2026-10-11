@@ -149,6 +149,23 @@ describe('views/*.vue 能渲染（模板读错属性的唯一防线）', () => {
     expect(html).toContain('执行本轮');
   });
 
+  it('BattleView：**自定义资源**显示在单位卡上（玩家实测：「可以识别，但无法使用、没写入」）', { timeout: 编译超时 }, async () => {
+    const 状态 = 造战斗状态();
+    状态.单位.契约者 = { ...状态.单位.契约者, 资源: { 愤怒: 5, 环位: 2 } };
+
+    const html = await 渲染('BattleView.vue', { 状态, 日志: [], 敌方意图: [] });
+
+    expect(html).toContain('资源:');
+    expect(html).toContain('愤怒 ×5');
+    expect(html).toContain('环位 ×2');
+  });
+
+  it('BattleView：没有资源的单位不出现「资源:」那一行', { timeout: 编译超时 }, async () => {
+    const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [] });
+
+    expect(html).not.toContain('资源:');
+  });
+
   it('行动下拉**按行动类型过滤**：主要只列主要行动技能 + 基础攻击；次要列次要的（这里是空的）', { timeout: 编译超时 }, async () => {
     // 造战斗状态里：月牙天冲/诛仙裂空 都是「主要行动」，两个单位都没有副武器
     const html = await 渲染('BattleView.vue', { 状态: 造战斗状态(), 日志: [], 敌方意图: [] });

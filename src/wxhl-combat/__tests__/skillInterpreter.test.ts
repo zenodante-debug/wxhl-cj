@@ -211,6 +211,22 @@ describe('skillInterpreter · 提示词必须教模型用上引擎真正执行�
     expect(提示词).toContain('最后手段');
   });
 
+  // 玩家实测 2026-10-11：「特殊资源虽然可以识别，但是无法使用……之前都没有写入」
+  it('有【特殊资源怎么写】配方：攒层 / 花掉 / 按层数触发阈值', () => {
+    expect(提示词).toContain('特殊资源');
+    expect(提示词).toContain('环位');
+    expect(提示词).toContain('愤怒');
+    expect(提示词).toMatch(/"操作"\s*:\s*"获得"/);
+    expect(提示词).toMatch(/"操作"\s*:\s*"消耗"/);
+    // 按层数触发要给出「条件读资源」的写法
+    expect(提示词).toMatch(/"源"\s*:\s*"资源"\s*,\s*"名"\s*:\s*"愤怒"/);
+    expect(提示词).toContain('受击时');
+  });
+
+  it('警告**别把自定义资源写成 HP**（那会真的扣血）', () => {
+    expect(提示词).toMatch(/别把.*写成 HP|千万别把.*HP/);
+  });
+
   it('属性点 vs 修正值两条通道讲清楚（修正值通道不再乘位阶系数）', () => {
     expect(提示词).toContain('STR修正');
     expect(提示词).toContain('AGI修正');
