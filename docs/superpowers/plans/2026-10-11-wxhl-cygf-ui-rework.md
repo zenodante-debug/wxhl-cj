@@ -191,7 +191,7 @@ describe('persona · 人设', () => {
   });
 
   it('可选构筑：粘贴合法 BuildPayload 时填入', () => {
-    const parsed = PersonaPack.parse({ ...base, type: 'persona', persona: { ...persona, 构筑方向: '走高闪避', 构筑: { 构筑名: '雾中剑客', 定位: 'x' } } });
+    const parsed = PersonaPack.parse({ ...base, type: 'persona', persona: { ...persona, 构筑方向: '走高闪避', 构筑: { 构筑名: '雾中剑客', 定位: 'x', 属性分配方向: { 主属性: 'AGI' } } } });
     expect(parsed.persona.构筑?.构筑名).toBe('雾中剑客');
   });
 });
