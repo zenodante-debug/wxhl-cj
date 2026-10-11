@@ -28,6 +28,20 @@ export interface ListQuery {
   offset: number;
 }
 
+/** listPacks 的投影行：只含 SELECT 列出的元数据（无 manage_hash / pack_json 等敏感或大字段） */
+export interface PackListRow {
+  id: string;
+  name: string;
+  type: string;
+  version: string;
+  author_name: string;
+  tags_json: string;
+  description: string;
+  downloads: number;
+  entry_count: number;
+  updated: string;
+}
+
 /** LIKE 通配符转义：玩家输入的 % / _ / \ 按字面量处理 */
 export function likeEscape(s: string): string {
   return s.replace(/[\\%_]/g, ch => `\\${ch}`);
@@ -74,7 +88,7 @@ export async function getPackById(db: D1Database, id: string): Promise<PackRow |
   return (await db.prepare(`SELECT * FROM packs WHERE id = ?`).bind(id).first()) as PackRow | null;
 }
 
-export async function listPacks(db: D1Database, query: ListQuery): Promise<{ rows: PackRow[]; total: number }> {
+export async function listPacks(db: D1Database, query: ListQuery): Promise<{ rows: PackListRow[]; total: number }> {
   const where: string[] = [`status = 'published'`];
   const args: unknown[] = [];
   if (query.type) {
@@ -101,7 +115,7 @@ export async function listPacks(db: D1Database, query: ListQuery): Promise<{ row
       `SELECT id, name, type, version, author_name, tags_json, description, downloads, entry_count, updated FROM packs WHERE ${whereSql} ${orderSql} LIMIT ? OFFSET ?`,
     )
     .bind(...args, query.limit, query.offset)
-    .all()) as { results: PackRow[] };
+    .all()) as { results: PackListRow[] };
   return { rows: rows.results ?? [], total: totalRow?.total ?? 0 };
 }
 

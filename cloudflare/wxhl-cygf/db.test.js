@@ -88,4 +88,34 @@ describe('数据层', () => {
     expect(await deletePackById(db, 'a1b2c3d4')).toBe(true);
     expect(await deletePackById(db, 'a1b2c3d4')).toBe(false);
   });
+
+  it('tag 过滤：只回 tags_json 含该标签的包', async () => {
+    const db = await freshDb();
+    await insertPack(db, row({ id: 'p1', name: '雾中列车', tags_json: '["副本"]' }));
+    await insertPack(db, row({ id: 'p2', name: '重装堡垒', tags_json: '["建造"]' }));
+    const page = await listPacks(db, { tag: '副本', limit: 50, offset: 0 });
+    expect(page.rows.map(r => r.id)).toEqual(['p1']);
+    expect(page.total).toBe(1);
+  });
+
+  it('{q, tag} 组合：q 分组短路后 tag 实参不错位（Finding 1）', async () => {
+    const db = await freshDb();
+    await insertPack(db, row({ id: 'p1', name: '雾中列车', tags_json: '["副本"]' }));
+    await insertPack(db, row({ id: 'p2', name: '重装堡垒', tags_json: '["建造"]' }));
+    const page = await listPacks(db, { q: '列车', tag: '副本', limit: 50, offset: 0 });
+    expect(page.total).toBe(1);
+    expect(page.rows.map(r => r.id)).toEqual(['p1']);
+  });
+
+  it('LIKE 大小写不敏感（SQLite 默认语义，Finding 2）', async () => {
+    const db = await freshDb();
+    await insertPack(db, row({ id: 'p1', name: 'Alpha' }));
+    expect((await listPacks(db, { q: 'alpha', limit: 50, offset: 0 })).rows.map(r => r.id)).toEqual(['p1']);
+  });
+
+  it('假件：WHERE 里出现未知列名抛错（认不出的 SQL 一律抛错，Finding 3）', async () => {
+    const db = await freshDb();
+    await expect(db.prepare(`SELECT COUNT(*) AS total FROM packs WHERE boo = ?`).bind('x').first()).rejects.toThrow(/未知列|no such column/);
+    await expect(db.prepare(`SELECT id FROM packs WHERE boo = ? ORDER BY updated DESC LIMIT ? OFFSET ?`).bind('x', 1, 0).all()).rejects.toThrow(/未知列|no such column/);
+  });
 });
