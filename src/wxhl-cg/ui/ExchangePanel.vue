@@ -8,7 +8,7 @@ import SparkLine from './SparkLine.vue';
 
 const store = useExchangeStore();
 const acct = computed(() => store.acct);
-const tab = ref<'market' | 'positions' | 'loan' | 'assets'>('market');
+const tab = ref<'market' | 'positions' | 'assets'>('market');
 const detail = ref<string | null>(null);
 const qty = ref(1);
 const leverage = ref(1);
@@ -57,8 +57,6 @@ async function doWithdraw() {
   }
 }
 
-const loanAmt = ref(0);
-const debtAmt = ref(0);
 const previewing = ref(false);
 const preview = ref<LiquidationResult | null>(null);
 
@@ -70,48 +68,14 @@ function openPreview() {
     toastr.error(e?.message ?? '清算预览失败');
   }
 }
-function doBorrow() {
-  try {
-    store.borrow(loanAmt.value);
-  } catch (e: any) {
-    toastr.error(e?.message ?? '借款失败');
-  }
-}
-function doRepay() {
-  try {
-    store.repay();
-  } catch (e: any) {
-    toastr.error(e?.message ?? '还款失败');
-  }
-}
-function doBorrowHigh() {
-  try {
-    store.borrowHigh();
-  } catch (e: any) {
-    toastr.error(e?.message ?? '高利贷失败');
-  }
-}
-function doPayDebt() {
-  try {
-    store.payDebt(debtAmt.value);
-  } catch (e: any) {
-    toastr.error(e?.message ?? '还债失败');
-  }
-}
 async function doBankruptcy() {
   try {
     await store.declareBankruptcy();
     previewing.value = false;
-    toastr.warning('破产清算完成——愿你下局好运');
+    toastr.warning('破产清算完成');
   } catch (e: any) {
     toastr.error(e?.message ?? '清算失败，已中止');
   }
-}
-
-const confirmDeath = ref(false);
-function doMarkDeath() {
-  store.markDeath();
-  confirmDeath.value = false;
 }
 </script>
 
@@ -126,7 +90,6 @@ function doMarkDeath() {
     <div class="cg-tabs">
       <button :class="{ on: tab === 'market' }" @click="tab = 'market'">行情</button>
       <button :class="{ on: tab === 'positions' }" @click="tab = 'positions'">持仓</button>
-      <button :class="{ on: tab === 'loan' }" @click="tab = 'loan'">借贷</button>
       <button :class="{ on: tab === 'assets' }" @click="tab = 'assets'">资产</button>
     </div>
 
@@ -164,34 +127,11 @@ function doMarkDeath() {
       </div>
     </div>
 
-    <div v-else-if="tab === 'loan'" class="cg-assets">
-      <template v-if="!acct.loan && acct.debt <= 0">
-        <div>可借额度：{{ store.loanOffer().maxAmount }}（利率 {{ store.loanOffer().rate * 100 }}%，期限 100 跳）</div>
-        <input v-model.number="loanAmt" type="number" min="1" placeholder="借款金额" />
-        <button @click="doBorrow">借款</button>
-      </template>
-      <template v-if="acct.loan">
-        <div>
-          借款本金：{{ acct.loan.principal }}（{{
-            acct.loan.highInterest ? '高利贷·还 2.5 倍+已累计利息 ' + acct.loan.accrued : '利率 ' + acct.loan.rate * 100 + '%'
-          }}）
-        </div>
-        <div v-if="!acct.loan.highInterest">到期：第 {{ acct.loan.dueTick }} 跳（当前 {{ acct.tick }}）</div>
-        <button @click="doRepay">还清</button>
-      </template>
-      <template v-if="acct.debt > 0">
-        <div class="cg-frozen">催收中债务：{{ acct.debt }}</div>
-        <input v-model.number="debtAmt" type="number" min="1" placeholder="还债金额" />
-        <button @click="doPayDebt">还债</button>
-        <button v-if="!acct.loan" class="danger" @click="doBorrowHigh">借高利贷（500，还 2.5 倍）</button>
-      </template>
-    </div>
-
     <div v-else class="cg-assets">
       <div>现金：{{ acct.cash }}</div>
       <div>净资产：{{ net }}</div>
       <div>累计亏损：{{ acct.cumulativeLoss }}（破产线 250）</div>
-      <div v-if="acct.frozen" class="cg-frozen">⛔ 账户冻结中</div>
+      <div v-if="acct.frozen" class="cg-frozen">⛔ 破产欠款未清：{{ acct.debt }}</div>
       <div class="cg-exchange">
         <h4>UP 兑换（1 UP = 1 币，双向 1% 手续费）</h4>
         <input v-model.number="exchangeAmt" type="number" min="1" placeholder="金额" />
@@ -210,20 +150,6 @@ function doMarkDeath() {
           <div class="cg-btns">
             <button class="danger" @click="doBankruptcy">确认清算</button>
             <button @click="previewing = false">取消</button>
-          </div>
-        </div>
-      </div>
-      <div class="cg-inheritance">
-        <div>
-          遗产估值 {{ store.inheritancePreview.estate }}｜现在死了要交：税 {{ store.inheritancePreview.tax }} + 过户费
-          {{ store.inheritancePreview.fee }}
-        </div>
-        <button class="danger" @click="confirmDeath = true">宣告死亡 / 放弃本局</button>
-        <div v-if="confirmDeath" class="cg-modal">
-          <p>宣告后账户打上死亡标记，下次打开交易所先扣缴遗产税。确定？</p>
-          <div class="cg-btns">
-            <button class="danger" @click="doMarkDeath">确定</button>
-            <button @click="confirmDeath = false">取消</button>
           </div>
         </div>
       </div>

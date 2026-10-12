@@ -13,17 +13,6 @@ export interface Position {
   margin: number; // 占用保证金
 }
 
-export type LoanState = 'none' | 'normal' | 'delinquent';
-
-export interface ActiveLoan {
-  principal: number;
-  rate: number; // 正常借款的单期利率；高利贷固定为偿还倍数 2.5
-  dueTick: number;
-  highInterest: boolean;
-  accrued: number; // 高利贷已累计利息
-  ticksHeld: number; // 高利贷持有跳数（利息递增用）
-}
-
 export interface ActiveNews {
   stock: string; // 股票代码
   text: string;
@@ -32,22 +21,37 @@ export interface ActiveNews {
   ttl: number; // 剩余生效跳数
 }
 
+export type LogKind = 'news' | 'trade' | 'system';
+
+export interface LogEntry {
+  tick: number;
+  time: string; // 现实时钟 HH:MM:SS
+  kind: LogKind;
+  text: string;
+}
+
+/** 存档里保留的日志条数上限（界面只显示最近 50 条） */
+export const LOG_CAP = 200;
+
 export interface ExchangeAccount {
   v: 1;
-  cash: number; // 交易所币，可为负（高利贷利息）
+  cash: number; // 交易所币，可为负
   positions: Record<string, Position>;
   prices: Record<string, number>;
   priceHistory: Record<string, number[]>;
+  /** 本次开盘基准价：脚本加载时快照，走势图基准线与涨跌幅都按它算 */
+  openPrices: Record<string, number>;
   tick: number;
-  loan: ActiveLoan | null;
-  loanState: LoanState;
-  debt: number; // 清算后剩余债务，跨档背着
+  /** 净投入（币）：累计存入所得的币 − 累计取出扣掉的币。总盈亏 = 净资产 − 净投入 */
+  netInvested: number;
+  /** 破产后未抵完的欠款，账户随之冻结，清偿后解冻 */
+  debt: number;
   bankruptcyCount: number;
-  deathMarked: boolean; // 死亡标记（遗产税用）
-  cumulativeLoss: number; // 累计已实现亏损（破产线）
-  frozen: boolean; // 失信/欠税冻结
+  cumulativeLoss: number; // 累计已实现亏损（破产线判定）
+  frozen: boolean; // 破产欠款未清
   news: ActiveNews | null;
   newsCooldown: number; // 距下次可抽新闻的跳数
+  logs: LogEntry[]; // 交易所日报
 }
 
 export function createAccount(): ExchangeAccount {
@@ -63,16 +67,16 @@ export function createAccount(): ExchangeAccount {
     positions: {},
     prices,
     priceHistory,
+    openPrices: { ...prices },
     tick: 0,
-    loan: null,
-    loanState: 'none',
+    netInvested: 0,
     debt: 0,
     bankruptcyCount: 0,
-    deathMarked: false,
     cumulativeLoss: 0,
     frozen: false,
     news: null,
     newsCooldown: 3,
+    logs: [],
   };
 }
 

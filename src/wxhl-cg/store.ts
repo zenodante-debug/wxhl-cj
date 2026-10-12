@@ -1,22 +1,12 @@
 // ================================================================
 // 回廊交易所 · pinia store：驱动引擎 + localStorage 持久化。
 // 所有副作用集中在本层；引擎（engine/）保持纯净。
-// z / defineStore / ref / klona / toastr 由 unplugin-auto-import 提供。
+// z / defineStore / ref / computed / klona / toastr 由 unplugin-auto-import 提供。
 // ================================================================
 import { createAccount, round2, type ExchangeAccount } from './engine/types';
 import { tickMarket } from './engine/market';
 import { closePosition, tickTrading } from './engine/trading';
-import {
-  HIGH_INTEREST_REPAY_MULT,
-  loanOffer,
-  repayDebt,
-  repayLoan,
-  takeHighInterestLoan,
-  takeLoan,
-  tickLoan,
-} from './engine/loan';
 import { computeLiquidation, EMPTY_EQUIP_SLOT, type LiquidationResult } from './engine/bankruptcy';
-import { estateValue, inheritanceTax, settleInheritance, transferFee } from './engine/inheritance';
 import { adjustUP, commitMvu, readContractor } from './mvu';
 
 export const STORAGE_KEY = 'wxhl-cg:account';
@@ -41,16 +31,18 @@ const AccountSchema = z.looseObject({
   ),
   prices: z.record(z.string(), z.number()),
   priceHistory: z.record(z.string(), z.array(z.number())),
+  openPrices: z.record(z.string(), z.number()),
   tick: z.number(),
-  loan: z.any().nullable(),
-  loanState: z.enum(['none', 'normal', 'delinquent']),
+  netInvested: z.number(),
   debt: z.number(),
   bankruptcyCount: z.number(),
-  deathMarked: z.boolean(),
   cumulativeLoss: z.number(),
   frozen: z.boolean(),
   news: z.any().nullable(),
   newsCooldown: z.number(),
+  logs: z.array(
+    z.looseObject({ tick: z.number(), time: z.string(), kind: z.enum(['news', 'trade', 'system']), text: z.string() }),
+  ),
 });
 
 export function loadAccount(storage: StorageLike): ExchangeAccount {
@@ -62,7 +54,10 @@ export function loadAccount(storage: StorageLike): ExchangeAccount {
       console.warn('[wxhl-cg] 存档结构校验失败，重置为新账户:', z.prettifyError(parsed.error));
       return createAccount();
     }
-    return parsed.data as ExchangeAccount;
+    // 开盘基准价 = 本次脚本加载时的价：涨跌幅与走势图基准线都按它算，因此每次加载都重新快照
+    const acct = parsed.data as ExchangeAccount;
+    acct.openPrices = { ...acct.prices };
+    return acct;
   } catch (e) {
     console.warn('[wxhl-cg] 存档 JSON 损坏，重置为新账户:', e);
     return createAccount();
@@ -88,13 +83,12 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     saveAccount(localStorage, klona(acct.value));
   }
 
-  /** 推进一跳：行情 → 交易结算（利息/强平），然后持久化。引擎 throw 时响亮失败并停表。 */
+  /** 推进一跳：行情 → 交易结算（杠杆利息/强平），然后持久化。引擎 throw 时响亮失败并停表。 */
   function doTick() {
     try {
       tickMarket(acct.value);
       const r = tickTrading(acct.value);
       if (r.liquidated.length) toastr.warning(`强平：${r.liquidated.join('、')} 已按现价强制平仓`);
-      tickLoan(acct.value);
       persist();
     } catch (e) {
       console.error('[wxhl-cg] 行情跳动失败，计时器已停止:', e);
@@ -113,22 +107,13 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     timer = null;
   }
 
-  /** 打开 app：有死亡标记先结算遗产税（响亮提示），再开面板 */
   function open() {
-    if (acct.value.deathMarked) {
-      const r = settleInheritance(acct.value);
-      toastr.warning(
-        `前任契约者已陨落。遗产税 ${r.tax} + 过户费 ${r.fee} 已扣缴${acct.value.debt > 0 ? '，不足部分转为债务' : ''}`,
-      );
-      persist();
-    }
     panelOpen.value = true;
     startTicker();
   }
 
   function close() {
     panelOpen.value = false;
-    stopTicker();
     persist();
   }
 
@@ -139,9 +124,11 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     exchanging = true;
     try {
       await adjustUP(-amount);
-      acct.value.cash = round2(acct.value.cash + round2(amount * (1 - EXCHANGE_FEE)));
+      const credited = round2(amount * (1 - EXCHANGE_FEE));
+      acct.value.cash = round2(acct.value.cash + credited);
+      acct.value.netInvested = round2(acct.value.netInvested + credited);
       persist();
-      toastr.success(`入金成功：${amount} UP → ${round2(amount * (1 - EXCHANGE_FEE))} 币（手续费 1%）`);
+      toastr.success(`入金成功：${amount} UP → ${credited} 币（手续费 1%）`);
     } finally {
       exchanging = false;
     }
@@ -157,6 +144,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
       const upGain = round2(amount * (1 - EXCHANGE_FEE));
       await adjustUP(upGain);
       acct.value.cash = round2(acct.value.cash - amount);
+      acct.value.netInvested = round2(acct.value.netInvested - amount);
       persist();
       toastr.success(`出金成功：${amount} 币 → ${upGain} UP（手续费 1%）`);
     } finally {
@@ -164,44 +152,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     }
   }
 
-  // ==================== 借贷 ====================
-
-  function borrow(amount: number) {
-    takeLoan(acct.value, amount);
-    persist();
-    toastr.success(`借款 ${amount} 到账，到期第 ${acct.value.loan!.dueTick} 跳`);
-  }
-
-  function borrowHigh() {
-    takeHighInterestLoan(acct.value);
-    persist();
-    toastr.warning('高利贷到账 500——还 2.5 倍，利息每跳递增，好自为之');
-  }
-
-  function repay() {
-    repayLoan(acct.value);
-    persist();
-    toastr.success('借款已还清');
-  }
-
-  function payDebt(amount: number) {
-    repayDebt(acct.value, amount);
-    persist();
-    toastr.success(acct.value.debt <= 0 ? '债务已清，账户解冻' : `已还 ${amount}，剩余债务 ${acct.value.debt}`);
-  }
-
   // ==================== 破产清算 ====================
-
-  /** 当前欠款总额 = debt + 未还借款（高利贷 2.5 倍+利息） */
-  function totalOwed(): number {
-    const loan = acct.value.loan;
-    const loanOwed = loan
-      ? loan.highInterest
-        ? loan.principal * HIGH_INTEREST_REPAY_MULT + loan.accrued
-        : loan.principal * (1 + loan.rate)
-      : 0;
-    return round2(acct.value.debt + loanOwed);
-  }
 
   /** 快照主卡资产（读不到契约者 → null，UI 阻止破产流程并提示） */
   function snapshotAssets() {
@@ -221,7 +172,8 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
 
   /** 预览清算（不执行）：持仓按现价估值 + 当前现金 + 主卡资产快照。零债务拒绝（防误点清空现金）。 */
   function previewBankruptcy(): LiquidationResult {
-    if (totalOwed() <= 0) throw new Error('没有待清债务，无需破产清算');
+    const owed = round2(acct.value.debt);
+    if (owed <= 0) throw new Error('没有待清债务，无需破产清算');
     const snap = snapshotAssets();
     if (!snap) throw new Error('读不到存档变量（契约者不存在），无法清算');
     // 持仓按现价估值（不实际平仓，预览用净值近似）
@@ -239,7 +191,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
       bloodline: snap.bloodline,
       talent: snap.talent,
       playerTier: snap.playerTier,
-      debt: totalOwed(),
+      debt: owed,
     });
   }
 
@@ -249,7 +201,8 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
    */
   async function declareBankruptcy() {
     if (bankruptcing) throw new Error('清算处理中，请勿重复操作');
-    if (totalOwed() <= 0) throw new Error('没有待清债务，无需破产清算');
+    const owed = round2(acct.value.debt);
+    if (owed <= 0) throw new Error('没有待清债务，无需破产清算');
     const r = readContractor();
     if (!r) throw new Error('读不到存档变量（契约者不存在），清算中止');
     bankruptcing = true;
@@ -269,7 +222,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
         bloodline: snap.bloodline,
         talent: snap.talent,
         playerTier: snap.playerTier,
-        debt: totalOwed(),
+        debt: owed,
       });
       // 3. MVU 写回（装备槽整槽重置为空槽形状，不能只清名称——残留数值会被当装备读）
       for (const name of liq.removedBag) _.unset(r.mvu, ['stat_data', '契约者', '背包', name]);
@@ -282,13 +235,9 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
       // 4. 交易所账本：抵债
       acct.value.cash = liq.returnCash; // 现金先全部抵债，溢出退回
       acct.value.debt = liq.remainingDebt;
-      acct.value.loan = null;
       acct.value.cumulativeLoss = 0;
       acct.value.bankruptcyCount++;
-      if (liq.remainingDebt <= 0) {
-        acct.value.frozen = false;
-        acct.value.loanState = 'none';
-      }
+      acct.value.frozen = liq.remainingDebt > 0; // 抵不完 ⇒ 冻结，清偿后解冻
       persist();
     } catch (e) {
       acct.value = snapshot; // 回滚交易所账本（MVU 未写成功 = 主卡没动）
@@ -298,18 +247,20 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     }
   }
 
-  // ==================== 遗产税 ====================
-
-  function markDeath() {
-    acct.value.deathMarked = true;
+  /** 用现金清偿欠款（不足则拒绝）；清偿后解冻。 */
+  function repayDebt(amount: number) {
+    if (acct.value.debt <= 0) throw new Error('没有待清债务');
+    const pay = Math.min(round2(amount), acct.value.debt);
+    if (!Number.isFinite(pay) || pay <= 0) throw new Error('清偿金额必须为正');
+    if (acct.value.cash < pay) throw new Error(`现金不足：只有 ${round2(acct.value.cash)}`);
+    acct.value.cash = round2(acct.value.cash - pay);
+    acct.value.debt = round2(acct.value.debt - pay);
+    if (acct.value.debt <= 0) {
+      acct.value.debt = 0;
+      acct.value.frozen = false;
+    }
     persist();
-    toastr.warning('已宣告本局终结——下次打开交易所将扣缴遗产税');
   }
-
-  const inheritancePreview = computed(() => {
-    const e = estateValue(acct.value);
-    return { estate: e, tax: inheritanceTax(e), fee: transferFee(e) };
-  });
 
   return {
     acct,
@@ -322,14 +273,8 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     stopTicker,
     depositUP,
     withdrawUP,
-    borrow,
-    borrowHigh,
-    repay,
-    payDebt,
-    loanOffer: () => loanOffer(acct.value),
     previewBankruptcy,
     declareBankruptcy,
-    markDeath,
-    inheritancePreview,
+    repayDebt,
   };
 });

@@ -20,4 +20,13 @@ describe('stocks / createAccount', () => {
       expect(acct.priceHistory[s.code]).toEqual([s.basePrice]);
     }
   });
+  it('账户带 净投入/日志/开盘基准价 字段，且借贷与遗产税字段已移除', () => {
+    const acct = createAccount();
+    expect(acct.netInvested).toBe(0);
+    expect(acct.logs).toEqual([]);
+    expect(acct.openPrices['TGJ']).toBe(100);
+    expect('loan' in acct).toBe(false);
+    expect('loanState' in acct).toBe(false);
+    expect('deathMarked' in acct).toBe(false);
+  });
 });
