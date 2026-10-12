@@ -149,14 +149,21 @@ export function renderBuildEntry(build) {
     .join('\n');
 }
 
-/** 人设：五要素 +（可选）构筑方向或嵌构筑 */
+/** 人设：五要素 + 外观三件套 +（可选）构筑方向或嵌构筑 */
 export function renderPersonaEntry(persona) {
+  const 外观 = persona.外观 ?? {};
+  const 外观行 = [
+    外观.外貌 ? `外貌：${外观.外貌}` : null,
+    外观.衣着 ? `衣着：${外观.衣着}` : null,
+    外观.装备幻化 ? `装备幻化：${外观.装备幻化}` : null,
+  ].filter(Boolean);
   return [
     `【人设】${persona.角色名}`,
     persona.性格 ? `性格：${persona.性格}` : null,
     persona.爱好?.length ? `爱好：${persona.爱好.join('、')}` : null,
     persona.厌恶?.length ? `厌恶：${persona.厌恶.join('、')}` : null,
     `背景故事：\n${persona.背景故事}`,
+    外观行.length ? `外观：\n${外观行.join('\n')}` : null,
     persona.构筑方向 ? `构筑方向：${persona.构筑方向}` : null,
     persona.构筑 ? `构筑详情：\n${renderBuildEntry(persona.构筑)}` : null,
   ]

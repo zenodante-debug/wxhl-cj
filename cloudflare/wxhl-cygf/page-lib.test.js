@@ -316,6 +316,23 @@ describe('五类包 → 世界书条目', () => {
     expect(text).toContain('高闪避流血');
   });
 
+  it('persona 外观三件套：含三项正文有三段；只写有的行；全空无「外观」节', () => {
+    const 全有 = renderPersonaEntry({ 角色名: '雾中剑客', 背景故事: 'bg', 外观: { 外貌: '银白长发', 衣着: '玄色长风衣', 装备幻化: '佩剑泛微光' } });
+    expect(全有).toContain('外貌：银白长发');
+    expect(全有).toContain('衣着：玄色长风衣');
+    expect(全有).toContain('装备幻化：佩剑泛微光');
+
+    const 部分 = renderPersonaEntry({ 角色名: '雾中剑客', 背景故事: 'bg', 外观: { 外貌: '短发', 衣着: '', 装备幻化: '' } });
+    expect(部分).toContain('外貌：短发');
+    expect(部分).not.toContain('衣着：');
+    expect(部分).not.toContain('装备幻化：');
+
+    const 全空 = renderPersonaEntry({ 角色名: '雾中剑客', 背景故事: 'bg', 外观: { 外貌: '', 衣着: '', 装备幻化: '' } });
+    expect(全空).not.toContain('外观');
+    // 完全没有 外观 字段也不能炸
+    expect(renderPersonaEntry({ 角色名: '雾中剑客', 背景故事: 'bg' })).not.toContain('外观');
+  });
+
   it('coverOrPlaceholder：空串与非法都回退到内置占位图（不产生破图）', () => {
     expect(coverOrPlaceholder('https://x.test/a.png')).toBe('https://x.test/a.png');
     expect(coverOrPlaceholder('')).toMatch(/^data:image\/svg\+xml/);

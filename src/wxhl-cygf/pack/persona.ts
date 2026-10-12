@@ -4,6 +4,13 @@ import { PackManifest } from './manifest';
 
 export const PersonaPayload = z.object({
   角色名: z.string().min(1),
+  外观: z
+    .object({
+      外貌: z.string().prefault(''),
+      衣着: z.string().prefault(''),
+      装备幻化: z.string().prefault(''),
+    })
+    .prefault({}),
   性格: z.string().prefault(''),
   爱好: z.array(z.string()).prefault([]),
   厌恶: z.array(z.string()).prefault([]),

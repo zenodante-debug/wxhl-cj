@@ -707,7 +707,7 @@ function doApply(pack, target, 类型) {
   if (!window.confirm(提示)) return;
   toast('正在写入存档…');
   bridge
-    .request('applyBuild', { target, name: 名字, 外貌, 类型, build })
+    .request('applyBuild', { target, name: 名字, 外貌, 外观: payload?.外观, 类型, build })
     .then(res => toast('已写入：' + ((res && res.written) || []).join('、')))
     .catch(error => toast((error && error.message) || String(error), true));
 }
@@ -1773,6 +1773,9 @@ function createPersonaSection() {
   const root = el('section', 'type-section');
   const grid = el('div', 'form');
   const name = textInput('雾中剑客');
+  const appearance = textArea(2, '如：银白长发，左眼有一道旧疤');
+  const outfit = textArea(2, '如：玄色长风衣，袖口绣银线');
+  const glamour = textArea(2, '如：佩剑在夜里泛微光');
   const personality = textArea(2);
   const likes = textInput('剑术, 雨夜');
   const dislikes = textInput('噪音, 背叛');
@@ -1780,6 +1783,9 @@ function createPersonaSection() {
   const direction = textInput('敏捷双持 ➜ 影袭');
   grid.append(
     field('角色名 *', name),
+    field('外貌', appearance, 'full'),
+    field('衣着', outfit, 'full'),
+    field('装备幻化', glamour, 'full'),
     field('性格', personality, 'full'),
     field('爱好（逗号分隔）', likes),
     field('厌恶（逗号分隔）', dislikes),
@@ -1793,10 +1799,15 @@ function createPersonaSection() {
   buildGrid.append(field('构筑（完整 BuildPayload JSON，留空则不嵌入）', buildJson, 'full'));
   root.append(buildGrid);
 
-  /** 把一份人设载荷填回表单（角色名/性格/爱好/厌恶/背景故事/构筑方向/可选构筑），编辑已上传的包时用 */
+  /** 把一份人设载荷填回表单（角色名/外观三件套/性格/爱好/厌恶/背景故事/构筑方向/可选构筑），编辑已上传的包时用 */
   function fillFromPersona(personaPayload) {
     const p = personaPayload?.persona ?? personaPayload ?? {};
     if (p.角色名 !== undefined) name.value = String(p.角色名 ?? '');
+    if (p.外观) {
+      appearance.value = String(p.外观.外貌 ?? '');
+      outfit.value = String(p.外观.衣着 ?? '');
+      glamour.value = String(p.外观.装备幻化 ?? '');
+    }
     if (p.性格 !== undefined) personality.value = String(p.性格 ?? '');
     if (p.爱好 !== undefined) likes.value = Array.isArray(p.爱好) ? p.爱好.join(', ') : String(p.爱好 ?? '');
     if (p.厌恶 !== undefined) dislikes.value = Array.isArray(p.厌恶) ? p.厌恶.join(', ') : String(p.厌恶 ?? '');
@@ -1810,6 +1821,9 @@ function createPersonaSection() {
     fill: personaPayload => fillFromPersona(personaPayload),
     reset() {
       name.value = '';
+      appearance.value = '';
+      outfit.value = '';
+      glamour.value = '';
       personality.value = '';
       likes.value = '';
       dislikes.value = '';
@@ -1821,6 +1835,11 @@ function createPersonaSection() {
       const raw = buildJson.value.trim();
       const persona = {
         角色名: name.value.trim(),
+        外观: {
+          外貌: appearance.value.trim(),
+          衣着: outfit.value.trim(),
+          装备幻化: glamour.value.trim(),
+        },
         性格: personality.value,
         爱好: splitList(likes.value),
         厌恶: splitList(dislikes.value),

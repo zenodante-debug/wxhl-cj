@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { applyAsPlayer, dispatchAction, ensureWorkshopWorldbook, entityFromBuild, MUTATING_ACTIONS, queued, resetQueueForTest, WORKSHOP_WORLDBOOK_NAME } from '../actions';
+import { applyAsPlayer, composeAppearance, dispatchAction, ensureWorkshopWorldbook, entityFromBuild, MUTATING_ACTIONS, queued, resetQueueForTest, WORKSHOP_WORLDBOOK_NAME } from '../actions';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -274,6 +274,28 @@ describe('applyBuild · 装到不同位置（2026-10-12）', () => {
 
   it('applyBuild 进互斥队列', () => {
     expect(MUTATING_ACTIONS.has('applyBuild')).toBe(true);
+  });
+
+  it('composeAppearance：三段按序分行，只拼非空段', () => {
+    expect(composeAppearance({ 外观: { 外貌: '白发', 衣着: '黑袍', 装备幻化: '剑气' } })).toBe('外貌：白发\n衣着：黑袍\n装备幻化：剑气');
+    const 部分 = composeAppearance({ 外观: { 外貌: '银发', 衣着: '', 装备幻化: '' } });
+    expect(部分).toBe('外貌：银发');
+    expect(部分).not.toContain('衣着：');
+    expect(部分).not.toContain('装备幻化：');
+  });
+
+  it('composeAppearance：兼容 build.外观 / 旧字段 外貌 / 外观额外', () => {
+    expect(composeAppearance({ build: { 外观: { 衣着: '披风' } } })).toBe('衣着：披风');
+    expect(composeAppearance({ 外貌: '旧样式一段' })).toBe('外貌：旧样式一段');
+    expect(composeAppearance({ 外观额外: { 装备幻化: '剑发微光' } })).toBe('装备幻化：剑发微光');
+  });
+
+  it('外观全空 → entityFromBuild 落成「无」', () => {
+    const 空 = composeAppearance({ 外观: {} });
+    expect(空).toBe('');
+    expect(entityFromBuild(build, 'BOSS', 空).外貌).toBe('无');
+    // 有值时拼好的整段直接落进实体 外貌
+    expect(entityFromBuild(build, 'BOSS', composeAppearance({ 外观: { 外貌: '白发', 衣着: '黑袍' } })).外貌).toBe('外貌：白发\n衣着：黑袍');
   });
 
   it('target 非法 / 缺名字 → 响亮报错', async () => {

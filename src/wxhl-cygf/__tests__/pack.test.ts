@@ -167,4 +167,19 @@ describe('persona · 人设', () => {
     const parsed = PersonaPack.parse({ ...base, type: 'persona', persona: { ...persona, 构筑方向: '走高闪避', 构筑: { 构筑名: '雾中剑客', 定位: 'x', 属性分配方向: { 主属性: 'AGI' } } } });
     expect(parsed.persona.构筑?.构筑名).toBe('雾中剑客');
   });
+
+  it('外观三件套：缺省为三个空串；带外观（含部分）都能通过', () => {
+    const 缺省 = PersonaPack.parse({ ...base, type: 'persona', persona });
+    expect(缺省.persona.外观).toEqual({ 外貌: '', 衣着: '', 装备幻化: '' });
+
+    const 全填 = PersonaPack.parse({
+      ...base,
+      type: 'persona',
+      persona: { ...persona, 外观: { 外貌: '银白长发', 衣着: '玄色长风衣', 装备幻化: '佩剑泛微光' } },
+    });
+    expect(全填.persona.外观).toEqual({ 外貌: '银白长发', 衣着: '玄色长风衣', 装备幻化: '佩剑泛微光' });
+
+    const 部分 = PersonaPack.parse({ ...base, type: 'persona', persona: { ...persona, 外观: { 外貌: '短发' } } });
+    expect(部分.persona.外观).toEqual({ 外貌: '短发', 衣着: '', 装备幻化: '' });
+  });
 });

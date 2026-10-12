@@ -252,6 +252,34 @@ const 副本角色类型 = ['杂兵', '精英', 'BOSS', '隐藏BOSS', '精英（
 
 const 零属性 = () => ({ STR: 0, AGI: 0, CON: 0, PER: 0 });
 
+/**
+ * 外观三件套 → 单个「外貌」字符串：带标签分行，只拼非空段；三段全空回 ''（由 entityFromBuild 落成 '无'）。
+ * 取值口径：payload.外观（或 payload.build?.外观）→ payload.外观额外，逐块取第一个非空文本；「外貌」兼容旧字段 payload.外貌。
+ */
+export function composeAppearance(payload: Record<string, any>): string {
+  const 外观块: Array<Record<string, any>> = [payload?.外观 ?? payload?.build?.外观 ?? {}, payload?.外观额外 ?? {}];
+  const 取值 = (key: string): string => {
+    for (const 块 of 外观块) {
+      const value = 块?.[key];
+      if (typeof value === 'string' && value.trim()) return value.trim();
+    }
+    if (key === '外貌') {
+      const 旧 = payload?.外貌;
+      if (typeof 旧 === 'string' && 旧.trim()) return 旧.trim();
+    }
+    return '';
+  };
+  const 行: Array<[string, string]> = [
+    ['外貌', 取值('外貌')],
+    ['衣着', 取值('衣着')],
+    ['装备幻化', 取值('装备幻化')],
+  ];
+  return 行
+    .filter(([, value]) => value)
+    .map(([label, value]) => `${label}：${value}`)
+    .join('\n');
+}
+
 /** 构筑载荷 → 变量结构里的「实体」（实体Schema） */
 export function entityFromBuild(build: any, 类型: string, 外貌: string): Record<string, any> {
   const 基础 = { STR: 5, AGI: 5, CON: 5, PER: 5, ...(build?.属性基础 ?? {}) };
@@ -340,7 +368,7 @@ async function applyBuild(payload: Record<string, any>): Promise<unknown> {
   const build = payload.build ?? {};
   const 名字 = String(payload.name ?? '').trim() || String(build.构筑名 ?? '').trim() || String(build.角色名 ?? '').trim();
   if (!名字) throw new Error('applyBuild 缺少名字（要写进哪个实体的键）');
-  const 外貌 = String(payload.外貌 ?? '').trim();
+  const 外貌 = composeAppearance(payload);
 
   await waitGlobalInitialized('Mvu');
   const { 数据, message_id } = readLatestMvu();
