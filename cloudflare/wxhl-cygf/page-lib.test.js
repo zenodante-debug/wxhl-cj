@@ -365,3 +365,35 @@ describe('parseBuildJson · 粘贴变量捕捉构筑', () => {
     expect(deriveAttributeDirection(null)).toEqual({ 主属性: 'STR', 副属性: '无' });
   });
 });
+
+describe('parseBuildJson · MVU 指令数组（用户实际粘贴的形状）', () => {
+  const 指令 = JSON.stringify([
+    { op: 'insert', path: '/契约者/副本角色/两面宿傩（伏黑惠）', value: {
+      外貌: '白发黑纹', 类型: '隐藏BOSS（固有角色）', 构筑: 'PER_STR (战地法师): 极高法术效能配合近战压制。',
+      头部: { 等级: 75, 阶位: '四阶', 称号: { 当前称号: { 名称: '诅咒之王' }, '备用称号（只记录不生效）': {} } },
+      属性: { 基础: { STR: 50, AGI: 50, CON: 50, PER: 60 } },
+      职业: { 名称: '十种影法术', 稀有度: '银色', 转职阶段: '二转', 主属性加成: { 属性: 'PER', 值: 15 }, 职业技能: {}, 转职树: { 名称: '十种影法术' } },
+      通用技能: {}, 装备: { 主武器: { 名称: '无' } },
+    } },
+  ]);
+
+  it('取 path 末段当名字、构筑字段当定位、等级/阶位/四维都进得来', () => {
+    const build = parseBuildJson(指令);
+    expect(build.构筑名).toBe('两面宿傩（伏黑惠）');
+    expect(build.定位).toContain('战地法师');
+    expect(build.等级).toBe(75);
+    expect(build.阶位).toBe('四阶');
+    expect(build.属性基础.PER).toBe(60);
+    expect(build.属性分配方向).toEqual({ 主属性: 'PER', 副属性: 'STR' });
+    expect(build.职业.名称).toBe('十种影法术');
+  });
+
+  it('称号读 当前称号（新卡片结构）', () => {
+    expect(parseBuildJson(指令).称号.名称).toBe('诅咒之王');
+  });
+
+  it('指令数组里没有可用 value / value 不像构筑 → 响亮报错', () => {
+    expect(() => parseBuildJson(JSON.stringify([{ op: 'delete', path: '/x' }]))).toThrow(/value/);
+    expect(() => parseBuildJson(JSON.stringify([{ op: 'insert', path: '/x', value: { 经济: { UP: 1 } } }]))).toThrow(/头部|属性|职业|构筑/);
+  });
+});

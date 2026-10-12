@@ -483,6 +483,40 @@ const looksLikeBuild = v => isRecord(v) && ('构筑名' in v || '定位' in v);
  * 粘贴 JSON 捕捉构筑：吃四种形状 —— {stat_data:{契约者}} / {契约者} / 契约者子树 / 构筑载荷。
  * 认不出来就抛人话错误（不静默产出空构筑）。
  */
+/** 把一份契约者子树映射成构筑载荷（nameHint = 从指令 path 末尾取到的实体名） */
+function buildFromContractor(契约者, nameHint = '') {
+  const 头部 = 契约者.头部 ?? {};
+  const 属性基础 = 契约者.属性?.基础 ?? {};
+  const 职业 = 契约者.职业 ?? {};
+  const 称号 = 头部.称号?.当前称号 ?? 头部.称号 ?? {};
+  const 名字 = nameHint || (职业.名称 && 职业.名称 !== '无' ? 职业.名称 : '未命名构筑');
+  return {
+    构筑名: 名字,
+    定位:
+      契约者.构筑 && 契约者.构筑 !== '无'
+        ? 契约者.构筑
+        : 职业.职业简介 && 职业.职业简介 !== '无'
+          ? 职业.职业简介
+          : '未填写',
+    等级: Number(头部.等级) || 1,
+    阶位: 头部.阶位 || '一阶',
+    属性基础: {
+      STR: Number(属性基础.STR) || 5, AGI: Number(属性基础.AGI) || 5,
+      CON: Number(属性基础.CON) || 5, PER: Number(属性基础.PER) || 5,
+    },
+    属性分配方向: deriveAttributeDirection(属性基础),
+    天赋: 头部.天赋 ?? {}, 血统: 头部.血统 ?? {}, 称号,
+    职业, 通用技能: 契约者.通用技能 ?? {},
+    主要装备: 契约者.装备 ?? {}, 背包建议: {},
+  };
+}
+
+/**
+ * 粘贴 JSON 捕捉构筑。认五种形状：
+ *   ① {stat_data:{契约者:{…}}} ② {契约者:{…}} ③ 契约者/实体子树
+ *   ④ 一份构筑载荷 ⑤ **MVU 指令数组**（[{op,path,value}] —— 从酒馆复制变量时常见的形状）
+ * 认不出来就抛人话错误（不静默产出空构筑）。
+ */
 export function parseBuildJson(text) {
   let raw;
   try {
@@ -490,27 +524,21 @@ export function parseBuildJson(text) {
   } catch {
     throw new Error('JSON 格式不正确：请粘贴从酒馆复制的变量或一份构筑载荷');
   }
-  // 提取候选后**仍要验形**：`{stat_data:{契约者:{经济:…}}}` 这种残缺子树不能被当成构筑
-  const 候选 = raw?.stat_data?.契约者 ?? raw?.契约者 ?? raw;
-  const 契约者 = looksLikeContractor(候选) ? 候选 : null;
-  if (契约者) {
-    const 头部 = 契约者.头部 ?? {};
-    const 属性基础 = 契约者.属性?.基础 ?? {};
-    return {
-      构筑名: 契约者.职业?.名称 && 契约者.职业.名称 !== '无' ? 契约者.职业.名称 : '未命名构筑',
-      定位: 契约者.职业?.职业简介 && 契约者.职业.职业简介 !== '无' ? 契约者.职业.职业简介 : '未填写',
-      等级: Number(头部.等级) || 1,
-      阶位: 头部.阶位 || '一阶',
-      属性基础: {
-        STR: Number(属性基础.STR) || 5, AGI: Number(属性基础.AGI) || 5,
-        CON: Number(属性基础.CON) || 5, PER: Number(属性基础.PER) || 5,
-      },
-      属性分配方向: deriveAttributeDirection(属性基础),
-      天赋: 头部.天赋 ?? {}, 血统: 头部.血统 ?? {}, 称号: 头部.称号 ?? {},
-      职业: 契约者.职业 ?? {}, 通用技能: 契约者.通用技能 ?? {},
-      主要装备: 契约者.装备 ?? {}, 背包建议: {},
-    };
+
+  // ⑤ MVU 指令数组：取最后一条「带对象 value」的指令，path 末段当实体名
+  if (Array.isArray(raw)) {
+    const 指令 = [...raw].reverse().find(item => item && typeof item === 'object' && isRecord(item.value));
+    if (!指令) throw new Error('无法识别的 JSON：指令数组里没有可用的 value（需要 op/path/value 形式的 MVU 指令）');
+    if (!looksLikeContractor(指令.value)) {
+      throw new Error('无法识别的 JSON：指令的 value 里没有 头部/属性/职业 等构筑字段');
+    }
+    const 名 = String(指令.path ?? '').split('/').filter(Boolean).pop() ?? '';
+    return buildFromContractor(指令.value, 名);
   }
+
+  // 提取候选后**仍要验形**：{stat_data:{契约者:{经济:…}}} 这种残缺子树不能被当成构筑
+  const 候选 = raw?.stat_data?.契约者 ?? raw?.契约者 ?? raw;
+  if (looksLikeContractor(候选)) return buildFromContractor(候选);
   if (looksLikeBuild(raw)) return raw;
-  throw new Error('无法识别的 JSON：需要是从酒馆复制的契约者变量（含 头部/属性/职业）或一份构筑载荷（含 构筑名/定位）');
+  throw new Error('无法识别的 JSON：需要是从酒馆复制的契约者变量（含 头部/属性/职业）、MVU 指令数组，或一份构筑载荷（含 构筑名/定位）');
 }
