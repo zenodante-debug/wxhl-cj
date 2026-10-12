@@ -59,6 +59,43 @@ export function resetQueueForTest(): void {
   _queue = Promise.resolve();
 }
 
+// ==================== 契约者只读桥接（竞技场同款白名单） ====================
+/** 竞技场同款白名单：只回构筑相关子树，绝不带经济/背包/人际关系/副本经历/论坛档案 */
+const CONTRACT_SAVE_KEYS = ['头部', '属性', '衍生属性', '职业', '通用技能', '装备'] as const;
+
+/** 重算 属性.实际 = 基础 + 加成 + 自定义加成（照 src/wxhl-003/workshop.ts 的 extractContractSave） */
+function recomputeActual(属性: any): void {
+  if (!属性?.基础) return;
+  属性.实际 = {
+    STR: (属性.基础.STR ?? 0) + (属性.加成?.STR ?? 0) + (属性.自定义加成?.STR ?? 0),
+    AGI: (属性.基础.AGI ?? 0) + (属性.加成?.AGI ?? 0) + (属性.自定义加成?.AGI ?? 0),
+    CON: (属性.基础.CON ?? 0) + (属性.加成?.CON ?? 0) + (属性.自定义加成?.CON ?? 0),
+    PER: (属性.基础.PER ?? 0) + (属性.加成?.PER ?? 0) + (属性.自定义加成?.PER ?? 0),
+  };
+}
+
+/** 只读：从当前楼层（回退最新楼层）的 stat_data.契约者 摘出六字段构筑白名单 */
+function readContractor(): { 契约者: Record<string, unknown> } {
+  const pick = (messageId: number | 'latest') => {
+    const vars = getVariables({ type: 'message', message_id: messageId }) as any;
+    // 用可选链而不是 lodash `_`：宿主脚本没有引 lodash
+    return vars?.stat_data?.契约者 as Record<string, any> | undefined;
+  };
+  let 契约者: Record<string, any> | undefined;
+  try {
+    契约者 = pick(typeof getLastMessageId === 'function' ? getLastMessageId() : -1);
+  } catch {
+    /* 楼层接口不可用 */
+  }
+  if (!契约者) 契约者 = pick(-1);
+  if (!契约者) throw new Error('读不到当前契约者：请确认已加载角色卡并在有存档的楼层使用');
+
+  const 摘出: Record<string, unknown> = {};
+  for (const key of CONTRACT_SAVE_KEYS) 摘出[key] = 契约者[key];
+  recomputeActual(摘出.属性);
+  return { 契约者: 摘出 };
+}
+
 // ==================== 世界书 ensure ====================
 export async function ensureWorkshopWorldbook(): Promise<{ created: boolean; bound: boolean }> {
   let created = false;
@@ -194,6 +231,8 @@ async function handleAction(action: string, payload: Record<string, any>): Promi
       if (removed > 0) await replaceWorldbook(name, kept, { render: 'immediate' });
       return { removed };
     }
+    case 'readContractor':
+      return readContractor();
     default:
       throw new Error(`未知桥接动作: ${action}`);
   }

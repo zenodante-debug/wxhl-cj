@@ -64,18 +64,27 @@ const 头部组件Schema = z
   })
   .prefault({});
 
-/** 只给方向，不给数值（用户 2026-10-11 定稿） */
-export const 属性方向Schema = z.object({
-  主属性: z.enum(['STR', 'AGI', 'CON', 'PER']),
-  副属性: z.enum(['STR', 'AGI', 'CON', 'PER', '无']).prefault('无'),
-});
+/** 方向：数值已回填，方向仍保留作提示（老包不带方向也能解析，见 老包不炸 测试） */
+export const 属性方向Schema = z
+  .object({
+    主属性: z.enum(['STR', 'AGI', 'CON', 'PER']).prefault('STR'),
+    副属性: z.enum(['STR', 'AGI', 'CON', 'PER', '无']).prefault('无'),
+  })
+  .prefault({});
 
 export const 职业Schema = z
   .object({
     名称: z.string().prefault('无'),
     稀有度: z.string().prefault('无'),
-    职业特性: z.record(z.string(), z.union([z.string(), z.record(z.string(), z.any())])).prefault({}),
+    转职阶段: z.string().prefault('基础'),
+    职业等级: z.coerce.number().prefault(0),
+    PEXP_当前: z.coerce.number().prefault(0),
+    PEXP_升级所需: z.coerce.number().prefault(0),
+    主属性加成: z.object({ 属性: z.string().prefault('无'), 值: z.coerce.number().prefault(0) }).prefault({}),
+    副属性加成: z.object({ 属性: z.string().prefault('无'), 值: z.coerce.number().prefault(0) }).prefault({}),
+    职业简介: z.string().prefault('无').describe('职业的简短介绍、机制方向与发展定位'),
     职业技能: z.record(z.string(), 技能Schema).prefault({}),
+    职业特性: z.record(z.string(), z.union([z.string(), z.record(z.string(), z.any())])).prefault({}),
     传承技能: z.record(z.string(), 技能Schema).prefault({}),
     转职树: z.object({ 名称: z.string().prefault('无'), 分支: z.record(z.string(), z.any()).prefault({}) }).prefault({}),
   })
@@ -85,6 +94,16 @@ export const 职业Schema = z
 export const BuildPayload = z.object({
   构筑名: z.string().min(1),
   定位: z.string().min(1).describe('战术流派/小队定位一句话'),
+  等级: z.coerce.number().int().min(1).prefault(1),
+  阶位: z.string().prefault('一阶'),
+  属性基础: z
+    .object({
+      STR: z.coerce.number().prefault(5),
+      AGI: z.coerce.number().prefault(5),
+      CON: z.coerce.number().prefault(5),
+      PER: z.coerce.number().prefault(5),
+    })
+    .prefault({}),
   属性分配方向: 属性方向Schema,
   天赋: 头部组件Schema,
   血统: 头部组件Schema,

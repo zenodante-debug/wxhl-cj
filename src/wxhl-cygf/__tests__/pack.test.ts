@@ -86,7 +86,7 @@ describe('dungeon · 对齐主卡副本结构', () => {
   });
 });
 
-describe('build · 去掉属性数值，只留分配方向', () => {
+describe('build · 构筑字段（方向 + 数值回填 + 职业镜像新卡）', () => {
   const build = {
     构筑名: '重装堡垒', 定位: '物理破坏配合高容错换血',
     属性分配方向: { 主属性: 'STR', 副属性: 'CON' },
@@ -104,9 +104,44 @@ describe('build · 去掉属性数值，只留分配方向', () => {
     expect(parsed.build.主要装备.躯干.名称).toBe('无');
   });
 
-  it('不再有 属性基础 这种数值字段（性质：未知键被 strip，不报错）', () => {
-    const parsed = BuildPack.parse({ ...base, type: 'build', build: { ...build, 属性基础: { STR: 99 } } });
-    expect('属性基础' in parsed.build).toBe(false);
+  it('等级/阶位/四维属性可填，且分配方向保留', () => {
+    const parsed = BuildPack.parse({
+      ...base, type: 'build',
+      build: {
+        构筑名: '重装堡垒', 定位: '换血', 等级: 7, 阶位: '二阶',
+        属性基础: { STR: 12, AGI: 6, CON: 14, PER: 8 },
+        属性分配方向: { 主属性: 'CON', 副属性: 'STR' },
+      },
+    });
+    expect(parsed.build.等级).toBe(7);
+    expect(parsed.build.阶位).toBe('二阶');
+    expect(parsed.build.属性基础).toEqual({ STR: 12, AGI: 6, CON: 14, PER: 8 });
+    expect(parsed.build.属性分配方向.主属性).toBe('CON');
+  });
+
+  it('等级/阶位/属性基础有默认值（老包不炸）', () => {
+    const parsed = BuildPack.parse({ ...base, type: 'build', build: { 构筑名: 'x', 定位: 'y' } });
+    expect(parsed.build.等级).toBe(1);
+    expect(parsed.build.阶位).toBe('一阶');
+    expect(parsed.build.属性基础.STR).toBe(5);
+  });
+
+  it('职业镜像新卡：职业简介/转职阶段/职业等级/主副属性加成都能填', () => {
+    const parsed = BuildPack.parse({
+      ...base, type: 'build',
+      build: {
+        构筑名: 'x', 定位: 'y',
+        职业: { 名称: '卫士', 稀有度: '蓝色', 转职阶段: '基础', 职业等级: 3,
+          职业简介: '以盾护人、以守为攻的前排', 主属性加成: { 属性: 'CON', 值: 2 } },
+      },
+    });
+    expect(parsed.build.职业.职业简介).toContain('前排');
+    expect(parsed.build.职业.主属性加成).toEqual({ 属性: 'CON', 值: 2 });
+  });
+
+  it('未知键仍被 strip，不报错', () => {
+    const parsed = BuildPack.parse({ ...base, type: 'build', build: { ...build, 不存在字段: 1 } });
+    expect('不存在字段' in parsed.build).toBe(false);
   });
 
   it('主属性必须是四维之一', () => {

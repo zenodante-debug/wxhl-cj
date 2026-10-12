@@ -201,4 +201,34 @@ describe('dispatchAction · 动作分发', () => {
   it('deleteWorkshopEntries 缺 sourceMeta.sourceId → 响亮报错', async () => {
     await expect(dispatchAction('deleteWorkshopEntries', { worldbookName: 'x' })).rejects.toThrow('sourceMeta.sourceId');
   });
+
+  it('readContractor 是只读动作，不进互斥队列', () => {
+    expect(MUTATING_ACTIONS.has('readContractor')).toBe(false);
+  });
+
+  it('readContractor 只回构筑白名单字段，并重算 属性.实际', async () => {
+    const 契约者 = {
+      头部: { 等级: 7, 阶位: '二阶', 天赋: { 名称: '石肤' } },
+      属性: { 基础: { STR: 10, AGI: 5, CON: 12, PER: 6 }, 加成: { STR: 1, AGI: 2, CON: 0, PER: 1 }, 自定义加成: { STR: 0, AGI: 0, CON: 3, PER: 0 } },
+      职业: { 名称: '卫士', 职业简介: '前排' },
+      通用技能: {}, 装备: {}, 衍生属性: {},
+      // 下面这些**必须不出现**在返回体里（Review Focus #1）
+      经济: { UP: 9999 }, 背包: { 好东西: { 数量: 3 } }, 人际关系: { 某人: {} }, 副本经历: {}, 论坛档案: {}, 小队: {}, 其他契约者: {}, 副本角色: {},
+    };
+    vi.stubGlobal('getVariables', vi.fn().mockReturnValue({ stat_data: { 契约者 } }));
+    vi.stubGlobal('getLastMessageId', vi.fn().mockReturnValue(12));
+
+    const result = (await dispatchAction('readContractor', {})) as any;
+    const c = result.契约者;
+    expect(Object.keys(c).sort()).toEqual(['头部', '属性', '衍生属性', '职业', '通用技能', '装备'].sort());
+    expect(c.属性.实际).toEqual({ STR: 11, AGI: 7, CON: 15, PER: 7 }); // 基础+加成+自定义（Review Focus #3）
+    expect(c).not.toHaveProperty('经济');
+    expect(JSON.stringify(c)).not.toContain('UP');
+  });
+
+  it('readContractor 读不到契约者 → 响亮报错', async () => {
+    vi.stubGlobal('getVariables', vi.fn().mockReturnValue({ stat_data: {} }));
+    vi.stubGlobal('getLastMessageId', vi.fn().mockReturnValue(3));
+    await expect(dispatchAction('readContractor', {})).rejects.toThrow(/契约者/);
+  });
 });
