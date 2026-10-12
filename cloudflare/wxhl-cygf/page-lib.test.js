@@ -1,8 +1,8 @@
 // cloudflare/wxhl-cygf/page-lib.test.js
 import { describe, expect, it, vi } from 'vitest';
 import {
-  computeInstalled, coverOrPlaceholder, createBridgeClient, isAgreementAccepted, mapExtensionEntry,
-  MAX_IMPORT_BYTES, packToWorldbookEntries, parseWorldbookJson,
+  computeInstalled, coverOrPlaceholder, createBridgeClient, deriveAttributeDirection, isAgreementAccepted, mapExtensionEntry,
+  MAX_IMPORT_BYTES, packToWorldbookEntries, parseBuildJson, parseWorldbookJson,
   renderBuildEntry, renderPersonaEntry, sourceMetaOf,
 } from './page-lib.js';
 
@@ -320,5 +320,48 @@ describe('五类包 → 世界书条目', () => {
     expect(coverOrPlaceholder('https://x.test/a.png')).toBe('https://x.test/a.png');
     expect(coverOrPlaceholder('')).toMatch(/^data:image\/svg\+xml/);
     expect(coverOrPlaceholder('javascript:alert(1)')).toMatch(/^data:image\/svg\+xml/);
+  });
+});
+
+describe('parseBuildJson · 粘贴变量捕捉构筑', () => {
+  const 契约者 = {
+    头部: { 等级: 7, 阶位: '二阶', 天赋: { 名称: '石肤', 品质: '蓝色' }, 血统: { 名称: '无' }, 称号: { 名称: '无' } },
+    属性: { 基础: { STR: 12, AGI: 6, CON: 14, PER: 8 }, 加成: { STR: 1, AGI: 1, CON: 1, PER: 1 } },
+    职业: { 名称: '卫士', 稀有度: '蓝色', 职业简介: '前排' },
+    通用技能: { 横扫: { 类型: '主动' } }, 装备: { 主武器: { 名称: '斩首大剑' } },
+  };
+
+  it('吃 {stat_data:{契约者}}：等级/阶位/四维/职业/技能/装备都进得来', () => {
+    const build = parseBuildJson(JSON.stringify({ stat_data: { 契约者 } }));
+    expect(build.等级).toBe(7);
+    expect(build.阶位).toBe('二阶');
+    expect(build.属性基础.STR).toBe(12);
+    expect(build.职业.名称).toBe('卫士');
+    expect(build.通用技能.横扫.类型).toBe('主动');
+    expect(build.主要装备.主武器.名称).toBe('斩首大剑');
+    expect(build.构筑名).toBe('卫士');
+  });
+
+  it('也吃 {契约者:{…}} 与裸契约者子树', () => {
+    expect(parseBuildJson(JSON.stringify({ 契约者 })).等级).toBe(7);
+    expect(parseBuildJson(JSON.stringify(契约者)).等级).toBe(7);
+  });
+
+  it('本身就是构筑载荷时直接采用', () => {
+    const build = parseBuildJson(JSON.stringify({ 构筑名: '重装堡垒', 定位: '换血', 等级: 3 }));
+    expect(build.构筑名).toBe('重装堡垒');
+    expect(build.等级).toBe(3);
+  });
+
+  it('无法识别 → 响亮报错', () => {
+    expect(() => parseBuildJson('{oops')).toThrow(/JSON/);
+    expect(() => parseBuildJson(JSON.stringify({ 随便: 1 }))).toThrow(/构筑|契约者/);
+    expect(() => parseBuildJson(JSON.stringify({ stat_data: { 契约者: { 经济: { UP: 1 } } } }))).toThrow(/构筑|契约者/);
+  });
+
+  it('由四维数值推导属性分配方向（最大为主、次大为副）', () => {
+    expect(deriveAttributeDirection({ STR: 12, AGI: 6, CON: 14, PER: 8 })).toEqual({ 主属性: 'CON', 副属性: 'STR' });
+    expect(deriveAttributeDirection({ STR: 5, AGI: 5, CON: 5, PER: 5 })).toEqual({ 主属性: 'STR', 副属性: 'AGI' });
+    expect(deriveAttributeDirection(null)).toEqual({ 主属性: 'STR', 副属性: '无' });
   });
 });

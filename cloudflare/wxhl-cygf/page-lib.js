@@ -461,3 +461,56 @@ export function parseWorldbookJson(text, filename = '世界书.json') {
     summary: { total: entries.length, disabled: entries.filter(entry => !entry.enabled).length, generatedNames },
   };
 }
+
+// ==================== 构筑：粘贴变量捕捉 + 属性方向推导（spec §10.5） ====================
+const ATTR_ORDER = ['STR', 'AGI', 'CON', 'PER'];
+
+/** 由四维数值推导主/副属性（最大为主、次大为副；并列按 STR>AGI>CON>PER；缺值回 STR/无） */
+export function deriveAttributeDirection(属性基础) {
+  if (!属性基础) return { 主属性: 'STR', 副属性: '无' };
+  const 排序 = [...ATTR_ORDER].sort((a, b) => {
+    const diff = (Number(属性基础[b]) || 0) - (Number(属性基础[a]) || 0);
+    return diff !== 0 ? diff : ATTR_ORDER.indexOf(a) - ATTR_ORDER.indexOf(b);
+  });
+  return { 主属性: 排序[0], 副属性: 排序[1] ?? '无' };
+}
+
+const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
+const looksLikeContractor = v => isRecord(v) && ['头部', '属性', '职业', '通用技能', '装备'].some(k => k in v);
+const looksLikeBuild = v => isRecord(v) && ('构筑名' in v || '定位' in v);
+
+/**
+ * 粘贴 JSON 捕捉构筑：吃四种形状 —— {stat_data:{契约者}} / {契约者} / 契约者子树 / 构筑载荷。
+ * 认不出来就抛人话错误（不静默产出空构筑）。
+ */
+export function parseBuildJson(text) {
+  let raw;
+  try {
+    raw = JSON.parse(String(text ?? '').replace(/^\uFEFF/, ''));
+  } catch {
+    throw new Error('JSON 格式不正确：请粘贴从酒馆复制的变量或一份构筑载荷');
+  }
+  // 提取候选后**仍要验形**：`{stat_data:{契约者:{经济:…}}}` 这种残缺子树不能被当成构筑
+  const 候选 = raw?.stat_data?.契约者 ?? raw?.契约者 ?? raw;
+  const 契约者 = looksLikeContractor(候选) ? 候选 : null;
+  if (契约者) {
+    const 头部 = 契约者.头部 ?? {};
+    const 属性基础 = 契约者.属性?.基础 ?? {};
+    return {
+      构筑名: 契约者.职业?.名称 && 契约者.职业.名称 !== '无' ? 契约者.职业.名称 : '未命名构筑',
+      定位: 契约者.职业?.职业简介 && 契约者.职业.职业简介 !== '无' ? 契约者.职业.职业简介 : '未填写',
+      等级: Number(头部.等级) || 1,
+      阶位: 头部.阶位 || '一阶',
+      属性基础: {
+        STR: Number(属性基础.STR) || 5, AGI: Number(属性基础.AGI) || 5,
+        CON: Number(属性基础.CON) || 5, PER: Number(属性基础.PER) || 5,
+      },
+      属性分配方向: deriveAttributeDirection(属性基础),
+      天赋: 头部.天赋 ?? {}, 血统: 头部.血统 ?? {}, 称号: 头部.称号 ?? {},
+      职业: 契约者.职业 ?? {}, 通用技能: 契约者.通用技能 ?? {},
+      主要装备: 契约者.装备 ?? {}, 背包建议: {},
+    };
+  }
+  if (looksLikeBuild(raw)) return raw;
+  throw new Error('无法识别的 JSON：需要是从酒馆复制的契约者变量（含 头部/属性/职业）或一份构筑载荷（含 构筑名/定位）');
+}
