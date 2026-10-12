@@ -27,7 +27,7 @@
 
 ---
 
-### Task A: 宿主侧（契约修订 + `readContractor` + 构建推送）
+### Task 1: 宿主侧（契约修订 + `readContractor` + 构建推送）
 
 **Files:**
 - Modify: `src/wxhl-cygf/pack/build.ts`
@@ -36,7 +36,7 @@
 - Test: `src/wxhl-cygf/__tests__/pack.test.ts`、`src/wxhl-cygf/__tests__/actions.test.ts`
 
 **Interfaces:**
-- Produces（Task B 依赖）: `BuildPayload` 新增 `等级: number`、`阶位: string`、`属性基础: {STR,AGI,CON,PER}`；`职业Schema` 镜像新卡；桥接动作 `readContractor`（payload 无参）→ `{ 契约者: {...} }`
+- Produces（Task 2 依赖）: `BuildPayload` 新增 `等级: number`、`阶位: string`、`属性基础: {STR,AGI,CON,PER}`；`职业Schema` 镜像新卡；桥接动作 `readContractor`（payload 无参）→ `{ 契约者: {...} }`
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -196,12 +196,12 @@ function readContractor(): { 契约者: Record<string, unknown> } {
 ```bash
 git add src/wxhl-cygf dist/wxhl-cygf
 git commit -m "feat(wxhl-cygf): 构筑回填数值/等级/阶位、职业镜像新卡；宿主新增只读 readContractor"
-bash scripts/push-cygf.sh   # 记下新的 commit 号，Task C 要用
+bash scripts/push-cygf.sh   # 记下新的 commit 号，Task 3 要用
 ```
 
 ---
 
-### Task B: 页面（build 表单补字段 + 读取存档 + 粘贴捕捉）
+### Task 2: 页面（build 表单补字段 + 读取存档 + 粘贴捕捉）
 
 **Files:**
 - Modify: `cloudflare/wxhl-cygf/page-lib.js`（加纯函数 `parseBuildJson`）
@@ -274,7 +274,7 @@ git commit -m "feat(wxhl-cygf): 构筑表单回填数值/等级/阶位/职业简
 
 ---
 
-### Task C: 收尾与交接
+### Task 3: 收尾与交接
 
 - [ ] **Step 1: 全量验证**：`npx vitest run cloudflare/wxhl-cygf/ src/wxhl-cygf/`、`npx eslint …`（无 error）、`npm run build`
 - [ ] **Step 2: 重建部署单文件**：`ESBUILD_WASM_PATH="C:/Users/zero/AppData/Local/Temp/esb/node_modules/esbuild-wasm" node cloudflare/wxhl-cygf/build-bundle.mjs`
@@ -286,7 +286,7 @@ git commit -m "feat(wxhl-cygf): 构筑表单回填数值/等级/阶位/职业简
 
 ## Self-Review 记录
 
-- **Spec 覆盖**：§10.1 → Task A（契约）+ Task B（表单）；§10.2 → Task A（职业镜像）；§10.3 → Task A（换参考文件）；§10.4 → Task A（readContractor）+ Task B（读取入口）；§10.5 → Task B（parseBuildJson）
+- **Spec 覆盖**：§10.1 → Task 1（契约）+ Task 2（表单）；§10.2 → Task 1（职业镜像）；§10.3 → Task 1（换参考文件）；§10.4 → Task 1（readContractor）+ Task 2（读取入口）；§10.5 → Task 2（parseBuildJson）
 - **Placeholder**：无 TBD；页面部分给编号式要求（DOM 体量大，行为明确）
 - **类型一致性**：`BuildPayload` 新字段（A）→ `parseBuildJson` 映射（B）→ 表单字段（B）一致；`readContractor` 返回 `{契约者}`（A）→ 页面用同一形状喂 `parseBuildJson`（B）一致
-- **Review Focus**：5 条已钉（#1/#2/#3 → Task A 测试；#4/#5 → Task B 测试）
+- **Review Focus**：5 条已钉（#1/#2/#3 → Task 1 测试；#4/#5 → Task 2 测试）
