@@ -6,6 +6,7 @@
 import { createAccount, round2, type ExchangeAccount } from './engine/types';
 import { tickMarket } from './engine/market';
 import { closePosition, tickTrading } from './engine/trading';
+import { BANKRUPTCY_LINE, shouldGoBankrupt } from './engine/bankrupt';
 import { computeLiquidation, EMPTY_EQUIP_SLOT, type LiquidationResult } from './engine/bankruptcy';
 import { adjustUP, commitMvu, readContractor } from './mvu';
 
@@ -78,22 +79,44 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
   /** 防重入闸（照市场 purchasing/listing 惯例）：异步 MVU 操作进行中拒绝并发调用 */
   let exchanging = false;
   let bankruptcing = false;
+  /** 自动清算连续失败次数（只提示一次，避免每 10 秒刷屏） */
+  let liquidateFailures = 0;
 
   function persist() {
     saveAccount(localStorage, klona(acct.value));
   }
 
-  /** 推进一跳：行情 → 交易结算（杠杆利息/强平），然后持久化。引擎 throw 时响亮失败并停表。 */
+  /** 推进一跳：行情 → 交易结算（杠杆利息/强平）→ 破产线检查，然后持久化。引擎 throw 时响亮失败并停表。 */
   function doTick() {
     try {
       tickMarket(acct.value);
       const r = tickTrading(acct.value);
       if (r.liquidated.length) toastr.warning(`强平：${r.liquidated.join('、')} 已按现价强制平仓`);
       persist();
+      // 破产线：累计已实现亏损越过 250 → 自动清算（异步，失败不阻塞行情，下一跳重试）
+      if (!bankruptcing && shouldGoBankrupt(acct.value)) {
+        void autoLiquidate();
+      }
     } catch (e) {
       console.error('[wxhl-cg] 行情跳动失败，计时器已停止:', e);
       toastr.error('交易所行情引擎出错，已停止跳动（详见控制台）');
       stopTicker();
+    }
+  }
+
+  /** 破产线自动清算：以累计已实现亏损为待偿额；失败整体回滚，下一跳自动重试 */
+  async function autoLiquidate() {
+    const owed = round2(acct.value.cumulativeLoss);
+    try {
+      await runLiquidation(owed);
+      liquidateFailures = 0;
+      toastr.error(`破产清算：累计亏损突破 ${BANKRUPTCY_LINE}，交易所已变卖你的资产抵债`);
+    } catch (e) {
+      liquidateFailures++;
+      console.error('[wxhl-cg] 破产自动清算失败（下一跳重试）:', e);
+      if (liquidateFailures === 1) {
+        toastr.error('破产清算失败（读不到存档变量？）——将每跳重试，详见控制台');
+      }
     }
   }
 
@@ -196,12 +219,11 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
   }
 
   /**
-   * 执行破产清算：强平持仓 → 快照 → 计算 → MVU 写回 → 更新交易所账本。
+   * 清算核心：强平持仓 → 快照 → 计算 → MVU 写回 → 更新交易所账本。
    * 原子性：先快照交易所账本，任一步 throw 则整体回滚——宁可响亮失败也不半清算。
    */
-  async function declareBankruptcy() {
+  async function runLiquidation(owed: number) {
     if (bankruptcing) throw new Error('清算处理中，请勿重复操作');
-    const owed = round2(acct.value.debt);
     if (owed <= 0) throw new Error('没有待清债务，无需破产清算');
     const r = readContractor();
     if (!r) throw new Error('读不到存档变量（契约者不存在），清算中止');
@@ -235,7 +257,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
       // 4. 交易所账本：抵债
       acct.value.cash = liq.returnCash; // 现金先全部抵债，溢出退回
       acct.value.debt = liq.remainingDebt;
-      acct.value.cumulativeLoss = 0;
+      acct.value.cumulativeLoss = 0; // 计数器归零，重新开始
       acct.value.bankruptcyCount++;
       acct.value.frozen = liq.remainingDebt > 0; // 抵不完 ⇒ 冻结，清偿后解冻
       persist();
@@ -245,6 +267,11 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     } finally {
       bankruptcing = false;
     }
+  }
+
+  /** 手动清算（账上已欠款时）：以现有欠款为待偿额 */
+  async function declareBankruptcy() {
+    await runLiquidation(round2(acct.value.debt));
   }
 
   /** 用现金清偿欠款（不足则拒绝）；清偿后解冻。 */

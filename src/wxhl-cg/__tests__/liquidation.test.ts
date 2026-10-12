@@ -47,13 +47,13 @@ describe('tickTrading', () => {
   });
   it('杠杆 ≤20 不收利息；>20 每跳收 (L−20)×0.01%×名义', () => {
     const a = withCash(10000);
-    openPosition(a, 'TGJ', 'long', 1, 20);
-    openPosition(a, 'FM', 'long', 1, 50); // FM 基准价 40
+    openPosition(a, 'TGJ', 'long', 10, 20); // 名义 1000 保证金 50，不收费息档
+    openPosition(a, 'FM', 'long', 10, 50); // FM 基准价 40 → 名义 400 保证金 8
     const cash0 = a.cash;
     const r = tickTrading(a);
-    // 只有 FM 收息：40×30×0.0001 = 0.12
-    expect(r.interest).toBeCloseTo(0.12, 6);
-    expect(a.cash).toBeCloseTo(cash0 - 0.12, 6);
+    // 只有 FM 收息：400×30×0.0001 = 1.2
+    expect(r.interest).toBeCloseTo(1.2, 6);
+    expect(a.cash).toBeCloseTo(cash0 - 1.2, 6);
   });
   it('重开 app 第一跳按现价判定强平（关闭期间不豁免）', () => {
     const a = withCash(10000);

@@ -124,3 +124,44 @@ describe('负 UP 语义', () => {
     expect(store.acct.cash).toBe(500);
   });
 });
+
+// 破产线自动清算（Review Focus 1）
+describe('破产线自动清算', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  const flush = () => new Promise(r => setTimeout(r, 0));
+
+  it('亏损破线 → 自动变卖抵债：现金先抵、不足部分留债务并冻结', async () => {
+    stubTavern(); // MVU 可读可写
+    const store = useExchangeStore();
+    store.acct.cash = 100;
+    store.acct.cumulativeLoss = 300; // 越过 250
+    store.doTick();
+    await flush();
+    expect(store.acct.bankruptcyCount).toBe(1);
+    expect(store.acct.cash).toBe(0); // 100 全抵债
+    expect(store.acct.debt).toBe(200); // 300 − 100
+    expect(store.acct.frozen).toBe(true);
+    expect(store.acct.cumulativeLoss).toBe(0); // 计数器归零
+  });
+
+  it('MVU 不可写 → 整体回滚、不留脏态，下一跳仍会重试', async () => {
+    stubTavern({ failWrite: true });
+    const store = useExchangeStore();
+    store.acct.cash = 100;
+    store.acct.cumulativeLoss = 300;
+    store.doTick();
+    await flush();
+    expect(store.acct.bankruptcyCount).toBe(0);
+    expect(store.acct.cash).toBe(100); // 未动
+    expect(store.acct.debt).toBe(0);
+    expect(store.acct.cumulativeLoss).toBe(300); // 仍超线 ⇒ 下一跳会再试
+    // 落盘的只是"跳过之后、清算之前"的状态，没有半清算痕迹
+    const saved = JSON.parse(localStorage.getItem(STORAGE_KEY)!);
+    expect(saved.debt).toBe(0);
+    expect(saved.cash).toBe(100);
+    expect(saved.bankruptcyCount).toBe(0);
+  });
+});

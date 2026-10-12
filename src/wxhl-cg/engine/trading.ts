@@ -7,14 +7,23 @@ import { stockOf } from './stocks';
 
 export const COMMISSION_RATE = 0.01; // 佣金：成交额 1%，买卖双向
 export const COMMISSION_MARGIN_CAP = 0.1; // 佣金上限：保证金 10%
-export const STAMP_RATE = 0.001; // 印花税：卖出方 0.1%（平多/开空/强平/清算）
-export const MAINTENANCE_RATE = 0.05; // 强平维持线：净值 ≤ 名义×5%
+export const COMMISSION_MIN = 1; // 佣金下限：1 币（照杀跌尖塔数值）
+export const STAMP_RATE = 0.001; // 印花税：卖出方 0.1%
+export const STAMP_MARGIN_CAP = 0.01; // 印花税上限：保证金 1%
+export const MIN_MARGIN = 5; // 最低保证金
+export const MAINTENANCE_RATE = 0.05; // 强平维持线：净值 ≤ 保证金×5%
 export const LEVERAGE_INTEREST_THRESHOLD = 20;
 export const LEVERAGE_INTEREST_RATE = 0.0001; // 每超 1 倍，每跳收名义本金 0.01%
 
-/** 佣金 = min(成交额×1%, 保证金×10%) */
+/** 佣金 = clamp(成交额×1%, 下限 1, 上限保证金×10%) */
 export function commission(notional: number, margin: number): number {
-  return round2(Math.min(notional * COMMISSION_RATE, margin * COMMISSION_MARGIN_CAP));
+  const raw = notional * COMMISSION_RATE;
+  return round2(Math.min(Math.max(raw, COMMISSION_MIN), margin * COMMISSION_MARGIN_CAP));
+}
+
+/** 印花税 = min(成交额×0.1%, 保证金×1%)，只向卖出方收 */
+export function stampTax(notional: number, margin: number): number {
+  return round2(Math.min(notional * STAMP_RATE, margin * STAMP_MARGIN_CAP));
 }
 
 export function positionPnl(pos: Position, price: number): number {
@@ -44,27 +53,43 @@ export interface OpenResult {
 }
 
 /**
- * 开仓。抛出 Error 的情形（响亮失败）：账户冻结、参数非法、现金不足、已有同股仓位。
- * 印花税：仅开空收（卖出方）。
+ * 下单预览：与 openPosition 同算式但不动账本，供界面显示"这单要花多少"。
+ * 参数非法时同样抛错（界面据此禁用按钮）。
  */
-export function openPosition(acct: ExchangeAccount, code: string, side: Side, qty: number, leverage: number): OpenResult {
-  if (acct.frozen) throw new Error('账户冻结中，禁止开仓');
+export function tradePreview(
+  acct: ExchangeAccount,
+  code: string,
+  side: Side,
+  qty: number,
+  leverage: number,
+): OpenResult & { total: number } {
   stockOf(code);
   if (!Number.isInteger(qty) || qty <= 0) throw new Error('数量必须是正整数');
   if (!Number.isInteger(leverage) || leverage < 1 || leverage > 100) throw new Error('杠杆必须是 1–100 的整数');
-  if (acct.positions[code]) throw new Error('已有该股仓位，请先平仓');
-
   const price = acct.prices[code];
   const notional = round2(qty * price);
   const margin = round2(notional / leverage);
   const fee = commission(notional, margin);
-  const stamp = side === 'short' ? round2(notional * STAMP_RATE) : 0;
-  const total = round2(margin + fee + stamp);
+  const stamp = side === 'short' ? stampTax(notional, margin) : 0;
+  return { notional, margin, fee, stamp, total: round2(margin + fee + stamp) };
+}
+
+/**
+ * 开仓。抛出 Error 的情形（响亮失败）：账户冻结、参数非法、现金不足、已有同股仓位、保证金过低。
+ * 印花税：仅开空收（卖出方）。
+ */
+export function openPosition(acct: ExchangeAccount, code: string, side: Side, qty: number, leverage: number): OpenResult {
+  if (acct.frozen) throw new Error('账户冻结中（破产欠款未清），禁止开仓');
+  const r = tradePreview(acct, code, side, qty, leverage);
+  if (acct.positions[code]) throw new Error('已有该股仓位，请先平仓');
+  if (r.margin < MIN_MARGIN) throw new Error(`保证金 ${r.margin} 低于最低保证金 ${MIN_MARGIN}`);
+
+  const total = round2(r.margin + r.fee + r.stamp);
   if (acct.cash < total) throw new Error(`现金不足：需要 ${total}，只有 ${round2(acct.cash)}`);
 
   acct.cash = round2(acct.cash - total);
-  acct.positions[code] = { side, qty, entryPrice: price, leverage, margin };
-  return { notional, margin, fee, stamp };
+  acct.positions[code] = { side, qty, entryPrice: acct.prices[code], leverage, margin: r.margin };
+  return r;
 }
 
 export interface CloseResult {
@@ -86,7 +111,7 @@ export function closePosition(acct: ExchangeAccount, code: string, force = false
   const notional = round2(pos.qty * price);
   const pnl = positionPnl(pos, price);
   const fee = commission(notional, pos.margin);
-  const stamp = pos.side === 'long' ? round2(notional * STAMP_RATE) : 0;
+  const stamp = pos.side === 'long' ? stampTax(notional, pos.margin) : 0;
   const returned = round2(pos.margin + pnl - fee - stamp);
   acct.cash = round2(acct.cash + returned);
   if (pnl < 0) acct.cumulativeLoss = round2(acct.cumulativeLoss + -pnl);

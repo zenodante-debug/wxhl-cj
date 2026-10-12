@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { createAccount } from '../engine/types';
-import { closePosition, commission, netAssets, openPosition, positionEquity, positionPnl } from '../engine/trading';
+import {
+  closePosition,
+  commission,
+  netAssets,
+  openPosition,
+  positionEquity,
+  positionPnl,
+  stampTax,
+  tradePreview,
+} from '../engine/trading';
 
 function withCash(v: number) {
   const a = createAccount();
@@ -9,10 +18,37 @@ function withCash(v: number) {
 }
 
 describe('commission', () => {
-  it('成交额 1%，上限保证金 10%', () => {
+  it('成交额 1%，上限保证金 10%，下限 1', () => {
     expect(commission(1000, 100)).toBe(10); // 1% = 10，上限 10 → 10
     expect(commission(100000, 1000)).toBe(100); // 1% = 1000，上限 100 → 100
     expect(commission(500, 500)).toBe(5);
+    expect(commission(10, 100)).toBe(1); // 1% = 0.1 → 下限 1
+  });
+});
+
+describe('stampTax', () => {
+  it('成交额 0.1%，上限保证金 1%', () => {
+    expect(stampTax(1000, 10000)).toBe(1); // 0.1% = 1
+    expect(stampTax(100000, 1000)).toBe(10); // 0.1% = 100 → 上限 10
+  });
+});
+
+describe('tradePreview', () => {
+  it('与实际开仓扣款一致（做多）', () => {
+    const a = withCash(10000);
+    const p = tradePreview(a, 'TGJ', 'long', 2, 5);
+    const cash0 = a.cash;
+    openPosition(a, 'TGJ', 'long', 2, 5);
+    expect(cash0 - a.cash).toBe(p.total);
+    expect(p.margin).toBe(40);
+    expect(p.stamp).toBe(0);
+  });
+  it('做空含印花税，且不动账本', () => {
+    const a = withCash(10000);
+    const p = tradePreview(a, 'TGJ', 'short', 2, 5);
+    expect(p.stamp).toBeCloseTo(0.2, 6);
+    expect(a.cash).toBe(10000);
+    expect(a.positions['TGJ']).toBeUndefined();
   });
 });
 
@@ -44,6 +80,12 @@ describe('openPosition（做多）', () => {
     expect(() => openPosition(a, 'TGJ', 'long', 0, 1)).toThrow();
     expect(() => openPosition(a, 'TGJ', 'long', 1, 0)).toThrow();
     expect(() => openPosition(a, 'TGJ', 'long', 1, 101)).toThrow();
+  });
+  it('最低保证金 5：小单拒绝', () => {
+    const a = withCash(10000);
+    // 名义 100 / 杠杆 100 = 保证金 1 < 5
+    expect(() => openPosition(a, 'TGJ', 'long', 1, 100)).toThrow(/最低保证金/);
+    expect(a.positions['TGJ']).toBeUndefined();
   });
 });
 
