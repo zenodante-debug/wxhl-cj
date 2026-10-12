@@ -9,7 +9,7 @@ import { closePosition, openPosition, tickTrading } from './engine/trading';
 import { pushLog } from './engine/metrics';
 import { BANKRUPTCY_LINE, shouldGoBankrupt } from './engine/bankrupt';
 import { computeLiquidation, EMPTY_EQUIP_SLOT, type LiquidationResult } from './engine/bankruptcy';
-import { adjustUP, commitMvu, readContractor } from './mvu';
+import { adjustUP, commitMvu, readContractor, readUP } from './mvu';
 
 export const STORAGE_KEY = 'wxhl-cg:account';
 
@@ -76,6 +76,8 @@ const EXCHANGE_FEE = 0.01; // UP 兑换双向 1%
 export const useExchangeStore = defineStore('wxhl-cg', () => {
   const acct = ref<ExchangeAccount>(loadAccount(localStorage));
   const panelOpen = ref(false);
+  /** 主卡 UP 余额（读不到为 null）；账户资产里与现金并列显示 */
+  const up = ref<number | null>(readUP());
   let timer: ReturnType<typeof setInterval> | null = null;
   /** 防重入闸（照市场 purchasing/listing 惯例）：异步 MVU 操作进行中拒绝并发调用 */
   let exchanging = false;
@@ -85,6 +87,11 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
 
   function persist() {
     saveAccount(localStorage, klona(acct.value));
+  }
+
+  /** 刷新主卡 UP 余额（打开面板、兑换后、每跳各读一次） */
+  function refreshUP() {
+    up.value = readUP();
   }
 
   /** 推进一跳：行情 → 交易结算（杠杆利息/强平）→ 破产线检查，然后持久化。引擎 throw 时响亮失败并停表。 */
@@ -102,6 +109,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
         toastr.warning(text);
       }
       persist();
+      refreshUP();
       // 破产线：累计已实现亏损越过 250 → 自动清算（异步，失败不阻塞行情，下一跳重试）
       if (!bankruptcing && shouldGoBankrupt(acct.value)) {
         void autoLiquidate();
@@ -173,6 +181,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
 
   function open() {
     panelOpen.value = true;
+    refreshUP();
     startTicker();
   }
 
@@ -193,6 +202,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
       acct.value.netInvested = round2(acct.value.netInvested + credited);
       pushLog(acct.value, 'system', `存入 ${amount} UP → ${credited} 币`);
       persist();
+      refreshUP();
       toastr.success(`入金成功：${amount} UP → ${credited} 币（手续费 1%）`);
     } finally {
       exchanging = false;
@@ -212,6 +222,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
       acct.value.netInvested = round2(acct.value.netInvested - amount);
       pushLog(acct.value, 'system', `取出 ${amount} 币 → ${upGain} UP`);
       persist();
+      refreshUP();
       toastr.success(`出金成功：${amount} 币 → ${upGain} UP（手续费 1%）`);
     } finally {
       exchanging = false;
@@ -336,6 +347,8 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
   return {
     acct,
     panelOpen,
+    up,
+    refreshUP,
     open,
     close,
     doTick,

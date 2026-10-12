@@ -1,291 +1,633 @@
-<!-- 回廊交易所 · 主面板：行情 / 持仓 / 资产 -->
+<!-- 回廊交易所 · 单页主面板：左行情 / 中详情 / 右上资产 / 右下持仓 / 下日报 -->
 <script setup lang="ts">
 import { useExchangeStore } from '../store';
 import { STOCKS } from '../engine/stocks';
-import { netAssets, openPosition, closePosition, positionPnl, liquidationPrice } from '../engine/trading';
-import type { LiquidationResult } from '../engine/bankruptcy';
+import { liquidationPrice, tradePreview } from '../engine/trading';
+import type { ChartLine } from './chartGeometry';
+import PriceChart from './PriceChart.vue';
 import SparkLine from './SparkLine.vue';
+import AssetPanel from './AssetPanel.vue';
+import PositionsPanel from './PositionsPanel.vue';
+import TradeLog from './TradeLog.vue';
 
 const store = useExchangeStore();
 const acct = computed(() => store.acct);
-const tab = ref<'market' | 'positions' | 'assets'>('market');
-const detail = ref<string | null>(null);
-const qty = ref(1);
+
+/** 当前查看的股票；未选中时用列表第一只 */
+const pickedCode = ref<string>(STOCKS[0].code);
+const detail = computed(() => STOCKS.find(s => s.code === pickedCode.value) ?? STOCKS[0]);
+const price = computed(() => acct.value.prices[detail.value.code]);
+const openPrice = computed(() => acct.value.openPrices[detail.value.code] ?? price.value);
+/** 涨跌幅按"开盘基准价"算（开盘 = 本次脚本加载） */
+const pct = computed(() => ((price.value - openPrice.value) / openPrice.value) * 100);
+
+function pctOf(code: string): number {
+  const open = acct.value.openPrices[code] ?? acct.value.prices[code];
+  return ((acct.value.prices[code] - open) / open) * 100;
+}
+
+const position = computed(() => acct.value.positions[detail.value.code]);
+
+/** 图上三条线：开盘基准 / 开仓价 / 强平价 */
+const chartLines = computed<ChartLine[]>(() => {
+  const lines: ChartLine[] = [{ value: openPrice.value, label: `开盘 ${openPrice.value}`, kind: 'base' }];
+  const pos = position.value;
+  if (pos) {
+    lines.push({ value: pos.entryPrice, label: `成本 ${pos.entryPrice}`, kind: 'entry' });
+    const liq = liquidationPrice(pos);
+    if (Number.isFinite(liq) && liq > 0) lines.push({ value: liq, label: `强平 ${liq}`, kind: 'liq' });
+  }
+  return lines;
+});
+
+const qty = ref(10);
 const leverage = ref(1);
 
-const net = computed(() => netAssets(acct.value));
-
-function pct(code: string): number {
-  const h = acct.value.priceHistory[code];
-  if (!h || h.length < 2) return 0;
-  return ((h[h.length - 1] - h[0]) / h[0]) * 100;
-}
-
-function buy(code: string, side: 'long' | 'short') {
+/** 下单费用预览（做多/做空各一份），参数非法时为 null */
+function previewOf(side: 'long' | 'short') {
   try {
-    openPosition(acct.value, code, side, qty.value, leverage.value);
-    store.persist();
-    toastr.success(`已开${side === 'long' ? '多' : '空'} ${code} ×${qty.value}`);
-  } catch (e: any) {
-    toastr.error(e?.message ?? '开仓失败');
+    return tradePreview(acct.value, detail.value.code, side, qty.value, leverage.value);
+  } catch {
+    return null;
   }
 }
+const previewLong = computed(() => previewOf('long'));
+const previewShort = computed(() => previewOf('short'));
 
-function close(code: string) {
+function doOrder(side: 'long' | 'short') {
   try {
-    const r = closePosition(acct.value, code);
-    store.persist();
-    toastr.success(`平仓 ${code}：盈亏 ${r.pnl >= 0 ? '+' : ''}${r.pnl}`);
+    const r = store.placeOrder(detail.value.code, side, qty.value, leverage.value);
+    toastr.success(`开${side === 'long' ? '多' : '空'} ${detail.value.code} ×${qty.value}（保证金 ${r.margin}）`);
   } catch (e: any) {
-    toastr.error(e?.message ?? '平仓失败');
-  }
-}
-
-const exchangeAmt = ref(0);
-async function doDeposit() {
-  try {
-    await store.depositUP(exchangeAmt.value);
-  } catch (e: any) {
-    toastr.error(e?.message ?? '入金失败');
-  }
-}
-async function doWithdraw() {
-  try {
-    await store.withdrawUP(exchangeAmt.value);
-  } catch (e: any) {
-    toastr.error(e?.message ?? '出金失败');
-  }
-}
-
-const previewing = ref(false);
-const preview = ref<LiquidationResult | null>(null);
-
-function openPreview() {
-  try {
-    preview.value = store.previewBankruptcy();
-    previewing.value = true;
-  } catch (e: any) {
-    toastr.error(e?.message ?? '清算预览失败');
-  }
-}
-async function doBankruptcy() {
-  try {
-    await store.declareBankruptcy();
-    previewing.value = false;
-    toastr.warning('破产清算完成');
-  } catch (e: any) {
-    toastr.error(e?.message ?? '清算失败，已中止');
+    toastr.error(e?.message ?? '下单失败');
   }
 }
 </script>
 
 <template>
-  <div v-if="store.panelOpen" class="cg-panel">
-    <div class="cg-head">
-      <span class="cg-title">回廊交易所</span>
-      <span class="cg-net">净资产 {{ net }}</span>
-      <button class="cg-close" @click="store.close()">✕</button>
-    </div>
-    <div v-if="acct.news" class="cg-news">{{ acct.news.sentiment === 'good' ? '📈' : '📉' }} {{ acct.news.text }}</div>
-    <div class="cg-tabs">
-      <button :class="{ on: tab === 'market' }" @click="tab = 'market'">行情</button>
-      <button :class="{ on: tab === 'positions' }" @click="tab = 'positions'">持仓</button>
-      <button :class="{ on: tab === 'assets' }" @click="tab = 'assets'">资产</button>
-    </div>
-
-    <div v-if="tab === 'market' && !detail" class="cg-list">
-      <div v-for="s in STOCKS" :key="s.code" class="cg-row" @click="detail = s.code">
-        <div class="cg-row-name">{{ s.name }}<span class="cg-code">{{ s.code }}</span></div>
-        <SparkLine :data="acct.priceHistory[s.code]" />
-        <div class="cg-price">{{ acct.prices[s.code] }}</div>
-        <div class="cg-pct" :class="pct(s.code) >= 0 ? 'up' : 'down'">{{ pct(s.code).toFixed(2) }}%</div>
+  <div v-if="store.panelOpen" class="cg-overlay" @click.self="store.close()">
+    <div class="cg-panel">
+      <div class="cg-head">
+        <span class="cg-title">回廊交易所</span>
+        <span class="cg-head-sub mono">第 {{ acct.tick }} 跳</span>
+        <button class="cg-head-btn" @click="store.doTick()">跳过</button>
+        <button class="cg-head-btn cg-x" @click="store.close()">✕</button>
       </div>
-    </div>
 
-    <div v-else-if="tab === 'market' && detail" class="cg-detail">
-      <button @click="detail = null">← 返回</button>
-      <h3>{{ detail }}</h3>
-      <SparkLine :data="acct.priceHistory[detail]" :width="300" :height="120" />
-      <div>现价 {{ acct.prices[detail] }}</div>
-      <div v-if="acct.positions[detail]">强平价：{{ liquidationPrice(acct.positions[detail]) }}</div>
-      <label>数量 <input v-model.number="qty" type="number" min="1" /></label>
-      <label>杠杆 <input v-model.number="leverage" type="range" min="1" max="100" /> ×{{ leverage }}</label>
-      <div class="cg-btns">
-        <button class="buy" @click="buy(detail, 'long')">做多</button>
-        <button class="sell" @click="buy(detail, 'short')">做空</button>
+      <div v-if="acct.news" class="cg-news" :class="acct.news.sentiment">
+        <span class="cg-news-tag">{{ acct.news.sentiment === 'good' ? '利好' : '利空' }}</span>
+        {{ acct.news.text }}
       </div>
-    </div>
+      <div v-else class="cg-news muted">暂无新闻</div>
 
-    <div v-else-if="tab === 'positions'" class="cg-list">
-      <div v-if="!Object.keys(acct.positions).length" class="cg-empty">空仓</div>
-      <div v-for="(p, code) in acct.positions" :key="code" class="cg-row">
-        <div class="cg-row-name">{{ code }} {{ p.side === 'long' ? '多' : '空' }} ×{{ p.leverage }}</div>
-        <div class="cg-pct" :class="positionPnl(p, acct.prices[code]) >= 0 ? 'up' : 'down'">
-          {{ positionPnl(p, acct.prices[code]) }}
-        </div>
-        <button @click="close(code)">平仓</button>
-      </div>
-    </div>
-
-    <div v-else class="cg-assets">
-      <div>现金：{{ acct.cash }}</div>
-      <div>净资产：{{ net }}</div>
-      <div>累计亏损：{{ acct.cumulativeLoss }}（破产线 250）</div>
-      <div v-if="acct.frozen" class="cg-frozen">⛔ 破产欠款未清：{{ acct.debt }}</div>
-      <div class="cg-exchange">
-        <h4>UP 兑换（1 UP = 1 币，双向 1% 手续费）</h4>
-        <input v-model.number="exchangeAmt" type="number" min="1" placeholder="金额" />
-        <div class="cg-btns">
-          <button @click="doDeposit">入金（UP→币）</button>
-          <button @click="doWithdraw">出金（币→UP）</button>
-        </div>
-      </div>
-      <div class="cg-bankruptcy">
-        <div>破产次数：{{ acct.bankruptcyCount }}</div>
-        <button class="danger" @click="openPreview">申请破产清算</button>
-        <div v-if="previewing" class="cg-modal">
-          <h4>破产清算清单（确认后不可撤销）</h4>
-          <div v-for="(s, i) in preview?.steps ?? []" :key="i">【{{ s.category }}】{{ s.name }} → 抵 {{ s.proceeds }}</div>
-          <div>抵债合计 {{ preview?.totalProceeds }}，剩余债务 {{ preview?.remainingDebt }}</div>
-          <div class="cg-btns">
-            <button class="danger" @click="doBankruptcy">确认清算</button>
-            <button @click="previewing = false">取消</button>
+      <div class="cg-grid">
+        <!-- 左：行情 -->
+        <div class="cg-list">
+          <div class="cg-list-head">行情</div>
+          <div
+            v-for="s in STOCKS"
+            :key="s.code"
+            class="cg-row"
+            :class="{ on: s.code === pickedCode }"
+            @click="pickedCode = s.code"
+          >
+            <div class="cg-row-top">
+              <span class="cg-row-name">{{ s.name }}</span>
+              <span class="mono cg-row-price">{{ acct.prices[s.code] }}</span>
+            </div>
+            <div class="cg-row-bot">
+              <span class="mono dim">{{ s.code }}</span>
+              <SparkLine :data="acct.priceHistory[s.code]" :width="70" :height="18" />
+              <span class="mono" :class="pctOf(s.code) >= 0 ? 'up' : 'down'">
+                {{ pctOf(s.code) >= 0 ? '+' : '' }}{{ pctOf(s.code).toFixed(2) }}%
+              </span>
+            </div>
           </div>
         </div>
+
+        <!-- 中：股价详情 -->
+        <div class="cg-center">
+          <div class="cg-detail-head">
+            <span class="cg-detail-name">{{ detail.name }}</span>
+            <span class="mono dim">{{ detail.code }} · {{ detail.faction }}</span>
+          </div>
+          <div class="cg-detail-price">
+            <span class="mono big" :class="pct >= 0 ? 'up' : 'down'">{{ price }}</span>
+            <span class="mono" :class="pct >= 0 ? 'up' : 'down'">
+              {{ pct >= 0 ? '+' : '' }}{{ pct.toFixed(2) }}%（开盘 {{ openPrice }}）
+            </span>
+          </div>
+          <PriceChart :data="acct.priceHistory[detail.code]" :lines="chartLines" :width="360" :height="150" />
+
+          <div class="cg-trade">
+            <label class="cg-field">
+              数量
+              <input v-model.number="qty" type="number" min="1" step="1" />
+            </label>
+            <label class="cg-field cg-field-wide">
+              杠杆
+              <input v-model.number="leverage" type="range" min="1" max="100" />
+              <b class="mono">×{{ leverage }}</b>
+            </label>
+          </div>
+
+          <div class="cg-fee">
+            <template v-if="previewLong">
+              做多需 <b class="mono">{{ previewLong.total }}</b>（保证金 {{ previewLong.margin }} + 佣金
+              {{ previewLong.fee }}）
+            </template>
+            <template v-else>数量/杠杆不合法</template>
+            <br />
+            <template v-if="previewShort">
+              做空需 <b class="mono">{{ previewShort.total }}</b>（保证金 {{ previewShort.margin }} + 佣金
+              {{ previewShort.fee }} + 印花税 {{ previewShort.stamp }}）
+            </template>
+          </div>
+
+          <div class="cg-actions">
+            <button class="cg-buy" :disabled="acct.frozen || !!position || !previewLong" @click="doOrder('long')">
+              做多
+            </button>
+            <button class="cg-sell" :disabled="acct.frozen || !!position || !previewShort" @click="doOrder('short')">
+              做空
+            </button>
+          </div>
+          <div v-if="position" class="cg-hint">已持有 {{ detail.code }}，先平仓再反手</div>
+          <div v-else-if="acct.frozen" class="cg-hint down">账户冻结中：先清偿欠款</div>
+          <div v-else-if="!previewLong" class="cg-hint down">保证金不足 {{ 5 }} 或参数不合法</div>
+        </div>
+
+        <!-- 右：资产 + 持仓 -->
+        <div class="cg-right">
+          <AssetPanel />
+          <PositionsPanel />
+        </div>
       </div>
+
+      <TradeLog />
     </div>
   </div>
 </template>
 
 <style scoped>
-.cg-panel {
+/* ———— 状态栏同款暖色板（照抄 src/wxhl-003/statusbar/theme.scss）———— */
+.cg-overlay {
+  --cg-void: #080504;
+  --cg-bg: #120b07;
+  --cg-panel: #241812;
+  --cg-panel-2: #2e1e14;
+  --cg-sub: #1a100a;
+  --cg-border: #4a3226;
+  --cg-border-soft: #33221a;
+  --cg-hover: #3a2418;
+  --cg-amber: #e8c078;
+  --cg-amber-dim: #c8a060;
+  --cg-gold: #d0a850;
+  --cg-ember: #d8914a;
+  --cg-chalk: #e8dfd2;
+  --cg-chalk-dim: #b3a390;
+  --cg-dim: #7d6c58;
+  --cg-up: #6ac08a;
+  --cg-down: #d05040;
+  --cg-font-display: 'Noto Serif SC', 'SimSun', serif;
+  --cg-font-body: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
+  --cg-font-mono: 'JetBrains Mono', 'Courier New', monospace;
+
   position: fixed;
   inset: 0;
-  background: #0d0f14;
-  color: #e6e6e6;
+  z-index: 2147483640;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: rgba(0, 0, 0, 0.65);
+  backdrop-filter: blur(4px);
+  padding: env(safe-area-inset-top, 0) env(safe-area-inset-right, 0) env(safe-area-inset-bottom, 0)
+    env(safe-area-inset-left, 0);
   pointer-events: auto;
+  font-family: var(--cg-font-body);
+  color: var(--cg-chalk);
+}
+.cg-panel {
+  width: min(980px, 94vw);
+  height: min(92dvh, 920px);
   display: flex;
   flex-direction: column;
-  font-size: 14px;
+  gap: 8px;
+  padding: 10px;
+  box-sizing: border-box;
+  background: var(--cg-void);
+  border: 1px solid var(--cg-border);
+  border-radius: 18px;
+  overflow: hidden;
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.6);
 }
+
+/* ———— 控件基线：修"白底白字"（浏览器默认控件样式在这种深色面板上必然串色）———— */
+.cg-panel input,
+.cg-panel button,
+.cg-panel select {
+  background: var(--cg-panel);
+  color: var(--cg-chalk);
+  border: 1px solid var(--cg-border);
+  border-radius: 6px;
+  padding: 4px 8px;
+  font: inherit;
+  font-family: var(--cg-font-body);
+}
+.cg-panel input::placeholder {
+  color: var(--cg-dim);
+}
+.cg-panel button {
+  cursor: pointer;
+}
+.cg-panel button:hover:not(:disabled) {
+  background: var(--cg-hover);
+}
+.cg-panel button:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+.cg-panel input[type='range'] {
+  padding: 0;
+  border: none;
+  background: transparent;
+  accent-color: var(--cg-amber);
+}
+
+/* ———— 顶栏 ———— */
 .cg-head {
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 10px 14px;
-  border-bottom: 1px solid #262a33;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--cg-border-soft);
 }
 .cg-title {
-  font-weight: 700;
-}
-.cg-net {
-  margin-left: auto;
-  opacity: 0.8;
-}
-.cg-close {
-  background: none;
-  border: none;
-  color: #999;
+  font-family: var(--cg-font-display);
   font-size: 16px;
+  letter-spacing: 2px;
+  color: var(--cg-amber);
 }
-.cg-news {
-  padding: 6px 14px;
-  background: #1a2030;
+.cg-head-sub {
+  font-size: 11px;
+  color: var(--cg-dim);
+}
+.cg-head-btn {
+  margin-left: auto;
   font-size: 12px;
+  padding: 3px 10px;
 }
-.cg-tabs {
-  display: flex;
-  gap: 4px;
-  padding: 8px 14px;
+.cg-head-btn + .cg-head-btn {
+  margin-left: 0;
 }
-.cg-tabs button {
-  flex: 1;
-  padding: 6px;
-  background: #171b23;
-  border: 1px solid #262a33;
-  color: #ccc;
+.cg-x {
+  color: var(--cg-chalk-dim);
+}
+
+.cg-news {
+  padding: 4px 8px;
   border-radius: 6px;
+  background: var(--cg-sub);
+  border-left: 3px solid var(--cg-gold);
+  font-size: 12px;
+  line-height: 1.5;
 }
-.cg-tabs button.on {
-  background: #24406e;
-  color: #fff;
+.cg-news.good {
+  border-left-color: var(--cg-up);
+}
+.cg-news.bad {
+  border-left-color: var(--cg-down);
+}
+.cg-news.muted {
+  color: var(--cg-dim);
+  border-left-color: var(--cg-border);
+}
+.cg-news-tag {
+  color: var(--cg-amber-dim);
+  margin-right: 4px;
+}
+
+/* ———— 三栏 ———— */
+.cg-grid {
+  flex: 1;
+  display: grid;
+  grid-template-columns: 210px minmax(280px, 1fr) 270px;
+  gap: 8px;
+  min-height: 0;
+}
+.cg-list,
+.cg-center,
+.cg-right {
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.cg-list,
+.cg-center {
+  background: var(--cg-bg);
+  border: 1px solid var(--cg-border-soft);
+  border-radius: 8px;
+  padding: 8px;
 }
 .cg-list {
-  flex: 1;
   overflow-y: auto;
-  padding: 0 14px;
 }
+.cg-right {
+  overflow-y: auto;
+}
+.cg-list-head,
+.cg-card-title,
+.cg-log-head {
+  font-family: var(--cg-font-display);
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: var(--cg-amber-dim);
+  margin-bottom: 4px;
+}
+
+/* ———— 股票行 ———— */
 .cg-row {
+  padding: 5px 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  border: 1px solid transparent;
+}
+.cg-row:hover {
+  background: var(--cg-hover);
+}
+.cg-row.on {
+  background: var(--cg-panel);
+  border-color: var(--cg-border);
+}
+.cg-row-top,
+.cg-row-bot {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 10px 0;
-  border-bottom: 1px solid #1c2029;
+  gap: 6px;
 }
 .cg-row-name {
   flex: 1;
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
-.cg-code {
-  opacity: 0.5;
-  margin-left: 6px;
+.cg-row-price,
+.cg-row-bot {
   font-size: 11px;
 }
-.cg-pct.up {
-  color: #e5484d;
+.cg-row-bot .dim {
+  width: 34px;
 }
-.cg-pct.down {
-  color: #30a46c;
+.cg-row-bot span:last-child {
+  margin-left: auto;
 }
-.cg-detail,
-.cg-assets {
-  padding: 14px;
+
+/* ———— 详情 ———— */
+.cg-center {
+  overflow-y: auto;
+}
+.cg-detail-head {
   display: flex;
-  flex-direction: column;
-  gap: 10px;
+  align-items: baseline;
+  gap: 8px;
 }
-.cg-btns {
+.cg-detail-name {
+  font-family: var(--cg-font-display);
+  font-size: 15px;
+  color: var(--cg-chalk);
+}
+.cg-detail-price {
+  display: flex;
+  align-items: baseline;
+  gap: 10px;
+  font-size: 13px;
+}
+.big {
+  font-size: 22px;
+}
+.cg-trade {
   display: flex;
   gap: 10px;
+  flex-wrap: wrap;
 }
-.cg-btns .buy {
-  flex: 1;
-  background: #e5484d;
-  color: #fff;
-  border: none;
-  padding: 10px;
-  border-radius: 6px;
+.cg-field {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: var(--cg-chalk-dim);
 }
-.cg-btns .sell {
+.cg-field input[type='number'] {
+  width: 72px;
+}
+.cg-field-wide {
   flex: 1;
-  background: #30a46c;
-  color: #fff;
-  border: none;
-  padding: 10px;
+}
+.cg-field-wide input[type='range'] {
+  flex: 1;
+}
+.cg-fee {
+  font-size: 11px;
+  line-height: 1.6;
+  color: var(--cg-chalk-dim);
+  background: var(--cg-sub);
   border-radius: 6px;
+  padding: 5px 7px;
+}
+.cg-actions {
+  display: flex;
+  gap: 8px;
+}
+.cg-actions button {
+  flex: 1;
+  padding: 8px;
+  font-size: 13px;
+  letter-spacing: 1px;
+  border: none;
+}
+.cg-buy {
+  background: #2c5c3f;
+  color: #eafff1;
+}
+.cg-buy:hover:not(:disabled) {
+  background: #356f4c !important;
+}
+.cg-sell {
+  background: #6b2a24;
+  color: #ffeceb;
+}
+.cg-sell:hover:not(:disabled) {
+  background: #7d322b !important;
+}
+.cg-hint {
+  font-size: 11px;
+  color: var(--cg-dim);
+}
+
+/* ———— 右栏卡片 ———— */
+.cg-card {
+  background: var(--cg-bg);
+  border: 1px solid var(--cg-border-soft);
+  border-radius: 8px;
+  padding: 8px;
+}
+.cg-count {
+  margin-left: 6px;
+  color: var(--cg-dim);
+  letter-spacing: 0;
+}
+.cg-kv {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  line-height: 1.9;
+}
+.cg-kv .k {
+  color: var(--cg-chalk-dim);
+}
+.mono {
+  font-family: var(--cg-font-mono);
+}
+.dim {
+  color: var(--cg-dim);
+}
+.up {
+  color: var(--cg-up);
+}
+.down {
+  color: var(--cg-down);
+}
+.cg-bar {
+  height: 3px;
+  background: var(--cg-sub);
+  border-radius: 2px;
+  overflow: hidden;
+  margin: 4px 0 6px;
+}
+.cg-bar i {
+  display: block;
+  height: 100%;
+  background: var(--cg-ember);
+}
+.cg-debt {
+  background: #2a1210;
+  border: 1px solid #6b2a24;
+  border-radius: 6px;
+  padding: 6px;
+  font-size: 12px;
+  margin-bottom: 6px;
+}
+.cg-sub-title {
+  font-size: 11px;
+  color: var(--cg-dim);
+  margin: 6px 0 3px;
+}
+.cg-presets {
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+  gap: 4px;
+}
+.cg-presets button {
+  font-size: 11px;
+  padding: 4px 2px;
+}
+
+/* ———— 持仓 ———— */
+.cg-pos {
+  border-top: 1px solid var(--cg-border-soft);
+  padding: 5px 0;
+  position: relative;
+}
+.cg-pos.danger {
+  background: #2a1210;
+  border-radius: 6px;
+  padding: 5px 6px;
+}
+.cg-pos-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+}
+.side-long {
+  color: var(--cg-up);
+}
+.side-short {
+  color: var(--cg-ember);
+}
+.cg-pos-head .pnl {
+  margin-left: auto;
+}
+.cg-pos-sub {
+  display: flex;
+  gap: 8px;
+  font-size: 11px;
+  margin: 2px 0 4px;
+}
+.cg-close-pos {
+  font-size: 11px;
+  padding: 2px 10px;
 }
 .cg-empty {
-  opacity: 0.5;
+  color: var(--cg-dim);
+  font-size: 12px;
+  padding: 8px 0;
   text-align: center;
-  padding: 30px;
 }
-.cg-frozen {
-  color: #f7b955;
-}
-.danger {
-  background: #5c1a1a;
-  color: #ffb3b3;
-  border: 1px solid #8a2f2f;
-  padding: 8px;
-  border-radius: 6px;
-}
-.cg-modal {
-  border: 1px solid #8a2f2f;
-  background: #151019;
+
+/* ———— 日报 ———— */
+.cg-log {
+  height: 132px;
+  background: var(--cg-bg);
+  border: 1px solid var(--cg-border-soft);
   border-radius: 8px;
-  padding: 12px;
+  padding: 6px 8px;
   display: flex;
   flex-direction: column;
-  gap: 8px;
-  font-size: 13px;
+  min-height: 0;
+}
+.cg-log-body {
+  flex: 1;
+  overflow-y: auto;
+  font-size: 11.5px;
+  line-height: 1.7;
+}
+.cg-log-row {
+  display: flex;
+  gap: 6px;
+  border-left: 2px solid var(--cg-border);
+  padding-left: 6px;
+}
+.cg-log-row.news {
+  border-left-color: var(--cg-gold);
+}
+.cg-log-row.trade {
+  border-left-color: var(--cg-up);
+}
+.cg-log-row.system {
+  border-left-color: var(--cg-ember);
+}
+.cg-log-tag {
+  color: var(--cg-dim);
+  flex: none;
+}
+.cg-log-text {
+  flex: 1;
+}
+
+/* ———— 窄屏堆叠（手机端由 index.ts 的内联尺寸兜底，这里只管内部排版）———— */
+@media (max-width: 860px) {
+  .cg-grid {
+    grid-template-columns: 1fr;
+    overflow-y: auto;
+  }
+  .cg-list {
+    max-height: 180px;
+  }
+  .cg-panel {
+    border-radius: 14px;
+  }
 }
 </style>
