@@ -91,3 +91,23 @@ describe('installBridge · 重载守卫', () => {
     second();
   });
 });
+
+describe('createBridgeListener · 只认面板 iframe 的来源', () => {
+  it('来源不是面板 iframe → 丢弃，不 dispatch 也不回包', async () => {
+    const { event, source } = makeEvent(request('handshake'));
+    const dispatch = vi.fn();
+    const listener = createBridgeListener({ allowedOrigin: ORIGIN, dispatch, expectedSource: () => ({ other: true } as unknown as Window) });
+    await listener(event);
+    expect(dispatch).not.toHaveBeenCalled();
+    expect(source.postMessage).not.toHaveBeenCalled();
+  });
+
+  it('expectedSource 返回 null（未开面板/测试）→ 跳过该校验，照常处理', async () => {
+    const { event, source } = makeEvent(request('handshake'));
+    const dispatch = vi.fn().mockResolvedValue({ ok: true });
+    const listener = createBridgeListener({ allowedOrigin: ORIGIN, dispatch, expectedSource: () => null });
+    await listener(event);
+    expect(dispatch).toHaveBeenCalled();
+    expect(source.postMessage).toHaveBeenCalled();
+  });
+});
