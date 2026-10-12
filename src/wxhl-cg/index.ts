@@ -6,6 +6,7 @@ import { createScriptIdDiv, teleportStyle } from '@util/script';
 import ExchangePanel from './ui/ExchangePanel.vue';
 import { useExchangeStore } from './store';
 import { viewportMode } from './ui/viewportMode';
+import './ui/panel.scss'; // 全局样式（子组件内部元素也要吃到，见文件头注释）
 
 declare const __WXHL_BUILD__: string;
 

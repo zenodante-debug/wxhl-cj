@@ -76,9 +76,10 @@ function doRepayDebt() {
     </div>
     <div class="cg-kv">
       <span class="k">破产线</span>
-      <span class="v mono" :class="lossRatio >= 80 ? 'down' : ''">{{ acct.cumulativeLoss }} / {{ BANKRUPTCY_LINE }}</span>
+      <span class="v mono" :class="lossRatio >= 80 ? 'down' : ''">累计亏损 {{ acct.cumulativeLoss }} / {{ BANKRUPTCY_LINE }}</span>
     </div>
     <div class="cg-bar"><i :style="{ width: lossRatio + '%' }"></i></div>
+    <div class="cg-hint">亏满 {{ BANKRUPTCY_LINE }} 就强制变卖资产抵债（只算已平仓的实亏，浮亏不算）</div>
 
     <div v-if="acct.debt > 0" class="cg-debt">
       <div>欠交易所 <b class="mono down">{{ acct.debt }}</b>（账户已冻结）</div>
