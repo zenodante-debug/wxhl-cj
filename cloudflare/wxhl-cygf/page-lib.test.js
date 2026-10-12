@@ -461,3 +461,31 @@ describe('parseBuildJson · 逐字段 replace 指令（用户 2026-10-12 粘贴�
     expect(() => parseBuildJson(JSON.stringify([{ op: 'replace', path: '/契约者/经济/UP', value: 1 }]))).toThrow(/构筑字段/);
   });
 });
+
+describe('parseBuildJson · 认字段（不依赖输入形状）', () => {
+  it('平铺形态：等级/四维/职业直接挂在顶上也能认', () => {
+    const build = parseBuildJson(JSON.stringify({
+      姓名: '测试者', 等级: 7, 阶位: '二阶',
+      STR: 12, AGI: 6, CON: 14, PER: 8,
+      职业: { 名称: '卫士', 职业简介: '前排' }, 天赋: { 名称: '石肤' },
+    }));
+    expect(build.构筑名).toBe('测试者');
+    expect(build.等级).toBe(7);
+    expect(build.属性基础).toEqual({ STR: 12, AGI: 6, CON: 14, PER: 8 });
+    expect(build.属性分配方向).toEqual({ 主属性: 'CON', 副属性: 'STR' });
+    expect(build.职业.名称).toBe('卫士');
+  });
+
+  it('深层包装 + 多个实体：取认出的字段最多的那个', () => {
+    const 薄 = { 属性: { 基础: { STR: 1, AGI: 1, CON: 1, PER: 1 } } };
+    const 全 = {
+      头部: { 姓名: '本体', 等级: 9, 阶位: '三阶' },
+      属性: { 基础: { STR: 20, AGI: 20, CON: 20, PER: 20 } },
+      职业: { 名称: '咒术师' }, 通用技能: {}, 装备: {},
+    };
+    const build = parseBuildJson(JSON.stringify({ a: { b: { deep: 薄 } }, c: { d: 全 } }));
+    expect(build.构筑名).toBe('本体');
+    expect(build.等级).toBe(9);
+    expect(build.属性基础.STR).toBe(20);
+  });
+});

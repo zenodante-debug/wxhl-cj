@@ -486,48 +486,90 @@ export function deriveAttributeDirection(属性基础) {
   return { 主属性: 排序[0], 副属性: 排序[1] ?? '无' };
 }
 
+/** 契约者/实体身上已知的字段名——用来「认字」而不是枚举形状 */
+const CONTRACTOR_KEYS = ['头部', '属性', '衍生属性', '职业', '通用技能', '装备', '特殊资源', '状态', '背包', '外貌', '构筑', '好感度'];
+
+const ATTR_KEYS = ['STR', 'AGI', 'CON', 'PER'];
+
+/** 四维：从数组/对象里捡出 STR/AGI/CON/PER（缺的补 5） */
+function pickAttributes(node) {
+  const 候选 = [node?.属性?.基础, node?.属性, node?.属性基础, node];
+  for (const c of 候选) {
+    if (isRecord(c) && ATTR_KEYS.some(k => k in c)) {
+      return Object.fromEntries(ATTR_KEYS.map(k => [k, Number(c[k]) || 5]));
+    }
+  }
+  return null;
+}
+
 const isRecord = v => v !== null && typeof v === 'object' && !Array.isArray(v);
-const looksLikeContractor = v => isRecord(v) && ['头部', '属性', '职业', '通用技能', '装备'].some(k => k in v);
 const looksLikeBuild = v => isRecord(v) && ('构筑名' in v || '定位' in v);
 
-/**
- * 粘贴 JSON 捕捉构筑：吃四种形状 —— {stat_data:{契约者}} / {契约者} / 契约者子树 / 构筑载荷。
- * 认不出来就抛人话错误（不静默产出空构筑）。
- */
-/** 把一份契约者子树映射成构筑载荷（nameHint = 从指令 path 末尾取到的实体名） */
-function buildFromContractor(契约者, nameHint = '') {
-  const 头部 = 契约者.头部 ?? {};
-  const 属性基础 = 契约者.属性?.基础 ?? {};
-  const 职业 = 契约者.职业 ?? {};
-  const 称号 = 头部.称号?.当前称号 ?? 头部.称号 ?? {};
+/** 按字段名到各处捡出构筑载荷（不假设层级：等级/阶位在顶上或 头部 下都行，四维同理） */
+function buildFromAnywhere(source, nameHint = '') {
+  const 头部 = isRecord(source.头部) ? source.头部 : source;
+  const 职业 = isRecord(source.职业) ? source.职业 : {};
+  const 称号 = (头部.称号 && (头部.称号.当前称号 ?? 头部.称号)) || source.称号 || {};
+  const 属性基础 = pickAttributes(source) ?? { STR: 5, AGI: 5, CON: 5, PER: 5 };
   const 名字 =
     nameHint ||
     (头部.姓名 && String(头部.姓名).trim()) ||
     (职业.名称 && 职业.名称 !== '无' ? 职业.名称 : '') ||
     '未命名构筑';
+  const 通用技能 = source.通用技能 ?? source.技能 ?? {};
+  const 装备 = source.装备 ?? source.主要装备 ?? {};
   return {
     构筑名: 名字,
     定位:
-      契约者.构筑 && 契约者.构筑 !== '无'
-        ? 契约者.构筑
+      source.构筑 && source.构筑 !== '无'
+        ? source.构筑
         : 职业.职业简介 && 职业.职业简介 !== '无'
           ? 职业.职业简介
           : '未填写',
-    等级: Number(头部.等级) || 1,
-    阶位: 头部.阶位 || '一阶',
-    属性基础: {
-      STR: Number(属性基础.STR) || 5, AGI: Number(属性基础.AGI) || 5,
-      CON: Number(属性基础.CON) || 5, PER: Number(属性基础.PER) || 5,
-    },
+    等级: Number(头部.等级 ?? source.等级) || 1,
+    阶位: 头部.阶位 ?? source.阶位 ?? '一阶',
+    属性基础,
     属性分配方向: deriveAttributeDirection(属性基础),
-    天赋: 头部.天赋 ?? {}, 血统: 头部.血统 ?? {}, 称号,
-    职业, 通用技能: 契约者.通用技能 ?? {},
-    主要装备: 契约者.装备 ?? {}, 背包建议: {},
+    天赋: 头部.天赋 ?? source.天赋 ?? {},
+    血统: 头部.血统 ?? source.血统 ?? {},
+    称号,
+    职业,
+    通用技能,
+    主要装备: 装备,
+    背包建议: {},
   };
 }
 
+/** 「认字」打分：这棵子树里有几个已知契约者字段 */
+function contractorScore(node) {
+  if (!isRecord(node)) return 0;
+  // 已知键名 + 四维（平铺形态常常只有四维与职业，光数键名会误判成「信息太少」）
+  return CONTRACTOR_KEYS.filter(k => k in node).length + (pickAttributes(node) ? 2 : 0);
+}
+
+/** 深度优先找最像契约者/实体的子树（字段最多者胜） */
+function pickRichest(root) {
+  let best = null;
+  const walk = (node, depth, keyHint) => {
+    if (depth > 6) return;
+    if (Array.isArray(node)) {
+      node.forEach(v => walk(v, depth + 1, keyHint));
+      return;
+    }
+    if (!isRecord(node)) return;
+    const score = contractorScore(node);
+    // 注意：外层键名（如 契约者 / stat_data）是容器名，不能当实体名用
+    if (score > 0 && (!best || score > best.score)) best = { node, score };
+    for (const [k, v] of Object.entries(node)) {
+      if (isRecord(v) || Array.isArray(v)) walk(v, depth + 1, k);
+    }
+  };
+  walk(root, 0, '');
+  return best;
+}
+
 /**
- * 按 path 回放 MVU 指令，拼出一个对象（用于「逐字段 replace」那种复制形态）。
+ * 按 path 回放 MVU 指令，拼出一个对象（用于逐字段 replace 那种复制形态）。
  * path 形如 '/契约者/头部/姓名'；支持 replace/insert/set/assign/add 与 delete/remove。
  */
 export function applyMvuCommands(raw) {
@@ -551,7 +593,6 @@ export function applyMvuCommands(raw) {
       delete parent[keys[keys.length - 1]];
       continue;
     }
-    // 其余（replace/insert/set/assign/add/push…）一律写入 value —— 我们只关心最终形状
     const parent = keys.length === 1 ? root : parentOf(keys.slice(0, -1));
     parent[keys[keys.length - 1]] = item.value;
   }
@@ -559,10 +600,11 @@ export function applyMvuCommands(raw) {
 }
 
 /**
- * 粘贴 JSON 捕捉构筑。认六种形状：
- *   ① {stat_data:{契约者:{…}}} ② {契约者:{…}} ③ 契约者/实体子树 ④ 一份构筑载荷
- *   ⑤ **MVU 指令数组**（[{op,path,value}]）—— 逐字段 replace 的、或一条 insert 整个实体的，都认
- * 认不出来就抛人话错误（不静默产出空构筑）。
+ * 粘贴 JSON 捕捉构筑。**按字段名识别，不枚举形状**：
+ *   指令数组（逐字段 replace / 一条 insert 整个实体）→ 先回放成对象；
+ *   然后整棵走一遍，谁凑出的已知字段（头部/属性/职业/通用技能/装备…）最多就用谁，
+ *   再按字段名到各处捡值（等级/阶位在顶上或 头部 下都行，四维在 属性.基础 或平铺都行）。
+ * 一点都认不出来就抛人话错误（不静默产出空构筑）。
  */
 export function parseBuildJson(text) {
   let raw;
@@ -572,28 +614,32 @@ export function parseBuildJson(text) {
     throw new Error('JSON 格式不正确：请粘贴从酒馆复制的变量或一份构筑载荷');
   }
 
-  // ⑤ MVU 指令数组
-  if (Array.isArray(raw)) {
-    const 指令 = raw.filter(item => isRecord(item) && isRecord(item.value));
-    // 先按 path 回放合并，逐字段 replace 的形态走这条
-    const 合并 = applyMvuCommands(raw);
-    const 候选 = 合并?.契约者 ?? 合并;
-    if (looksLikeContractor(候选)) return buildFromContractor(候选);
-    // 再退回「某一条指令的 value 就是整个实体」（如 insert /契约者/副本角色/<名字>）
-    if (指令.length === 0 && Object.keys(合并).length === 0) {
-      throw new Error('无法识别的 JSON：指令数组里没有可用的 value（需要 op/path/value 形式）');
-    }
-    const 最后一条 = 指令[指令.length - 1];
-    if (最后一条 && looksLikeContractor(最后一条.value)) {
-      const 名 = String(最后一条.path ?? '').split('/').filter(Boolean).pop() ?? '';
-      return buildFromContractor(最后一条.value, 名);
-    }
-    throw new Error('无法识别的 JSON：指令里没有 头部/属性/职业 等构筑字段（逐字段 replace 与「insert 整个实体」两种形态都试过了）');
+  const 是指令数组 = Array.isArray(raw);
+  const 源 = 是指令数组 ? applyMvuCommands(raw) : raw;
+
+  // 直接是一份构筑载荷 → 原样采用
+  if (looksLikeBuild(源)) return 源;
+
+  const 指令 = 是指令数组 ? raw.filter(item => isRecord(item) && isRecord(item.value)) : [];
+  const 最后一条 = 指令[指令.length - 1];
+  const 路径名 = 最后一条 ? (String(最后一条.path ?? '').split('/').filter(Boolean).pop() ?? '') : '';
+
+  // 认字：整棵找最像契约者/实体的子树（stat_data.契约者 / {契约者} / 裸子树 / 更深包装都能命中）
+  const 命中 = pickRichest(源);
+  if (命中 && 命中.score >= 2) {
+    // 命中的正是「某条指令塞进来的整个实体」时，用 path 末段当名字（对副本角色/队友，这比职业名贴切）
+    const 提示 = 最后一条 && 最后一条.value === 命中.node ? 路径名 : '';
+    return buildFromAnywhere(命中.node, 提示);
   }
 
-  // 提取候选后**仍要验形**：{stat_data:{契约者:{经济:…}}} 这种残缺子树不能被当成构筑
-  const 候选 = raw?.stat_data?.契约者 ?? raw?.契约者 ?? raw;
-  if (looksLikeContractor(候选)) return buildFromContractor(候选);
-  if (looksLikeBuild(raw)) return raw;
-  throw new Error('无法识别的 JSON：需要是从酒馆复制的契约者变量（含 头部/属性/职业）、MVU 指令数组，或一份构筑载荷（含 构筑名/定位）');
+  if (指令.length === 0 && Object.keys(源).length === 0) {
+    throw new Error('无法识别的 JSON：指令数组里没有可用的 value（需要 op/path/value 形式）');
+  }
+  if (最后一条 && contractorScore(最后一条.value) >= 2) {
+    return buildFromAnywhere(最后一条.value, 路径名);
+  }
+  if (命中 && 命中.score === 1) {
+    throw new Error('这段 JSON 里只认出 1 个构筑字段，信息太少，无法确定是契约者（请从酒馆复制完整的变量结构）');
+  }
+  throw new Error('无法识别的 JSON：没找到 头部/属性/职业/通用技能/装备 等构筑字段（指令数组或契约者变量都行）');
 }
