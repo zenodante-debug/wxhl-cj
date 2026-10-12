@@ -26,17 +26,24 @@ function mountApp() {
 
   const { destroy } = teleportStyle();
 
-  app.mount($app[0]);
-
+  // 清理函数与重载入口都在 mount() **之前**就位：
+  // 万一下面 mount 同步抛错（App setup 崩溃），重载按钮仍能把残骸清干净再重挂 ——
+  // 那正是这个按钮存在的场合，不能恰好在最需要它的时候没登记。
   清理上一个 = () => {
     window.removeEventListener('resize', updateSize);
-    app.unmount();
+    try {
+      app.unmount();
+    } catch (_) {
+      /* 挂载没成功时 unmount 会抛，忽略即可 */
+    }
     $app.remove();
     destroy();
   };
 
   // 供 App.vue 设置项调用（重载小手机）
   setReloadApp(mountApp);
+
+  app.mount($app[0]);
 }
 
 // 左下角重载按钮：原生 DOM，不走 Vue —— 建在 app.mount() 之前，
@@ -80,11 +87,12 @@ function buildReloadButton() {
 
 $(() => {
   buildReloadButton();
-  mountApp();
 
-  // pagehide 时跑清理（只注册一次）
+  // pagehide 清理先注册、再挂载 —— 免得挂载抛错时连清理都没登记
   $(window).on('pagehide', () => {
     清理上一个?.();
     清理上一个 = null;
   });
+
+  mountApp();
 });
