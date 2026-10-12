@@ -58,9 +58,9 @@ key：`wxhl-cg:account`（JSON，zod parse，版本字段 `v` 便于迁移）。
 
 ```ts
 interface ExchangeAccount {
-  v: 2;                                  // v1 存档自动迁移（见 §3.1）
+  v: 3;                                  // v1/v2 存档自动迁移（见 §3.1）
   cash: number;                          // 交易所币，可为负
-  positions: Record<string, Position>;   // key = 股票代码（一只股一笔）
+  positions: Position[];                 // **一笔一行**：同一只股可多笔，也可多空对冲
   prices: Record<string, number>;        // 股票代码 -> 现价
   priceHistory: Record<string, number[]>;// 每股票最近 60 跳
   openPrices: Record<string, number>;    // 开盘基准价：每次脚本加载快照（§4）
@@ -76,11 +76,13 @@ interface ExchangeAccount {
 }
 
 interface Position {
+  id: string;               // 唯一标识，平仓按它定位
+  code: string;             // 股票代码
   side: 'long' | 'short';
   qty: number;              // 股数
-  entryPrice: number;       // 开仓均价
+  entryPrice: number;       // 这笔的开仓均价
   leverage: number;         // 1–100
-  margin: number;           // 占用保证金
+  margin: number;           // 这笔占用的保证金
 }
 
 interface LogEntry {
@@ -95,9 +97,10 @@ interface LogEntry {
 
 `v` 变更必须带迁移（终审 C1 教训：只改 schema 不迁移会把老存档静默清空）：
 
-- `v === 2`：按 `AccountSchema` 校验，失败则 `console.warn` + 重开新账户。
-- `v === 1`：走 `migrateV1()` —— 丢掉 `loan/loanState/deathMarked`，补上 `openPrices`（= 迁移时价）、`logs: []`、`netInvested`（= 迁移时的现金 + 持仓权益，即"盈亏从迁移那一刻重新起算"），其余（现金/持仓/价格/历史/跳动数/欠款/破产次数/累计亏损/冻结/新闻）全部保留。**不清空**。
-- 其他版本 / JSON 损坏：`console.warn` + 新账户。
+- `v === 3`：按 `AccountSchema` 校验，失败则 `console.warn` + 重开新账户；加载时 `openPrices` 重新快照。
+- `v === 2`：走 `migrate()` —— 持仓 `record` 拆成**一笔一行**（补 `id`/`code`），其余字段（含 `netInvested`/`logs`）原样保留。
+- `v === 1`：同上，另外丢掉 `loan/loanState/deathMarked`、补 `openPrices`/`logs: []`/`netInvested`（= 迁移时的现金 + 持仓权益，即"盈亏从迁移那一刻重新起算"）。
+- 其他版本 / JSON 损坏：`console.warn` + 新账户。**老版本一律迁移，不清空**（终审 C1 教训）。
 
 interface ActiveLoan {
   principal: number;
@@ -131,6 +134,8 @@ interface ActiveLoan {
 
 ## 5. 交易规则（照搬原作数值）
 
+- **下单输入是金额 = 保证金**（你实际掏的钱）：名义金额 = 金额 × 杠杆，股数 = `floor(名义 / 现价)`（向下取整，所以实际保证金 ≤ 输入金额）。界面同时显示 金额 → 名义 → 股数 三个数，并把佣金/印花税摊开。
+- **同一只股可以同时持有多笔**（一笔一行、逐笔平仓），也**可以多空同时持有做对冲**。
 - 做多/做空；杠杆 1–100 倍；保证金 = 名义价值 / 杠杆。
 - **最低保证金 5**：低于此的下单直接拒绝（照原作"保证金至少 5 金币"）。
 - **佣金**：买卖双向，`clamp(成交额 × 1%, 下限 1, 上限 保证金 × 10%)`。
