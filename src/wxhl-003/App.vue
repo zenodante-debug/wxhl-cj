@@ -180,6 +180,16 @@
                 <span class="app-label">玩家排行榜</span>
                 <span class="app-sub">{{ appSubs.rank }}</span>
               </div>
+              <div class="app-icon-wrapper" @click="openExchange">
+                <div class="app-icon exchange-icon">
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+                    <polyline points="3 17 9 11 13 15 21 7" />
+                    <polyline points="15 7 21 7 21 13" />
+                  </svg>
+                </div>
+                <span class="app-label">回廊交易所</span>
+                <span class="app-sub">{{ appSubs.exchange }}</span>
+              </div>
               <div class="app-icon-wrapper" @click="openSettings">
                 <div class="app-icon settings-icon">
                   <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
@@ -2566,6 +2576,7 @@ const appSubs = computed(() => ({
   market: '以物易物，童叟无欺',
   crafting: '千锤百炼，巧夺天工',
   rank: '以等级论高下',
+  exchange: '低吸高抛，愿赌服输',
   settlement: '结算空间',
   statusbar: idle.name,
 }));
@@ -2666,6 +2677,27 @@ function openCrafting() {
 
 function openRank() {
   currentView.value = 'rank';
+}
+
+/** 回廊交易所（wxhl-cg 脚本）：经 initializeGlobal 调起，未加载则提示 */
+async function openExchange() {
+  if (!canUseHubFacility()) {
+    toastr.warning(HUB_GATE_HINT);
+    return;
+  }
+  try {
+    const cg = await Promise.race([
+      waitGlobalInitialized<{ open(): void }>('WxhlCg'),
+      new Promise<null>(resolve => setTimeout(() => resolve(null), 1500)),
+    ]);
+    if (!cg) {
+      toastr.warning('交易所脚本未加载（wxhl-cg）');
+      return;
+    }
+    cg.open();
+  } catch {
+    toastr.warning('交易所脚本未加载（wxhl-cg）');
+  }
 }
 
 // ============ 副本生成 · 自选模式 ============
@@ -4023,6 +4055,10 @@ onUnmounted(() => {
 .settings-icon {
   background: linear-gradient(135deg, #2a2825, #181410);
   border: 1.5px solid rgba(200, 140, 100, 0.25);
+}
+.exchange-icon {
+  background: linear-gradient(135deg, #1a3a2a, #0f2018);
+  border: 1.5px solid rgba(48, 164, 108, 0.35);
 }
 .crafting-icon {
   background: linear-gradient(135deg, #3a2410, #20140a);
