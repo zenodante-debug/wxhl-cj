@@ -270,9 +270,16 @@ async function callApi(path, options) {
   } catch {
     /* 非 JSON 响应 */
   }
-  if (!res.ok) throw new Error(data?.error || `请求失败（HTTP ${res.status}）`);
+  if (!res.ok) {
+    const error = new Error(data?.error || `请求失败（HTTP ${res.status}）`);
+    // 带上状态码：页面靠它区分「密钥不对（403）」与网络故障——403 才清掉记住的密钥
+    error.status = res.status;
+    throw error;
+  }
   return data;
 }
+
+const jsonPost = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 export const api = {
   list: params => callApi(`/api/packs?${new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v))}`),
@@ -282,6 +289,10 @@ export const api = {
     callApi(`/api/packs/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manageKey, pack }) }),
   remove: (id, manageKey) =>
     callApi(`/api/packs/${id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manageKey }) }),
+  // 管理端点：纯 HTTP，键在请求体里；密钥不对时服务端回 403
+  adminList: key => callApi('/api/admin/list', jsonPost({ key })),
+  adminDelete: (key, ids) => callApi('/api/admin/delete', jsonPost({ key, ids })),
+  adminResetKey: (key, id) => callApi('/api/admin/reset-key', jsonPost({ key, id })),
 };
 
 // ==================== 免责声明 ====================

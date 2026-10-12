@@ -1,7 +1,7 @@
 // cloudflare/wxhl-cygf/page-lib.test.js
-import { describe, expect, it, vi } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  computeInstalled, coverOrPlaceholder, createBridgeClient, deriveAttributeDirection, isAgreementAccepted, mapExtensionEntry,
+  api, computeInstalled, coverOrPlaceholder, createBridgeClient, deriveAttributeDirection, isAgreementAccepted, mapExtensionEntry,
   MAX_IMPORT_BYTES, packToWorldbookEntries, parseBuildJson, parseWorldbookJson,
   renderBuildEntry, renderPersonaEntry, sourceMetaOf,
 } from './page-lib.js';
@@ -320,6 +320,36 @@ describe('五类包 → 世界书条目', () => {
     expect(coverOrPlaceholder('https://x.test/a.png')).toBe('https://x.test/a.png');
     expect(coverOrPlaceholder('')).toMatch(/^data:image\/svg\+xml/);
     expect(coverOrPlaceholder('javascript:alert(1)')).toMatch(/^data:image\/svg\+xml/);
+  });
+});
+
+describe('api · 管理端点与错误状态码', () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it('adminList / adminDelete / adminResetKey 都 POST 到 /api/admin/*，键与参数在请求体里', async () => {
+    const calls = [];
+    vi.stubGlobal('fetch', vi.fn(async (path, options) => {
+      calls.push({ path, options });
+      return { ok: true, status: 200, json: async () => ({ ok: true, rows: [] }) };
+    }));
+    await api.adminList('K');
+    await api.adminDelete('K', ['a', 'b']);
+    await api.adminResetKey('K', 'a');
+    expect(calls.map(c => c.path)).toEqual(['/api/admin/list', '/api/admin/delete', '/api/admin/reset-key']);
+    expect(calls.every(c => c.options.method === 'POST')).toBe(true);
+    expect(JSON.parse(calls[0].options.body)).toEqual({ key: 'K' });
+    expect(JSON.parse(calls[1].options.body)).toEqual({ key: 'K', ids: ['a', 'b'] });
+    expect(JSON.parse(calls[2].options.body)).toEqual({ key: 'K', id: 'a' });
+  });
+
+  it('非 2xx → 抛服务端 error 原文，并带上 status（页面靠 403 决定清掉记住的密钥）', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 403, json: async () => ({ error: '管理密钥不正确或未配置' }) })));
+    await expect(api.adminList('bad')).rejects.toMatchObject({ message: '管理密钥不正确或未配置', status: 403 });
+  });
+
+  it('非 JSON 响应体 → 回退到通用文案，status 仍然是服务端状态码', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => ({ ok: false, status: 500, json: async () => { throw new Error('not json'); } })));
+    await expect(api.adminList('x')).rejects.toMatchObject({ message: '请求失败（HTTP 500）', status: 500 });
   });
 });
 
