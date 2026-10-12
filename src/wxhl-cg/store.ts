@@ -16,6 +16,7 @@ import {
   tickLoan,
 } from './engine/loan';
 import { computeLiquidation, type LiquidationResult } from './engine/bankruptcy';
+import { estateValue, inheritanceTax, settleInheritance, transferFee } from './engine/inheritance';
 import { adjustUP, commitMvu, readContractor } from './mvu';
 
 export const STORAGE_KEY = 'wxhl-cg:account';
@@ -109,7 +110,15 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     timer = null;
   }
 
+  /** 打开 app：有死亡标记先结算遗产税（响亮提示），再开面板 */
   function open() {
+    if (acct.value.deathMarked) {
+      const r = settleInheritance(acct.value);
+      toastr.warning(
+        `前任契约者已陨落。遗产税 ${r.tax} + 过户费 ${r.fee} 已扣缴${acct.value.debt > 0 ? '，不足部分转为债务' : ''}`,
+      );
+      persist();
+    }
     panelOpen.value = true;
     startTicker();
   }
@@ -259,6 +268,19 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     persist();
   }
 
+  // ==================== 遗产税 ====================
+
+  function markDeath() {
+    acct.value.deathMarked = true;
+    persist();
+    toastr.warning('已宣告本局终结——下次打开交易所将扣缴遗产税');
+  }
+
+  const inheritancePreview = computed(() => {
+    const e = estateValue(acct.value);
+    return { estate: e, tax: inheritanceTax(e), fee: transferFee(e) };
+  });
+
   return {
     acct,
     panelOpen,
@@ -277,5 +299,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     loanOffer: () => loanOffer(acct.value),
     previewBankruptcy,
     declareBankruptcy,
+    markDeath,
+    inheritancePreview,
   };
 });

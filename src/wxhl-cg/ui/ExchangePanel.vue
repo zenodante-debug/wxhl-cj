@@ -107,6 +107,12 @@ async function doBankruptcy() {
     toastr.error(e?.message ?? '清算失败，已中止');
   }
 }
+
+const confirmDeath = ref(false);
+function doMarkDeath() {
+  store.markDeath();
+  confirmDeath.value = false;
+}
 </script>
 
 <template>
@@ -207,7 +213,20 @@ async function doBankruptcy() {
           </div>
         </div>
       </div>
-      <!-- Task 14 加遗产税 -->
+      <div class="cg-inheritance">
+        <div>
+          遗产估值 {{ store.inheritancePreview.estate }}｜现在死了要交：税 {{ store.inheritancePreview.tax }} + 过户费
+          {{ store.inheritancePreview.fee }}
+        </div>
+        <button class="danger" @click="confirmDeath = true">宣告死亡 / 放弃本局</button>
+        <div v-if="confirmDeath" class="cg-modal">
+          <p>宣告后账户打上死亡标记，下次打开交易所先扣缴遗产税。确定？</p>
+          <div class="cg-btns">
+            <button class="danger" @click="doMarkDeath">确定</button>
+            <button @click="confirmDeath = false">取消</button>
+          </div>
+        </div>
+      </div>
     </div>
   </div>
 </template>
