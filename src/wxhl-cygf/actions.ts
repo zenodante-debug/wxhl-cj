@@ -125,6 +125,7 @@ export const MUTATING_ACTIONS: ReadonlySet<string> = new Set([
   'deleteEntries',
   'upsertWorkshopEntries',
   'deleteWorkshopEntries',
+  'applyBuild',
 ]);
 
 function requireString(payload: Record<string, any>, key: string): string {
@@ -231,6 +232,8 @@ async function handleAction(action: string, payload: Record<string, any>): Promi
       if (removed > 0) await replaceWorldbook(name, kept, { render: 'immediate' });
       return { removed };
     }
+    case 'applyBuild':
+      return applyBuild(payload);
     case 'readContractor':
       return readContractor();
     default:
@@ -241,4 +244,138 @@ async function handleAction(action: string, payload: Record<string, any>): Promi
 /** 写动作进互斥队列，读动作直接执行 */
 export function dispatchAction(action: string, payload: Record<string, any>): Promise<unknown> {
   return MUTATING_ACTIONS.has(action) ? queued(() => handleAction(action, payload)) : handleAction(action, payload);
+}
+
+// ==================== 写变量：把构筑/人设装到不同位置（2026-10-12 用户需求） ====================
+const APPLY_TARGETS = ['扮演', '队友', '副本角色', '其他契约者'] as const;
+const 副本角色类型 = ['杂兵', '精英', 'BOSS', '隐藏BOSS', '精英（固有角色）', 'BOSS（固有角色）', '隐藏BOSS（固有角色）'] as const;
+
+const 零属性 = () => ({ STR: 0, AGI: 0, CON: 0, PER: 0 });
+
+/** 构筑载荷 → 变量结构里的「实体」（实体Schema） */
+export function entityFromBuild(build: any, 类型: string, 外貌: string): Record<string, any> {
+  const 基础 = { STR: 5, AGI: 5, CON: 5, PER: 5, ...(build?.属性基础 ?? {}) };
+  const 属性: any = { 基础, 加成: 零属性(), 自定义加成: 零属性(), 未分配属性点: 0 };
+  recomputeActual(属性);
+  return {
+    外貌: 外貌 || '无',
+    类型,
+    构筑: build?.定位 || '无',
+    好感度: 0,
+    头部: {
+      等级: Number(build?.等级) || 1,
+      阶位: build?.阶位 || '一阶',
+      天赋: build?.天赋 ?? { 名称: '无' },
+      血统: build?.血统 ?? { 名称: '无' },
+      称号: { 当前称号: build?.称号 ?? { 名称: '无' }, '备用称号（只记录不生效）': { 名称: '无' } },
+    },
+    属性,
+    职业: build?.职业 ?? { 名称: '无' },
+    通用技能: build?.通用技能 ?? {},
+    装备: build?.主要装备 ?? {},
+    状态: { 生命状态: '健康', 特殊状态: {} },
+    背包: {},
+  };
+}
+
+/**
+ * 扮演：**只覆盖构筑字段**，保留玩家自己的进度（经济/背包/人际关系/副本经历/论坛档案/小队…）。
+ * 用户 2026-10-12 拍板：不要把玩家的存档整个重置。
+ */
+export function applyAsPlayer(契约者: any, build: any): string[] {
+  const 写入: string[] = [];
+  const 原头部 = 契约者.头部 ?? {};
+  const 头部: any = {
+    ...原头部,
+    等级: Number(build?.等级) || Number(原头部.等级) || 1,
+    阶位: build?.阶位 || 原头部.阶位 || '一阶',
+  };
+  if (build?.天赋) 头部.天赋 = build.天赋;
+  if (build?.血统) 头部.血统 = build.血统;
+  if (build?.称号) {
+    头部.称号 = { 当前称号: build.称号, '备用称号（只记录不生效）': 原头部.称号?.['备用称号（只记录不生效）'] ?? { 名称: '无' } };
+  }
+  契约者.头部 = 头部;
+  写入.push('头部');
+
+  if (build?.属性基础) {
+    const 属性 = { ...(契约者.属性 ?? {}), 基础: { STR: 5, AGI: 5, CON: 5, PER: 5, ...build.属性基础 } };
+    recomputeActual(属性);
+    契约者.属性 = 属性;
+    写入.push('属性');
+  }
+  if (build?.职业) {
+    契约者.职业 = build.职业;
+    写入.push('职业');
+  }
+  if (build?.通用技能) {
+    契约者.通用技能 = build.通用技能;
+    写入.push('通用技能');
+  }
+  if (build?.主要装备) {
+    契约者.装备 = build.主要装备;
+    写入.push('装备');
+  }
+  return 写入;
+}
+
+/** 读当前楼层的 MVU 数据（楼层取不到就退回 -1，与 wxhl-003 store 同口径） */
+function readLatestMvu(): { 数据: any; message_id: number | 'latest' } {
+  let message_id: number | 'latest' = -1;
+  try {
+    const mid = typeof getLastMessageId === 'function' ? getLastMessageId() : -1;
+    if (mid && mid !== -1) message_id = mid;
+  } catch {
+    // 楼层接口不可用 → 保持 -1
+  }
+  return { 数据: Mvu.getMvuData({ type: 'message', message_id }), message_id };
+}
+
+/** 把构筑/人设装到不同位置：扮演改契约者构筑字段；其余写进对应实体表 */
+async function applyBuild(payload: Record<string, any>): Promise<unknown> {
+  const target = payload.target as (typeof APPLY_TARGETS)[number];
+  if (!APPLY_TARGETS.includes(target)) {
+    throw new Error('applyBuild 的 target 必须是 扮演/队友/副本角色/其他契约者');
+  }
+  const build = payload.build ?? {};
+  const 名字 = String(payload.name ?? '').trim() || String(build.构筑名 ?? '').trim() || String(build.角色名 ?? '').trim();
+  if (!名字) throw new Error('applyBuild 缺少名字（要写进哪个实体的键）');
+  const 外貌 = String(payload.外貌 ?? '').trim();
+
+  await waitGlobalInitialized('Mvu');
+  const { 数据, message_id } = readLatestMvu();
+  const 契约者 = 数据?.stat_data?.契约者;
+  if (!契约者) throw new Error('读不到当前契约者：请在有存档的楼层使用');
+
+  const 写入: string[] = [];
+  if (target === '扮演') {
+    写入.push(...applyAsPlayer(契约者, build));
+  } else {
+    let 类型 = '其他契约者';
+    if (target === '队友') 类型 = '小队成员';
+    else if (target === '副本角色') {
+      类型 = String(payload.类型 ?? '杂兵');
+      if (!副本角色类型.includes(类型 as (typeof 副本角色类型)[number])) {
+        throw new Error('副本角色的类型不合法：' + 类型);
+      }
+    }
+    const 实体 = entityFromBuild(build, 类型, 外貌);
+    if (target === '队友') {
+      契约者.小队 = 契约者.小队 ?? { 名称: '无', 成员: {} };
+      契约者.小队.成员 = 契约者.小队.成员 ?? {};
+      契约者.小队.成员[名字] = 实体;
+      写入.push('小队.成员.' + 名字);
+    } else if (target === '副本角色') {
+      契约者.副本角色 = 契约者.副本角色 ?? {};
+      契约者.副本角色[名字] = 实体;
+      写入.push('副本角色.' + 名字);
+    } else {
+      契约者.其他契约者 = 契约者.其他契约者 ?? {};
+      契约者.其他契约者[名字] = 实体;
+      写入.push('其他契约者.' + 名字);
+    }
+  }
+
+  await Mvu.replaceMvuData(数据, { type: 'message', message_id });
+  return { ok: true, target, name: 名字, written: 写入 };
 }

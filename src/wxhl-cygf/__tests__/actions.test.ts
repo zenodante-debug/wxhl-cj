@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { dispatchAction, ensureWorkshopWorldbook, MUTATING_ACTIONS, queued, resetQueueForTest, WORKSHOP_WORLDBOOK_NAME } from '../actions';
+import { applyAsPlayer, dispatchAction, ensureWorkshopWorldbook, entityFromBuild, MUTATING_ACTIONS, queued, resetQueueForTest, WORKSHOP_WORLDBOOK_NAME } from '../actions';
 
 afterEach(() => {
   vi.unstubAllGlobals();
@@ -230,5 +230,54 @@ describe('dispatchAction · 动作分发', () => {
     vi.stubGlobal('getVariables', vi.fn().mockReturnValue({ stat_data: {} }));
     vi.stubGlobal('getLastMessageId', vi.fn().mockReturnValue(3));
     await expect(dispatchAction('readContractor', {})).rejects.toThrow(/契约者/);
+  });
+});
+
+describe('applyBuild · 装到不同位置（2026-10-12）', () => {
+  const build = {
+    构筑名: '两面宿傩', 定位: 'PER_STR 战地法师', 等级: 75, 阶位: '四阶',
+    属性基础: { STR: 50, AGI: 50, CON: 50, PER: 60 },
+    天赋: { 名称: '生得术式：捌' }, 血统: { 名称: '受肉受体' }, 称号: { 名称: '诅咒之王' },
+    职业: { 名称: '十种影法术', 职业简介: 'shadow' }, 通用技能: {}, 主要装备: { 主武器: { 名称: '无' } },
+  };
+
+  it('entityFromBuild：属性.实际 重算、类型落位、好感度归零', () => {
+    const e = entityFromBuild(build, 'BOSS', '白发黑纹');
+    expect(e.类型).toBe('BOSS');
+    expect(e.外貌).toBe('白发黑纹');
+    expect(e.构筑).toBe('PER_STR 战地法师');
+    expect(e.好感度).toBe(0);
+    expect(e.头部.等级).toBe(75);
+    expect(e.头部.称号.当前称号.名称).toBe('诅咒之王');
+    expect(e.属性.实际).toEqual({ STR: 50, AGI: 50, CON: 50, PER: 60 });
+  });
+
+  it('applyAsPlayer：只覆盖构筑字段，玩家进度（经济/背包/人际关系）原样保留', () => {
+    const 契约者 = {
+      头部: { 姓名: '我', 等级: 3, 阶位: '一阶' },
+      属性: { 基础: { STR: 5, AGI: 6, CON: 7, PER: 8 }, 加成: { STR: 1, AGI: 0, CON: 0, PER: 0 } },
+      经济: { UP: 12345 }, 背包: { 好东西: { 数量: 3 } }, 人际关系: { 某人: { 关系: '朋友' } },
+      职业: { 名称: '旧职业' }, 小队: { 成员: { 老队友: {} } },
+    };
+    const 写入 = applyAsPlayer(契约者, build);
+    expect(写入).toContain('头部');
+    expect(契约者.头部.等级).toBe(75);
+    expect(契约者.头部.姓名).toBe('我'); // 保留
+    expect(契约者.属性.基础.PER).toBe(60);
+    expect(契约者.属性.实际.STR).toBe(51); // 基础 + 保留的加成
+    expect(契约者.职业.名称).toBe('十种影法术');
+    expect(契约者.经济.UP).toBe(12345); // 进度没被碰
+    expect(契约者.背包.好东西.数量).toBe(3);
+    expect(契约者.人际关系.某人.关系).toBe('朋友');
+    expect(契约者.小队.成员.老队友).toBeDefined();
+  });
+
+  it('applyBuild 进互斥队列', () => {
+    expect(MUTATING_ACTIONS.has('applyBuild')).toBe(true);
+  });
+
+  it('target 非法 / 缺名字 → 响亮报错', async () => {
+    await expect(dispatchAction('applyBuild', { target: '乱写', name: 'x' })).rejects.toThrow(/target/);
+    await expect(dispatchAction('applyBuild', { target: '队友' })).rejects.toThrow(/名字/);
   });
 });
