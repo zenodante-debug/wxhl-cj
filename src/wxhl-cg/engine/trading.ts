@@ -89,3 +89,49 @@ export function closePosition(acct: ExchangeAccount, code: string): CloseResult 
   delete acct.positions[code];
   return { pnl, fee, stamp, returned };
 }
+
+/**
+ * 强平价：净值(保证金+浮盈亏) ≤ 保证金×5% 时的价格。
+ * 做多：entry×(1−0.95/L)；做空：entry×(1+0.95/L)。
+ * （裁决：spec 原文「保证金 ≤ 名义×5%」会让 >20 倍杠杆开仓即破线——1/L < 5% 恒成立，
+ *  与 1–100 倍杠杆设计自相矛盾；维持线改为按保证金计，高杠杆依然更近强平。）
+ * 1 倍杠杆：做多 0 / 做空 Infinity（永不强平）。
+ */
+export function liquidationPrice(pos: Position): number {
+  if (pos.leverage === 1) return pos.side === 'long' ? 0 : Infinity;
+  const L = pos.leverage;
+  const ratio = (1 - MAINTENANCE_RATE) / L;
+  return pos.side === 'long' ? round2(pos.entryPrice * (1 - ratio)) : round2(pos.entryPrice * (1 + ratio));
+}
+
+export interface TickTradingResult {
+  liquidated: string[];
+  interest: number;
+}
+
+/**
+ * 每跳结算：先收杠杆利息（>20 倍），再逐个检查强平（费用照收）。
+ * 强平即按现价平仓（closePosition 同等逻辑），亏损计入 cumulativeLoss。
+ */
+export function tickTrading(acct: ExchangeAccount): TickTradingResult {
+  let interest = 0;
+  for (const [code, pos] of Object.entries(acct.positions)) {
+    if (pos.leverage > LEVERAGE_INTEREST_THRESHOLD) {
+      const notional = pos.qty * (acct.prices[code] ?? pos.entryPrice);
+      const fee = round2(notional * (pos.leverage - LEVERAGE_INTEREST_THRESHOLD) * LEVERAGE_INTEREST_RATE);
+      interest = round2(interest + fee);
+      acct.cash = round2(acct.cash - fee); // 可扣成负数
+    }
+  }
+  const liquidated: string[] = [];
+  for (const [code, pos] of Object.entries(acct.positions)) {
+    const price = acct.prices[code];
+    const liq = liquidationPrice(pos);
+    const hit = pos.side === 'long' ? price <= liq : price >= liq;
+    if (hit) {
+      closePosition(acct, code); // 佣金印花税照收（按平仓方向计）
+      liquidated.push(code);
+    }
+  }
+  return { liquidated, interest };
+}

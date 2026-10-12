@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { useExchangeStore } from '../store';
 import { STOCKS } from '../engine/stocks';
-import { netAssets, openPosition, closePosition, positionPnl } from '../engine/trading';
+import { netAssets, openPosition, closePosition, positionPnl, liquidationPrice } from '../engine/trading';
 import SparkLine from './SparkLine.vue';
 
 const store = useExchangeStore();
@@ -85,6 +85,7 @@ async function doWithdraw() {
       <h3>{{ detail }}</h3>
       <SparkLine :data="acct.priceHistory[detail]" :width="300" :height="120" />
       <div>现价 {{ acct.prices[detail] }}</div>
+      <div v-if="acct.positions[detail]">强平价：{{ liquidationPrice(acct.positions[detail]) }}</div>
       <label>数量 <input v-model.number="qty" type="number" min="1" /></label>
       <label>杠杆 <input v-model.number="leverage" type="range" min="1" max="100" /> ×{{ leverage }}</label>
       <div class="cg-btns">

@@ -5,6 +5,7 @@
 // ================================================================
 import { createAccount, round2, type ExchangeAccount } from './engine/types';
 import { tickMarket } from './engine/market';
+import { tickTrading } from './engine/trading';
 import { adjustUP } from './mvu';
 
 export const STORAGE_KEY = 'wxhl-cg:account';
@@ -73,10 +74,12 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     saveAccount(localStorage, klona(acct.value));
   }
 
-  /** 推进一跳并持久化。引擎 throw 时响亮失败并停表。 */
+  /** 推进一跳：行情 → 交易结算（利息/强平），然后持久化。引擎 throw 时响亮失败并停表。 */
   function doTick() {
     try {
       tickMarket(acct.value);
+      const r = tickTrading(acct.value);
+      if (r.liquidated.length) toastr.warning(`强平：${r.liquidated.join('、')} 已按现价强制平仓`);
       persist();
     } catch (e) {
       console.error('[wxhl-cg] 行情跳动失败，计时器已停止:', e);
