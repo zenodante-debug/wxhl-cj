@@ -2388,6 +2388,7 @@ import {
 import { clamp固有角色等级 } from './dungeonRules';
 import { mountStatusbar } from './statusbar/core';
 import { canUseHubFacility, HUB_GATE_HINT } from './hubGate';
+import { pickExchangeApi } from './exchangeBridge';
 import './statusbar/theme.scss';
 
 const store = useForumStore();
@@ -2679,25 +2680,33 @@ function openRank() {
   currentView.value = 'rank';
 }
 
-/** 回廊交易所（wxhl-cg 脚本）：经 initializeGlobal 调起，未加载则提示 */
+/** 回廊交易所（wxhl-cg 脚本）：先走 window.parent 同源直连，再回退 waitGlobalInitialized */
 async function openExchange() {
   if (!canUseHubFacility()) {
     toastr.warning(HUB_GATE_HINT);
     return;
   }
+  // 通道 1：交易所脚本挂载时会把接口写在 window.parent 上
+  const direct = pickExchangeApi((window.parent as any)?.WxhlCg);
+  if (direct) {
+    direct.open();
+    return;
+  }
+  // 通道 2：酒馆助手的全局接口共享（交易所脚本可能比手机晚加载）
   try {
-    const cg = await Promise.race([
-      waitGlobalInitialized<{ open(): void }>('WxhlCg'),
-      new Promise<null>(resolve => setTimeout(() => resolve(null), 1500)),
+    const shared = await Promise.race([
+      waitGlobalInitialized('WxhlCg'),
+      new Promise(resolve => setTimeout(() => resolve(null), 3000)),
     ]);
-    if (!cg) {
-      toastr.warning('交易所脚本未加载（wxhl-cg）');
+    const api = pickExchangeApi(shared);
+    if (api) {
+      api.open();
       return;
     }
-    cg.open();
-  } catch {
-    toastr.warning('交易所脚本未加载（wxhl-cg）');
+  } catch (e) {
+    console.warn('[wxhl-003] waitGlobalInitialized(WxhlCg) 失败:', e);
   }
+  toastr.warning('交易所脚本未加载：请在酒馆助手的脚本库里确认「回廊交易所」已安装并启用（控制台应有 [wxhl-cg] 已加载 横幅）');
 }
 
 // ============ 副本生成 · 自选模式 ============

@@ -30,11 +30,25 @@ $(() => {
   app.mount($app[0]);
 
   const store = useExchangeStore();
-  initializeGlobal('WxhlCg', {
+  const api = {
     open: () => store.open(),
     close: () => store.close(),
     isOpen: () => store.panelOpen,
-  });
+  };
+  // 两条发布通道，手机侧按此顺序找：
+  // 1. window.parent.WxhlCg —— 同源直连（脚本 iframe 与酒馆页面同源）
+  try {
+    (window.parent as any).WxhlCg = api;
+  } catch (e) {
+    console.warn('[wxhl-cg] 无法挂到 window.parent.WxhlCg:', e);
+  }
+  // 2. initializeGlobal —— 酒馆助手的全局接口共享
+  try {
+    initializeGlobal('WxhlCg', api);
+  } catch (e) {
+    console.warn('[wxhl-cg] initializeGlobal 不可用:', e);
+  }
+  console.info('[wxhl-cg] 交易接口已发布（window.parent.WxhlCg / initializeGlobal）');
 
   $(window).on('pagehide', () => {
     store.close();
