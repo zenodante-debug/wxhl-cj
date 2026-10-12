@@ -23,11 +23,11 @@ function memStorage() {
 }
 
 /** 搭一个可用的契约者 MVU 存档；failWrite 时 replaceMvuData 抛错 */
-function stubTavern(opts: { failWrite?: boolean } = {}) {
+function stubTavern(opts: { failWrite?: boolean; up?: number } = {}) {
   let stored: any = {
     stat_data: {
       契约者: {
-        经济: { UP: 1000 },
+        经济: { UP: opts.up ?? 1000 },
         背包: {},
         装备: {},
         通用技能: {},
@@ -45,7 +45,7 @@ function stubTavern(opts: { failWrite?: boolean } = {}) {
   };
   (globalThis as any).toastr = { success() {}, warning() {}, error() {}, info() {} };
   (globalThis as any).localStorage = memStorage();
-  return { getStored: () => stored };
+  return { getStored: () => stored, getUP: () => Number(stored.stat_data.契约者.经济.UP) };
 }
 
 describe('终审修复：C1/I3/I4', () => {
@@ -95,5 +95,32 @@ describe('终审修复：C1/I3/I4', () => {
     release!();
     await p1;
     expect(store.acct.cash).toBe(500); // 只扣了一次
+  });
+});
+
+// 用户 2026-10-12 确认：主卡 UP 允许为负。交易所侧语义随之钉死——
+// 出金把 UP 往 0 回升（合法），入金会加深欠额（拒绝）。
+// 说明：这两条是行为钉桩（实现期已按此实现，故首跑即绿），非 TDD 新功能。
+describe('负 UP 语义', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('UP 为负时出金照常：UP 向 0 回升', async () => {
+    const t = stubTavern({ up: -100 });
+    const store = useExchangeStore();
+    store.acct.cash = 500;
+    await store.withdrawUP(200); // 200×0.99 = 198 → UP 98
+    expect(t.getUP()).toBe(98);
+    expect(store.acct.cash).toBe(300);
+  });
+
+  it('UP 为负时入金被拒绝（会加深欠额），账本与存档都不动', async () => {
+    const t = stubTavern({ up: -100 });
+    const store = useExchangeStore();
+    store.acct.cash = 500;
+    await expect(store.depositUP(50)).rejects.toThrow(/UP 不足/);
+    expect(t.getUP()).toBe(-100);
+    expect(store.acct.cash).toBe(500);
   });
 });

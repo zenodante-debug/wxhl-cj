@@ -121,6 +121,7 @@ interface ActiveLoan {
 - 读写 `stat_data.契约者.经济.UP`，照抄 `src/wxhl-003/market/store.ts` 的 Mvu 读写模式（`Mvu.getMvuData` 最新楼层 → 改 → `Mvu.replaceMvuData`）。
 - 入金：扣 UP → 加交易所币 ×0.99（1% 手续费）；出金反向同样 1%。
 - 读不到 MVU（如界面不在楼层上下文）：toastr 报错、账本不动。
+- **主卡 UP 允许为负**（2026-10-12 用户确认，游戏内已实测）。交易所侧语义：UP 为负时**出金照常**（UP 向 0 回升）；**入金被拒绝**（会让欠额更深），报错不动账本。UP 可扣到恰好 0。
 
 ## 7. 借贷 / 失信 / 高利贷
 
