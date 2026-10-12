@@ -5,6 +5,7 @@
 import { createScriptIdDiv, teleportStyle } from '@util/script';
 import ExchangePanel from './ui/ExchangePanel.vue';
 import { useExchangeStore } from './store';
+import { viewportMode } from './ui/viewportMode';
 
 declare const __WXHL_BUILD__: string;
 
@@ -22,9 +23,15 @@ $(() => {
     const w = Math.round(vv?.width || window.parent.innerWidth || document.documentElement.clientWidth);
     const h = Math.round(vv?.height || window.parent.innerHeight || document.documentElement.clientHeight);
     $app.css({ width: w, height: h });
+    // 窗口形态必须按**宿主**视口判定（iframe 自己尺寸不稳），再交给 CSS 决定布局
+    $app.attr('data-mode', viewportMode(window.parent as any));
   };
   updateSize();
   window.addEventListener('resize', updateSize);
+  // 宿主可视视口变化（手机地址栏收起/键盘弹出）也要重算
+  const hostVV = (window.parent as any).visualViewport;
+  hostVV?.addEventListener?.('resize', updateSize);
+  hostVV?.addEventListener?.('scroll', updateSize);
 
   const { destroy } = teleportStyle();
   app.mount($app[0]);
@@ -55,6 +62,8 @@ $(() => {
   $(window).on('pagehide', () => {
     store.stopTicker();
     window.removeEventListener('resize', updateSize);
+    hostVV?.removeEventListener?.('resize', updateSize);
+    hostVV?.removeEventListener?.('scroll', updateSize);
     app.unmount();
     $app.remove();
     destroy();

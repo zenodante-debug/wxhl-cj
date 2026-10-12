@@ -34,7 +34,7 @@ export interface LogEntry {
 export const LOG_CAP = 200;
 
 export interface ExchangeAccount {
-  v: 1;
+  v: 2;
   cash: number; // 交易所币，可为负
   positions: Record<string, Position>;
   prices: Record<string, number>;
@@ -62,7 +62,7 @@ export function createAccount(): ExchangeAccount {
     priceHistory[s.code] = [s.basePrice];
   }
   return {
-    v: 1,
+    v: 2,
     cash: 0,
     positions: {},
     prices,

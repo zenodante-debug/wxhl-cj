@@ -11,7 +11,7 @@ describe('stocks / createAccount', () => {
   });
   it('createAccount 用基准价初始化价格和空历史', () => {
     const acct = createAccount();
-    expect(acct.v).toBe(1);
+    expect(acct.v).toBe(2);
     expect(acct.cash).toBe(0);
     expect(acct.tick).toBe(0);
     expect(acct.frozen).toBe(false);

@@ -50,6 +50,23 @@ describe('tradePreview', () => {
     expect(a.cash).toBe(10000);
     expect(a.positions['TGJ']).toBeUndefined();
   });
+  // 终审 I4：预览必须与实际可下单一致，否则按钮可点、点了才报错
+  it('预览同样拦最低保证金', () => {
+    const a = withCash(10000);
+    expect(() => tradePreview(a, 'TGJ', 'long', 1, 100)).toThrow(/最低保证金/);
+  });
+});
+
+describe('净资产与负债（终审 I5）', () => {
+  it('净资产扣掉欠款：破产后背债时净值为负', () => {
+    const a = withCash(0);
+    a.debt = 200;
+    expect(netAssets(a)).toBe(-200);
+  });
+  it('无欠款时不受影响', () => {
+    const a = withCash(1000);
+    expect(netAssets(a)).toBe(1000);
+  });
 });
 
 describe('openPosition（做多）', () => {

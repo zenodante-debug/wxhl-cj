@@ -1,6 +1,6 @@
 // 终审修复 pass 的 store 级测试：C1 零负债破产守卫 / I3 半清算回滚 / I4 防重入。
 // MVU/toastr/localStorage 全部是桩——不碰真酒馆。
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { useExchangeStore, STORAGE_KEY } from '../store';
 import { createAccount } from '../engine/types';
 import { openPosition } from '../engine/trading';
@@ -168,6 +168,26 @@ describe('常驻计时', () => {
 
     store.stopTicker();
     expect(store.nextTickAt).toBe(0);
+  });
+
+  // 终审 I1：跳过必须把 interval 也重排，否则倒计时骗人、连点会叠加跳频
+  it('skipTick 重排计时器：跳过之后不会在原来的时刻又自然跳一次', () => {
+    vi.useFakeTimers();
+    try {
+      stubTavern();
+      const store = useExchangeStore();
+      store.startTicker();
+      vi.advanceTimersByTime(3000); // 加载后 3 秒
+      store.skipTick();
+      const afterSkip = store.acct.tick;
+      vi.advanceTimersByTime(9000); // 距上次 skip 才 9 秒，不该自然跳
+      expect(store.acct.tick).toBe(afterSkip);
+      vi.advanceTimersByTime(2000); // 满 10 秒，自然跳一次
+      expect(store.acct.tick).toBe(afterSkip + 1);
+      store.stopTicker();
+    } finally {
+      vi.useRealTimers();
+    }
   });
 });
 

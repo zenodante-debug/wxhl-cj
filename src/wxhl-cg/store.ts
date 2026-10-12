@@ -19,7 +19,7 @@ export interface StorageLike {
 }
 
 const AccountSchema = z.looseObject({
-  v: z.literal(1),
+  v: z.literal(2),
   cash: z.number(),
   positions: z.record(
     z.string(),
@@ -47,17 +47,84 @@ const AccountSchema = z.looseObject({
   ),
 });
 
+/** v1（有借贷/死亡字段、无 openPrices/netInvested/logs）——只用于迁移识别 */
+const V1Schema = z.looseObject({
+  v: z.literal(1),
+  cash: z.number(),
+  positions: z.record(
+    z.string(),
+    z.looseObject({
+      side: z.enum(['long', 'short']),
+      qty: z.number(),
+      entryPrice: z.number(),
+      leverage: z.number(),
+      margin: z.number(),
+    }),
+  ),
+  prices: z.record(z.string(), z.number()),
+  priceHistory: z.record(z.string(), z.array(z.number())),
+  tick: z.number(),
+  debt: z.number(),
+  bankruptcyCount: z.number(),
+  cumulativeLoss: z.number(),
+  frozen: z.boolean(),
+  news: z.any().nullable(),
+  newsCooldown: z.number(),
+});
+
+/**
+ * v1 → v2 迁移（终审 C1）：改 schema 必须带迁移，否则老存档会被 safeParse 判失败而静默清空。
+ * 丢掉借贷/死亡字段，补上 openPrices/netInvested/logs；净投入取迁移点的现金+持仓权益，
+ * 也就是"盈亏从迁移那一刻重新起算"。
+ */
+function migrateV1(o: z.infer<typeof V1Schema>): ExchangeAccount {
+  const base = createAccount();
+  const acct: ExchangeAccount = {
+    ...base,
+    cash: round2(o.cash ?? 0),
+    positions: (o.positions ?? {}) as ExchangeAccount['positions'],
+    prices: { ...base.prices, ...(o.prices ?? {}) },
+    priceHistory: { ...base.priceHistory, ...(o.priceHistory ?? {}) },
+    tick: o.tick ?? 0,
+    debt: round2(o.debt ?? 0),
+    bankruptcyCount: o.bankruptcyCount ?? 0,
+    cumulativeLoss: round2(o.cumulativeLoss ?? 0),
+    frozen: !!o.frozen,
+    news: (o.news ?? null) as ExchangeAccount['news'],
+    newsCooldown: o.newsCooldown ?? 3,
+    logs: [],
+  };
+  acct.openPrices = { ...acct.prices };
+  let equity = acct.cash;
+  for (const [code, p] of Object.entries(acct.positions)) {
+    const price = acct.prices[code] ?? p.entryPrice;
+    equity += p.margin + (p.side === 'long' ? 1 : -1) * (price - p.entryPrice) * p.qty;
+  }
+  acct.netInvested = round2(equity);
+  return acct;
+}
+
 export function loadAccount(storage: StorageLike): ExchangeAccount {
   const raw = storage.getItem(STORAGE_KEY);
   if (!raw) return createAccount();
   try {
-    const parsed = AccountSchema.safeParse(JSON.parse(raw));
-    if (!parsed.success) {
-      console.warn('[wxhl-cg] 存档结构校验失败，重置为新账户:', z.prettifyError(parsed.error));
+    const parsed = JSON.parse(raw);
+    if (parsed?.v === 1) {
+      const v1 = V1Schema.safeParse(parsed);
+      if (!v1.success) {
+        console.warn('[wxhl-cg] v1 存档结构异常，重置为新账户:', z.prettifyError(v1.error));
+        return createAccount();
+      }
+      console.info('[wxhl-cg] 检测到 v1 存档，已迁移到 v2（现金/持仓/计数保留）');
+      return migrateV1(v1.data);
+    }
+    const v2 = AccountSchema.safeParse(parsed);
+    if (!v2.success) {
+      console.warn('[wxhl-cg] 存档结构校验失败，重置为新账户:', z.prettifyError(v2.error));
       return createAccount();
     }
     // 开盘基准价 = 本次脚本加载时的价：涨跌幅与走势图基准线都按它算，因此每次加载都重新快照
-    const acct = parsed.data as ExchangeAccount;
+    const acct = v2.data as ExchangeAccount;
     acct.openPrices = { ...acct.prices };
     return acct;
   } catch (e) {
@@ -176,11 +243,17 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     nextTickAt.value = Date.now() + TICK_MS;
   }
 
+  /** 重排计时器（clear + 重新 setInterval）：跳过之后必须重排，否则原定时刻还会再跳一次 */
+  function restartTimer() {
+    if (timer) clearInterval(timer);
+    scheduleNext();
+    timer = setInterval(doTick, TICK_MS);
+  }
+
   /** 常驻计时：脚本加载即开跳，与面板是否打开无关（用户 2026-10-12 拍板） */
   function startTicker() {
     if (timer) return;
-    scheduleNext();
-    timer = setInterval(doTick, TICK_MS);
+    restartTimer();
   }
 
   function stopTicker() {
@@ -189,9 +262,11 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     nextTickAt.value = 0;
   }
 
-  /** 手动跳过：立刻跳一次（内部会重新排下一跳的时间戳） */
+  /** 手动跳过：立刻跳一次并把整段间隔重新起算（不叠加、不改变 10 秒/跳的节奏） */
   function skipTick() {
-    if (timer) doTick();
+    if (!timer) return;
+    doTick();
+    restartTimer();
   }
 
   function open() {

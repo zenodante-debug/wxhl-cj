@@ -36,9 +36,9 @@ export function positionEquity(pos: Position, price: number): number {
   return round2(pos.margin + positionPnl(pos, price));
 }
 
-/** 账户净资产 = 现金 + Σ持仓净值 */
+/** 账户净资产 = 现金 + Σ持仓净值 − 未清欠款（欠款是真的负债，不能不计） */
 export function netAssets(acct: ExchangeAccount): number {
-  let sum = acct.cash;
+  let sum = acct.cash - acct.debt;
   for (const [code, pos] of Object.entries(acct.positions)) {
     sum += positionEquity(pos, acct.prices[code] ?? pos.entryPrice);
   }
@@ -69,6 +69,7 @@ export function tradePreview(
   const price = acct.prices[code];
   const notional = round2(qty * price);
   const margin = round2(notional / leverage);
+  if (margin < MIN_MARGIN) throw new Error(`保证金 ${margin} 低于最低保证金 ${MIN_MARGIN}`);
   const fee = commission(notional, margin);
   const stamp = side === 'short' ? stampTax(notional, margin) : 0;
   return { notional, margin, fee, stamp, total: round2(margin + fee + stamp) };
@@ -80,16 +81,15 @@ export function tradePreview(
  */
 export function openPosition(acct: ExchangeAccount, code: string, side: Side, qty: number, leverage: number): OpenResult {
   if (acct.frozen) throw new Error('账户冻结中（破产欠款未清），禁止开仓');
-  const r = tradePreview(acct, code, side, qty, leverage);
+  const r = tradePreview(acct, code, side, qty, leverage); // 内含最低保证金校验
   if (acct.positions[code]) throw new Error('已有该股仓位，请先平仓');
-  if (r.margin < MIN_MARGIN) throw new Error(`保证金 ${r.margin} 低于最低保证金 ${MIN_MARGIN}`);
 
-  const total = round2(r.margin + r.fee + r.stamp);
+  const total = r.total;
   if (acct.cash < total) throw new Error(`现金不足：需要 ${total}，只有 ${round2(acct.cash)}`);
 
   acct.cash = round2(acct.cash - total);
   acct.positions[code] = { side, qty, entryPrice: acct.prices[code], leverage, margin: r.margin };
-  return r;
+  return { notional: r.notional, margin: r.margin, fee: r.fee, stamp: r.stamp };
 }
 
 export interface CloseResult {

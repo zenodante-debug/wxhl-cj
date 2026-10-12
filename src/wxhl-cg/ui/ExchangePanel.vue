@@ -204,7 +204,7 @@ function doOrder(side: 'long' | 'short') {
   --cg-font-body: 'Noto Sans SC', 'PingFang SC', system-ui, sans-serif;
   --cg-font-mono: 'JetBrains Mono', 'Courier New', monospace;
 
-  position: fixed;
+  position: absolute; /* 不能用 fixed：fixed 的包含块是 iframe 视口，不跟随被设成 visualViewport 尺寸的根节点 */
   inset: 0;
   z-index: 2147483640;
   display: flex;
@@ -628,28 +628,30 @@ function doOrder(side: 'long' | 'short') {
   flex: 1;
 }
 
-/* ———— 窄屏堆叠 + 手机端窗口尺寸 ————
-   手机阈值与状态栏一致（mobile-compat.js:12-17）：粗指针 / 无 hover / 宽 ≤768。
-   这里用 CSS 表达是因为 #wxhl-cg-root 已被 index.ts 的 updateSize() 设成
-   visualViewport 尺寸，于是 overlay 100% == visualViewport，
-   面板 100% + overlay padding 6px 即 "visualViewport − 12"，与状态栏手机端规则同值。 */
-@media (max-width: 860px) {
-  .cg-grid {
-    grid-template-columns: 1fr;
-    overflow-y: auto;
-  }
-  .cg-list {
-    max-height: 180px;
-  }
+/* ———— 窗口形态（终审 I2/I3）————
+   形态由 index.ts 按**宿主视口**判定后写在根节点 [data-mode] 上（scripts iframe 自己的
+   宽度不可靠，媒体查询会误判）。wide = 三栏；compact = 单列但不贴满；phone = 贴满可视视口。 */
+[data-mode='compact'] .cg-grid {
+  grid-template-columns: 1fr;
+  overflow-y: auto;
 }
-@media (pointer: coarse), (hover: none), (max-width: 768px) {
-  .cg-overlay {
-    padding: 6px;
-  }
-  .cg-panel {
-    width: 100%;
-    height: 100%;
-    border-radius: 14px;
-  }
+[data-mode='compact'] .cg-list {
+  max-height: 200px;
+}
+
+[data-mode='phone'] .cg-overlay {
+  padding: 6px;
+}
+[data-mode='phone'] .cg-panel {
+  width: 100%;
+  height: 100%;
+  border-radius: 14px;
+}
+[data-mode='phone'] .cg-grid {
+  grid-template-columns: 1fr;
+  overflow-y: auto;
+}
+[data-mode='phone'] .cg-list {
+  max-height: 160px;
 }
 </style>
