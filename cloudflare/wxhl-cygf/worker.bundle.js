@@ -100,7 +100,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   }
   h1, h2, h3 { font-weight: 600; }
   input, select, textarea, button { font: inherit; color: inherit; }
-  input[type=text], input[type=search], input[type=number], select, textarea {
+  input[type=text], input[type=search], input[type=number], input[type=password], select, textarea {
     background: var(--bg-2); border: 1px solid var(--line); border-radius: 8px;
     padding: 7px 10px; width: 100%; color: var(--text);
   }
@@ -200,6 +200,20 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   .error-text { color: var(--danger); font-size: 13px; }
   .loading, .empty { color: var(--muted); padding: 24px 0; }
 
+  /* 编辑状态横幅（上传视图顶部） */
+  .edit-banner {
+    margin-bottom: 12px; padding: 10px 14px; border-radius: 8px;
+    background: var(--warn-bg); border: 1px solid var(--warn-line); color: var(--warn-text);
+    font-size: 13px;
+  }
+  /* 管理密钥输入框：放在按钮行里，需要自适应宽度而不是 width:100%
+     （写成 input.key-input 是为了压过上面 input[type=password] 的特异性） */
+  input.key-input { flex: 1 1 200px; width: auto; min-width: 140px; }
+  /* 管理员面板里的一行（密钥 + 按钮） */
+  .panel-row { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin: 10px 0; }
+  /* 面板行内右侧的操作按钮组（无边框，区别于详情页的 .actions） */
+  .row-actions { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
   /* 上传表单 */
   .form { display: grid; gap: 10px; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); margin-bottom: 6px; }
   .field { display: flex; flex-direction: column; gap: 4px; }
@@ -270,6 +284,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
     <div class="topbar-row">
       <h1>回廊创意工坊</h1>
       <input id="search" type="search" placeholder="搜索名称 / 简介 / 作者">
+      <button id="adminBtn">管理</button>
       <button id="uploadBtn" class="primary">上传</button>
     </div>
     <nav id="typeNav" class="type-nav" aria-label="分类"></nav>
@@ -298,6 +313,7 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
   <!-- 6. 上传视图 -->
   <section id="uploadView" class="view" hidden>
     <div class="view-head"><button id="uploadBack" class="ghost">← 返回列表</button><h2>上传内容包</h2></div>
+    <div id="uploadBanner" class="edit-banner" hidden></div>
     <nav id="uploadTypeNav" class="type-nav" aria-label="上传类型"></nav>
     <div class="form">
       <label class="field"><span class="field-label">名称 *</span><input id="upName" type="text"></label>
@@ -327,6 +343,23 @@ Set the \`cycles\` parameter to \`"ref"\` to resolve cyclical schemas with defs.
         <button id="keyCopy" class="primary">复制</button>
         <button id="keyDetail">查看详情</button>
         <button id="keyClose" class="ghost">返回列表</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 管理员面板（纯 HTTP，不依赖宿主桥） -->
+  <div id="adminView" class="overlay" hidden>
+    <div class="card-box">
+      <h2>管理员面板</h2>
+      <div class="panel-row">
+        <input id="adminKey" type="password" class="key-input" placeholder="管理员密钥" autocomplete="off">
+        <button id="adminLoadBtn" class="primary">载入列表</button>
+      </div>
+      <p id="adminError" class="error-text"></p>
+      <div id="adminList"></div>
+      <div id="adminResult"></div>
+      <div class="panel-row">
+        <button id="adminClose" class="ghost">关闭</button>
       </div>
     </div>
   </div>
@@ -366,6 +399,8 @@ const state = {
   uploadType: 'dungeon',
   currentDetailId: '',
   metaById: new Map(),
+  // 编辑态：{ id, name, version, key } —— 非空表示上传视图正在改一个已存在的包（提交走 update）
+  editing: null,
 };
 
 const bridge = W.createBridgeClient({ parentWindow: window.parent, selfWindow: window });
@@ -479,6 +514,7 @@ function toast(message, isError) {
 }
 
 function showListView() {
+  setEditMode(null); // 离开上传视图 = 放弃编辑态
   $('#detailView').hidden = true;
   $('#uploadView').hidden = true;
   $('#listView').hidden = false;
@@ -490,6 +526,58 @@ function showUploadView() {
   $('#uploadView').hidden = false;
   $('#listView').hidden = true;
   window.scrollTo(0, 0);
+}
+
+// ==================== 编辑态与「记住密钥」 ====================
+function manageKeyStorageKey(id) {
+  return \`wxhl_cygf_key_\${id}\`;
+}
+
+function readSavedKey(id) {
+  try {
+    return localStorage.getItem(manageKeyStorageKey(id)) ?? '';
+  } catch {
+    return ''; // 隐私模式下读不到就当没存过
+  }
+}
+
+function saveSavedKey(id, key) {
+  try {
+    if (key) localStorage.setItem(manageKeyStorageKey(id), key);
+    else localStorage.removeItem(manageKeyStorageKey(id));
+  } catch {
+    /* 隐私模式下写不进也放行 */
+  }
+}
+
+/** 进入 / 退出编辑态：锁死类型、显示横幅、改提交按钮文案 */
+function setEditMode(editing) {
+  state.editing = editing;
+  for (const btn of $('#uploadTypeNav').__buttons ?? []) btn.disabled = !!editing;
+  const banner = $('#uploadBanner');
+  if (editing) {
+    banner.textContent = \`正在编辑：\${editing.name}（v\${editing.version}）\`;
+    banner.hidden = false;
+    $('#upSubmit').textContent = '保存修改';
+  } else {
+    banner.textContent = '';
+    banner.hidden = true;
+    $('#upSubmit').textContent = '提交';
+  }
+}
+
+/** 把上传表单清回「新建」状态（打开新建 / 打开编辑前都先走一遍） */
+function resetUploadForm() {
+  state.draftId = genId();
+  $('#upName').value = '';
+  $('#upVersion').value = '1.0.0';
+  $('#upAuthor').value = '';
+  $('#upDiscord').value = '';
+  $('#upTags').value = '';
+  $('#upCover').value = '';
+  $('#upDesc').value = '';
+  $('#upError').textContent = '';
+  for (const section of Object.values(SECTIONS)) section.reset();
 }
 
 // ==================== 封面：一律走 img.src + onerror 回退占位 ====================
@@ -734,6 +822,95 @@ function renderActions(pack, installed) {
   return box;
 }
 
+// ==================== 5. 详情：管理区（编辑 / 下架 + 记住密钥） ====================
+function renderManage(pack) {
+  const box = el('div', 'actions');
+
+  const keyInput = document.createElement('input');
+  keyInput.type = 'password';
+  keyInput.className = 'key-input';
+  keyInput.placeholder = '上传时保存的管理密钥';
+  keyInput.autocomplete = 'off';
+  keyInput.value = readSavedKey(pack.id); // 存过就回填
+
+  const remember = document.createElement('input');
+  remember.type = 'checkbox';
+  remember.checked = !!keyInput.value;
+
+  const persist = () => saveSavedKey(pack.id, remember.checked ? keyInput.value.trim() : '');
+  remember.addEventListener('change', persist);
+  // 勾着「记住」时改密钥就地更新，免得填了却忘了再点一次勾选
+  keyInput.addEventListener('input', () => { if (remember.checked) persist(); });
+
+  const rememberWrap = el('label', 'field check');
+  rememberWrap.append(remember, el('span', 'field-label', '记住密钥'));
+
+  const editBtn = button('编辑此包', null, () => {
+    const key = keyInput.value.trim();
+    if (!key) {
+      toast('请先填写管理密钥', true);
+      return;
+    }
+    openEdit(pack, key);
+  });
+
+  const removeBtn = button('下架此包', 'danger', async () => {
+    const key = keyInput.value.trim();
+    if (!key) {
+      toast('请先填写管理密钥', true);
+      return;
+    }
+    if (!window.confirm(\`确定下架「\${pack.name}」吗？此操作不可撤销。\`)) return;
+    removeBtn.disabled = true;
+    try {
+      await W.api.remove(pack.id, key);
+      saveSavedKey(pack.id, ''); // 包都没了，密钥留着没意义
+      toast('已下架');
+      showListView();
+      loadList({ reset: true });
+    } catch (error) {
+      toast(error.message, true); // 服务端原文；403 = 密钥不对或没有
+      if (error.status === 403) {
+        saveSavedKey(pack.id, '');
+        remember.checked = false;
+      }
+    } finally {
+      removeBtn.disabled = false;
+    }
+  });
+
+  box.append(el('span', 'hint', '管理：'), keyInput, editBtn, removeBtn, rememberWrap);
+  box.append(el('div', 'hint', '密钥只存在本机浏览器；「下架」用服务端密钥校验，成功即删除，无法恢复。'));
+  return box;
+}
+
+/** 打开编辑：取回完整包 → 切到上传视图 → 锁定类型并预填 → 标记编辑态 */
+async function openEdit(pack, key) {
+  let res;
+  try {
+    res = await W.api.get(pack.id); // 列表只有元数据，编辑要完整包
+  } catch (error) {
+    toast('读取内容包失败：' + error.message, true);
+    return;
+  }
+  const full = res.pack;
+  resetUploadForm();
+  setEditMode(null); // 先退出可能残留的编辑态，否则下面的 setUploadType 会被锁死挡掉
+  state.draftId = full.id;
+  setUploadType(full.type);
+  $('#upName').value = full.name ?? '';
+  $('#upVersion').value = full.version ?? '1.0.0';
+  $('#upAuthor').value = full.author?.name ?? '';
+  $('#upDiscord').value = full.author?.discord ?? '';
+  $('#upTags').value = (full.tags ?? []).join(', ');
+  $('#upCover').value = full.cover ?? '';
+  $('#upDesc').value = full.description ?? '';
+  const section = SECTIONS[full.type];
+  if (typeof section?.fill === 'function') section.fill(full);
+  setEditMode({ id: full.id, name: full.name, version: full.version, key });
+  showUploadView();
+}
+
 function renderDetail(pack, installed) {
   const body = $('#detailBody');
   body.replaceChildren();
@@ -764,6 +941,7 @@ function renderDetail(pack, installed) {
   body.append(el('h3', 'section-title', '落地预览（写入世界书的条目）'));
   body.append(renderPreview(pack));
   body.append(renderActions(pack, installed));
+  body.append(renderManage(pack));
 }
 
 async function readInstalled(id) {
@@ -1034,6 +1212,18 @@ function createEntryEditor({ listEl, pagerEl, prevBtn, nextBtn, pageInfo, addBtn
       page = 0;
       render();
     },
+    /** 用已存在的条目（存储形状）覆盖草稿——编辑已上传的包时用 */
+    setEntries(entries) {
+      revision += 1;
+      busy = false;
+      fileInput.value = '';
+      statusEl.textContent = '';
+      statusEl.classList.remove('error-text');
+      drafts = (entries ?? []).map(entryToDraft);
+      if (drafts.length === 0) drafts.push(newEntry());
+      page = 0;
+      render();
+    },
     getEntries() {
       // 整行留空（名字与正文都空）的草稿不提交——默认那一行空草稿不该变成一条非法条目
       return drafts.filter(draft => String(draft.name ?? '').trim() || String(draft.content ?? '').trim()).map(buildEntryObject);
@@ -1118,6 +1308,16 @@ function createTaskList({ listEl, addBtn, label, fields }) {
       items.length = 0;
       render();
     },
+    /** 用已存在的行（对象数组）覆盖——编辑已上传的包时用 */
+    set(rows) {
+      items.length = 0;
+      for (const row of rows ?? []) {
+        const item = {};
+        for (const [key] of fields) item[key] = String(row?.[key] ?? '');
+        items.push(item);
+      }
+      render();
+    },
   };
 }
 
@@ -1167,6 +1367,7 @@ function createMechanismSection() {
   return {
     el: root,
     reset: () => editor.reset(),
+    fill: pack => editor.setEntries(pack?.条目),
     build: () => ({ 条目: editor.getEntries() }),
     validate: () => commonEntryProblems(editor.getEntries()),
     isBusy: () => editor.isBusy(),
@@ -1203,6 +1404,12 @@ return {
       editor.reset();
       ctrlName.value = '';
       ctrlBody.value = '';
+    },
+    fill(pack) {
+      editor.setEntries(pack?.事件条目);
+      const ctrl = pack?.控制器条目 ?? {};
+      ctrlName.value = ctrl.名称 ?? '';
+      ctrlBody.value = ctrl.正文 ?? '';
     },
     build() {
       const 控制器条目 = controller();
@@ -1284,6 +1491,27 @@ function createDungeonSection() {
       hidden.reset();
       achievements.reset();
       editor.reset();
+    },
+    /** 把一份副本包填回表单（字段名见 src/wxhl-cygf/pack/dungeon.ts） */
+    fill(pack) {
+      const d = pack ?? {};
+      if (d.副本名称 !== undefined) name.value = String(d.副本名称 ?? '');
+      if (['和平', '阵营', '血腥'].includes(d.副本类型)) category.value = d.副本类型;
+      if (d.基准等级 !== undefined) level.value = String(d.基准等级);
+      if (d.时间限制 !== undefined) limit.value = String(d.时间限制);
+      if (d.背景设定 !== undefined) background.value = String(d.背景设定 ?? '');
+      if (d.地图与区域 !== undefined) map.value = String(d.地图与区域 ?? '');
+      if (d.敌人配置 !== undefined) enemies.value = String(d.敌人配置 ?? '');
+      const main = d.主线任务 ?? {};
+      if (main.名称 !== undefined) mainName.value = String(main.名称 ?? '');
+      if (main.说明 !== undefined) mainDesc.value = String(main.说明 ?? '');
+      if (main.奖励 !== undefined) mainReward.value = String(main.奖励 ?? '');
+      sub.set(d.支线任务);
+      world.set(d.世界事件);
+      hidden.set(d.隐藏任务);
+      achievements.set(d.成就);
+      if (d.GM指导 !== undefined) gm.value = String(d.GM指导 ?? '');
+      editor.setEntries(d.额外条目);
     },
     build() {
       return {
@@ -1504,6 +1732,7 @@ function createBuildSection() {
 
   return {
     el: root,
+    fill: buildPayload => fillFromBuild(buildPayload),
     reset() {
       name.value = '';
       role.value = '';
@@ -1625,8 +1854,21 @@ function createPersonaSection() {
   buildGrid.append(field('构筑（完整 BuildPayload JSON，留空则不嵌入）', buildJson, 'full'));
   root.append(buildGrid);
 
+  /** 把一份人设载荷填回表单（角色名/性格/爱好/厌恶/背景故事/构筑方向/可选构筑），编辑已上传的包时用 */
+  function fillFromPersona(personaPayload) {
+    const p = personaPayload?.persona ?? personaPayload ?? {};
+    if (p.角色名 !== undefined) name.value = String(p.角色名 ?? '');
+    if (p.性格 !== undefined) personality.value = String(p.性格 ?? '');
+    if (p.爱好 !== undefined) likes.value = Array.isArray(p.爱好) ? p.爱好.join(', ') : String(p.爱好 ?? '');
+    if (p.厌恶 !== undefined) dislikes.value = Array.isArray(p.厌恶) ? p.厌恶.join(', ') : String(p.厌恶 ?? '');
+    if (p.背景故事 !== undefined) background.value = String(p.背景故事 ?? '');
+    if (p.构筑方向 !== undefined) direction.value = String(p.构筑方向 ?? '');
+    if (p.构筑) buildJson.value = JSON.stringify(p.构筑, null, 2);
+  }
+
   return {
     el: root,
+    fill: personaPayload => fillFromPersona(personaPayload),
     reset() {
       name.value = '';
       personality.value = '';
@@ -1682,6 +1924,7 @@ function renderUploadTypeNav() {
 }
 
 function setUploadType(type) {
+  if (state.editing) return; // 编辑中锁死类型：类型决定表单形状，中途改会让预填的字段对不上
   state.uploadType = type;
   const buttons = $('#uploadTypeNav').__buttons ?? [];
   for (const btn of buttons) btn.classList.toggle('active', btn.dataset.value === type);
@@ -1719,16 +1962,8 @@ function genId() {
 
 function openUpload() {
   showUploadView();
-  state.draftId = genId();
-  $('#upName').value = '';
-  $('#upVersion').value = '1.0.0';
-  $('#upAuthor').value = '';
-  $('#upDiscord').value = '';
-  $('#upTags').value = '';
-  $('#upCover').value = '';
-  $('#upDesc').value = '';
-  $('#upError').textContent = '';
-  for (const section of Object.values(SECTIONS)) section.reset();
+  setEditMode(null);
+  resetUploadForm();
   // 若列表正筛选在某个类型，上传默认跟随该类型
   setUploadType(W.PACK_TYPE_LABEL[state.type] ? state.type : 'dungeon');
 }
@@ -1754,13 +1989,24 @@ async function submitUpload() {
     errorBox.textContent = problem;
     return;
   }
+  const editing = state.editing;
   const submit = $('#upSubmit');
   submit.disabled = true;
   try {
-    const res = await W.api.upload(pack);
-    showManageKey(res.id, res.manageKey);
+    if (editing) {
+      await W.api.update(editing.id, editing.key, pack);
+      toast('已保存修改');
+      showListView(); // 关掉上传视图并清掉编辑态
+      await loadList({ reset: true });
+      openDetail(editing.id);
+    } else {
+      const res = await W.api.upload(pack);
+      showManageKey(res.id, res.manageKey);
+    }
   } catch (error) {
     errorBox.textContent = error.message; // 服务端权威校验错误原样显示
+    // 403 = 密钥不对（或包已被下架）：清掉记住的密钥，免得一直带着错的
+    if (editing && error.status === 403) saveSavedKey(editing.id, '');
   } finally {
     submit.disabled = false;
   }
@@ -1790,6 +2036,111 @@ function showManageKey(id, manageKey) {
   $('#keyModal').hidden = false;
 }
 
+// ==================== 管理员面板（纯 HTTP，不依赖宿主桥） ====================
+function openAdmin() {
+  $('#adminView').hidden = false;
+  $('#adminError').textContent = '';
+}
+
+function closeAdmin() {
+  $('#adminView').hidden = true;
+}
+
+async function loadAdminList() {
+  const key = $('#adminKey').value.trim();
+  const errorBox = $('#adminError');
+  errorBox.textContent = '';
+  if (!key) {
+    errorBox.textContent = '请先填写管理员密钥';
+    return;
+  }
+  const listEl = $('#adminList');
+  $('#adminResult').replaceChildren();
+  listEl.replaceChildren(el('div', 'loading', '加载中…'));
+  try {
+    const res = await W.api.adminList(key);
+    renderAdminRows(res?.rows ?? [], key);
+  } catch (error) {
+    listEl.replaceChildren();
+    errorBox.textContent = error.message; // 服务端原文（403 = 管理密钥不正确或未配置）
+  }
+}
+
+function renderAdminRows(rows, key) {
+  const listEl = $('#adminList');
+  if (rows.length === 0) {
+    listEl.replaceChildren(el('div', 'empty', '没有内容包'));
+    return;
+  }
+  listEl.replaceChildren(...rows.map(row => adminRow(row, key)));
+}
+
+function adminRow(row, key) {
+  const box = el('div', 'preview-entry');
+  const head = el('div', 'row-between');
+
+  const left = el('div');
+  const nameRow = el('div', 'detail-head');
+  nameRow.append(el('span', 'preview-name', row.name ?? ''));
+  nameRow.append(typeBadge(row.type));
+  left.append(nameRow);
+  left.append(el('div', 'detail-meta', \`作者：\${row.authorName ?? ''}\`));
+  left.append(el('div', 'detail-meta', \`版本：v\${row.version ?? ''} · 更新：\${formatTime(row.updated)}\`));
+  head.append(left);
+
+  const actions = el('div', 'row-actions');
+  actions.append(
+    button('强制下架', 'danger small', () => adminDelete(row, key)),
+    button('重置密钥', 'small', () => adminResetKey(row, key)),
+  );
+  head.append(actions);
+
+  box.append(head);
+  return box;
+}
+
+async function adminDelete(row, key) {
+  if (!window.confirm(\`确定强制下架「\${row.name}」吗？此操作不可撤销。\`)) return;
+  const errorBox = $('#adminError');
+  errorBox.textContent = '';
+  try {
+    await W.api.adminDelete(key, [row.id]);
+    toast('已下架：' + row.name);
+    await loadAdminList(); // 下架后重载列表
+  } catch (error) {
+    errorBox.textContent = error.message;
+  }
+}
+
+async function adminResetKey(row, key) {
+  if (!window.confirm(\`为「\${row.name}」重置管理密钥？原密钥立即失效。\`)) return;
+  const errorBox = $('#adminError');
+  errorBox.textContent = '';
+  try {
+    const res = await W.api.adminResetKey(key, row.id);
+    showAdminKey(res.manageKey);
+  } catch (error) {
+    errorBox.textContent = error.message;
+  }
+}
+
+/** 新密钥只显示这一次——独立的可复制行 + 复制按钮 */
+function showAdminKey(manageKey) {
+  const head = el('div', 'row-between');
+  head.append(el('span', 'hint', '新的管理密钥（只显示这一次，请立即保存）'));
+  const copy = button('复制', 'primary small');
+  copy.addEventListener('click', async () => {
+    try {
+      await navigator.clipboard.writeText(manageKey);
+      copy.textContent = '已复制';
+    } catch {
+      copy.textContent = '复制失败，请手动选择复制';
+    }
+  });
+  head.append(copy);
+  $('#adminResult').replaceChildren(head, el('pre', 'key-value', manageKey));
+}
+
 // ==================== 装配 ====================
 let searchTimer = 0;
 
@@ -1811,6 +2162,14 @@ function init() {
   $('#uploadBack').addEventListener('click', showListView);
   $('#detailBack').addEventListener('click', showListView);
   $('#upSubmit').addEventListener('click', submitUpload);
+
+  // 管理员面板：纯 HTTP，不需要宿主桥
+  $('#adminBtn').addEventListener('click', openAdmin);
+  $('#adminClose').addEventListener('click', closeAdmin);
+  $('#adminLoadBtn').addEventListener('click', loadAdminList);
+  $('#adminKey').addEventListener('keydown', event => {
+    if (event.key === 'Enter') loadAdminList();
+  });
 
   loadList({ reset: true });
   probeBridge();
@@ -2092,9 +2451,16 @@ async function callApi(path, options) {
   } catch {
     /* 非 JSON 响应 */
   }
-  if (!res.ok) throw new Error(data?.error || \`请求失败（HTTP \${res.status}）\`);
+  if (!res.ok) {
+    const error = new Error(data?.error || \`请求失败（HTTP \${res.status}）\`);
+    // 带上状态码：页面靠它区分「密钥不对（403）」与网络故障——403 才清掉记住的密钥
+    error.status = res.status;
+    throw error;
+  }
   return data;
 }
+
+const jsonPost = body => ({ method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
 
 export const api = {
   list: params => callApi(\`/api/packs?\${new URLSearchParams(Object.entries(params ?? {}).filter(([, v]) => v))}\`),
@@ -2104,6 +2470,10 @@ export const api = {
     callApi(\`/api/packs/\${id}\`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manageKey, pack }) }),
   remove: (id, manageKey) =>
     callApi(\`/api/packs/\${id}\`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ manageKey }) }),
+  // 管理端点：纯 HTTP，键在请求体里；密钥不对时服务端回 403
+  adminList: key => callApi('/api/admin/list', jsonPost({ key })),
+  adminDelete: (key, ids) => callApi('/api/admin/delete', jsonPost({ key, ids })),
+  adminResetKey: (key, id) => callApi('/api/admin/reset-key', jsonPost({ key, id })),
 };
 
 // ==================== 免责声明 ====================
