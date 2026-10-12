@@ -500,7 +500,11 @@ function buildFromContractor(契约者, nameHint = '') {
   const 属性基础 = 契约者.属性?.基础 ?? {};
   const 职业 = 契约者.职业 ?? {};
   const 称号 = 头部.称号?.当前称号 ?? 头部.称号 ?? {};
-  const 名字 = nameHint || (职业.名称 && 职业.名称 !== '无' ? 职业.名称 : '未命名构筑');
+  const 名字 =
+    nameHint ||
+    (头部.姓名 && String(头部.姓名).trim()) ||
+    (职业.名称 && 职业.名称 !== '无' ? 职业.名称 : '') ||
+    '未命名构筑';
   return {
     构筑名: 名字,
     定位:
@@ -523,9 +527,41 @@ function buildFromContractor(契约者, nameHint = '') {
 }
 
 /**
- * 粘贴 JSON 捕捉构筑。认五种形状：
- *   ① {stat_data:{契约者:{…}}} ② {契约者:{…}} ③ 契约者/实体子树
- *   ④ 一份构筑载荷 ⑤ **MVU 指令数组**（[{op,path,value}] —— 从酒馆复制变量时常见的形状）
+ * 按 path 回放 MVU 指令，拼出一个对象（用于「逐字段 replace」那种复制形态）。
+ * path 形如 '/契约者/头部/姓名'；支持 replace/insert/set/assign/add 与 delete/remove。
+ */
+export function applyMvuCommands(raw) {
+  const root = {};
+  const keysOf = p => String(p ?? '').split('/').slice(1).filter(k => k !== '');
+  const parentOf = keys => {
+    let node = root;
+    for (const k of keys) {
+      if (!isRecord(node[k])) node[k] = {};
+      node = node[k];
+    }
+    return node;
+  };
+  for (const item of Array.isArray(raw) ? raw : []) {
+    if (!isRecord(item)) continue;
+    const keys = keysOf(item.path);
+    if (keys.length === 0) continue;
+    const op = String(item.op ?? 'replace').toLowerCase();
+    if (op === 'delete' || op === 'remove' || op === 'unset') {
+      const parent = keys.length === 1 ? root : parentOf(keys.slice(0, -1));
+      delete parent[keys[keys.length - 1]];
+      continue;
+    }
+    // 其余（replace/insert/set/assign/add/push…）一律写入 value —— 我们只关心最终形状
+    const parent = keys.length === 1 ? root : parentOf(keys.slice(0, -1));
+    parent[keys[keys.length - 1]] = item.value;
+  }
+  return root;
+}
+
+/**
+ * 粘贴 JSON 捕捉构筑。认六种形状：
+ *   ① {stat_data:{契约者:{…}}} ② {契约者:{…}} ③ 契约者/实体子树 ④ 一份构筑载荷
+ *   ⑤ **MVU 指令数组**（[{op,path,value}]）—— 逐字段 replace 的、或一条 insert 整个实体的，都认
  * 认不出来就抛人话错误（不静默产出空构筑）。
  */
 export function parseBuildJson(text) {
@@ -536,15 +572,23 @@ export function parseBuildJson(text) {
     throw new Error('JSON 格式不正确：请粘贴从酒馆复制的变量或一份构筑载荷');
   }
 
-  // ⑤ MVU 指令数组：取最后一条「带对象 value」的指令，path 末段当实体名
+  // ⑤ MVU 指令数组
   if (Array.isArray(raw)) {
-    const 指令 = [...raw].reverse().find(item => item && typeof item === 'object' && isRecord(item.value));
-    if (!指令) throw new Error('无法识别的 JSON：指令数组里没有可用的 value（需要 op/path/value 形式的 MVU 指令）');
-    if (!looksLikeContractor(指令.value)) {
-      throw new Error('无法识别的 JSON：指令的 value 里没有 头部/属性/职业 等构筑字段');
+    const 指令 = raw.filter(item => isRecord(item) && isRecord(item.value));
+    // 先按 path 回放合并，逐字段 replace 的形态走这条
+    const 合并 = applyMvuCommands(raw);
+    const 候选 = 合并?.契约者 ?? 合并;
+    if (looksLikeContractor(候选)) return buildFromContractor(候选);
+    // 再退回「某一条指令的 value 就是整个实体」（如 insert /契约者/副本角色/<名字>）
+    if (指令.length === 0 && Object.keys(合并).length === 0) {
+      throw new Error('无法识别的 JSON：指令数组里没有可用的 value（需要 op/path/value 形式）');
     }
-    const 名 = String(指令.path ?? '').split('/').filter(Boolean).pop() ?? '';
-    return buildFromContractor(指令.value, 名);
+    const 最后一条 = 指令[指令.length - 1];
+    if (最后一条 && looksLikeContractor(最后一条.value)) {
+      const 名 = String(最后一条.path ?? '').split('/').filter(Boolean).pop() ?? '';
+      return buildFromContractor(最后一条.value, 名);
+    }
+    throw new Error('无法识别的 JSON：指令里没有 头部/属性/职业 等构筑字段（逐字段 replace 与「insert 整个实体」两种形态都试过了）');
   }
 
   // 提取候选后**仍要验形**：{stat_data:{契约者:{经济:…}}} 这种残缺子树不能被当成构筑

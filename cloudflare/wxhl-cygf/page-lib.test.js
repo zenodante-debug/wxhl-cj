@@ -1,7 +1,7 @@
 // cloudflare/wxhl-cygf/page-lib.test.js
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
-  api, computeInstalled, coverOrPlaceholder, createBridgeClient, deriveAttributeDirection, isAgreementAccepted, mapExtensionEntry,
+  api, applyMvuCommands, computeInstalled, coverOrPlaceholder, createBridgeClient, deriveAttributeDirection, isAgreementAccepted, mapExtensionEntry,
   MAX_IMPORT_BYTES, packToWorldbookEntries, parseBuildJson, parseWorldbookJson,
   renderBuildEntry, renderPersonaEntry, sourceMetaOf,
 } from './page-lib.js';
@@ -425,5 +425,39 @@ describe('parseBuildJson · MVU 指令数组（用户实际粘贴的形状）', 
   it('指令数组里没有可用 value / value 不像构筑 → 响亮报错', () => {
     expect(() => parseBuildJson(JSON.stringify([{ op: 'delete', path: '/x' }]))).toThrow(/value/);
     expect(() => parseBuildJson(JSON.stringify([{ op: 'insert', path: '/x', value: { 经济: { UP: 1 } } }]))).toThrow(/头部|属性|职业|构筑/);
+  });
+});
+
+describe('parseBuildJson · 逐字段 replace 指令（用户 2026-10-12 粘贴的形态）', () => {
+  const 五条悟 = JSON.stringify([
+    { op: 'replace', path: '/契约者/头部/姓名', value: '五条悟' },
+    { op: 'replace', path: '/契约者/头部/天赋', value: { 名称: '无下限咒术', 品质: '白色' } },
+    { op: 'replace', path: '/契约者/属性/基础', value: { STR: 5, AGI: 8, CON: 5, PER: 12 } },
+    { op: 'replace', path: '/契约者/职业/名称', value: '咒术师' },
+    { op: 'replace', path: '/契约者/职业/职业简介', value: '依托六眼与无下限术式的特化职业' },
+    { op: 'insert', path: '/契约者/特殊资源/血统', value: { 咒力: { 当前: 100, 上限: 100 } } },
+  ]);
+
+  it('回放合并后能解析：名字取头部.姓名、四维/职业都进来', () => {
+    const build = parseBuildJson(五条悟);
+    expect(build.构筑名).toBe('五条悟');
+    expect(build.定位).toContain('六眼');
+    expect(build.属性基础).toEqual({ STR: 5, AGI: 8, CON: 5, PER: 12 });
+    expect(build.属性分配方向).toEqual({ 主属性: 'PER', 副属性: 'AGI' });
+    expect(build.职业.名称).toBe('咒术师');
+    expect(build.天赋.名称).toBe('无下限咒术');
+  });
+
+  it('applyMvuCommands：delete 能删掉键', () => {
+    const 合并 = applyMvuCommands([
+      { op: 'replace', path: '/a/b', value: 1 },
+      { op: 'replace', path: '/a/c', value: 2 },
+      { op: 'delete', path: '/a/b' },
+    ]);
+    expect(合并).toEqual({ a: { c: 2 } });
+  });
+
+  it('既没有可回放的构筑字段、也没有整实体 insert → 响亮报错', () => {
+    expect(() => parseBuildJson(JSON.stringify([{ op: 'replace', path: '/契约者/经济/UP', value: 1 }]))).toThrow(/构筑字段/);
   });
 });
