@@ -43,6 +43,17 @@ const chartLines = computed<ChartLine[]>(() => {
 const qty = ref(10);
 const leverage = ref(1);
 
+/** 倒计时只做显示（1 秒刷新一次），不推进行情 */
+const now = ref(Date.now());
+let clock: ReturnType<typeof setInterval> | null = null;
+onMounted(() => {
+  clock = setInterval(() => (now.value = Date.now()), 1000);
+});
+onUnmounted(() => {
+  if (clock) clearInterval(clock);
+});
+const secondsLeft = computed(() => Math.max(0, Math.ceil((store.nextTickAt - now.value) / 1000)));
+
 /** 下单费用预览（做多/做空各一份），参数非法时为 null */
 function previewOf(side: 'long' | 'short') {
   try {
@@ -69,8 +80,8 @@ function doOrder(side: 'long' | 'short') {
     <div class="cg-panel">
       <div class="cg-head">
         <span class="cg-title">回廊交易所</span>
-        <span class="cg-head-sub mono">第 {{ acct.tick }} 跳</span>
-        <button class="cg-head-btn" @click="store.doTick()">跳过</button>
+        <span class="cg-head-sub mono">第 {{ acct.tick }} 跳 · 下次跳动 {{ secondsLeft }}s</span>
+        <button class="cg-head-btn" @click="store.skipTick()">跳过</button>
         <button class="cg-head-btn cg-x" @click="store.close()">✕</button>
       </div>
 
@@ -617,7 +628,11 @@ function doOrder(side: 'long' | 'short') {
   flex: 1;
 }
 
-/* ———— 窄屏堆叠（手机端由 index.ts 的内联尺寸兜底，这里只管内部排版）———— */
+/* ———— 窄屏堆叠 + 手机端窗口尺寸 ————
+   手机阈值与状态栏一致（mobile-compat.js:12-17）：粗指针 / 无 hover / 宽 ≤768。
+   这里用 CSS 表达是因为 #wxhl-cg-root 已被 index.ts 的 updateSize() 设成
+   visualViewport 尺寸，于是 overlay 100% == visualViewport，
+   面板 100% + overlay padding 6px 即 "visualViewport − 12"，与状态栏手机端规则同值。 */
 @media (max-width: 860px) {
   .cg-grid {
     grid-template-columns: 1fr;
@@ -626,7 +641,14 @@ function doOrder(side: 'long' | 'short') {
   .cg-list {
     max-height: 180px;
   }
+}
+@media (pointer: coarse), (hover: none), (max-width: 768px) {
+  .cg-overlay {
+    padding: 6px;
+  }
   .cg-panel {
+    width: 100%;
+    height: 100%;
     border-radius: 14px;
   }
 }

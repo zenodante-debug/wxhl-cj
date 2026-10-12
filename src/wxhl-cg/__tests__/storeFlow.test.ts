@@ -144,6 +144,33 @@ describe('交易写日报', () => {
   });
 });
 
+// 常驻计时（用户 2026-10-12：脚本一加载就自己跳，不依赖面板是否打开）
+describe('常驻计时', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('startTicker 排下一跳；开关面板不影响计时；skipTick 立刻跳一次并重排', () => {
+    stubTavern();
+    const store = useExchangeStore();
+    store.startTicker();
+    const scheduled = store.nextTickAt;
+    expect(scheduled).toBeGreaterThan(Date.now());
+
+    const tick0 = store.acct.tick;
+    store.skipTick();
+    expect(store.acct.tick).toBe(tick0 + 1);
+    expect(store.nextTickAt).toBeGreaterThan(0); // 重排了
+
+    store.open();
+    store.close();
+    expect(store.nextTickAt).toBeGreaterThan(0); // 关面板不停表
+
+    store.stopTicker();
+    expect(store.nextTickAt).toBe(0);
+  });
+});
+
 // 破产线自动清算（Review Focus 1）
 describe('破产线自动清算', () => {
   beforeEach(() => {

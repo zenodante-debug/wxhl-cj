@@ -30,6 +30,8 @@ $(() => {
   app.mount($app[0]);
 
   const store = useExchangeStore();
+  // 常驻计时：脚本加载即开跳（10 秒/跳），与面板是否打开无关
+  store.startTicker();
   const api = {
     open: () => store.open(),
     close: () => store.close(),
@@ -51,7 +53,7 @@ $(() => {
   console.info('[wxhl-cg] 交易接口已发布（window.parent.WxhlCg / initializeGlobal）');
 
   $(window).on('pagehide', () => {
-    store.close();
+    store.stopTicker();
     window.removeEventListener('resize', updateSize);
     app.unmount();
     $app.remove();

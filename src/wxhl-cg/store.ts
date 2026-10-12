@@ -78,6 +78,8 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
   const panelOpen = ref(false);
   /** 主卡 UP 余额（读不到为 null）；账户资产里与现金并列显示 */
   const up = ref<number | null>(readUP());
+  /** 下一跳的时间戳（界面倒计时用） */
+  const nextTickAt = ref(0);
   let timer: ReturnType<typeof setInterval> | null = null;
   /** 防重入闸（照市场 purchasing/listing 惯例）：异步 MVU 操作进行中拒绝并发调用 */
   let exchanging = false;
@@ -110,6 +112,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
       }
       persist();
       refreshUP();
+      scheduleNext();
       // 破产线：累计已实现亏损越过 250 → 自动清算（异步，失败不阻塞行情，下一跳重试）
       if (!bankruptcing && shouldGoBankrupt(acct.value)) {
         void autoLiquidate();
@@ -169,20 +172,31 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     }
   }
 
+  function scheduleNext() {
+    nextTickAt.value = Date.now() + TICK_MS;
+  }
+
+  /** 常驻计时：脚本加载即开跳，与面板是否打开无关（用户 2026-10-12 拍板） */
   function startTicker() {
     if (timer) return;
+    scheduleNext();
     timer = setInterval(doTick, TICK_MS);
   }
 
   function stopTicker() {
     if (timer) clearInterval(timer);
     timer = null;
+    nextTickAt.value = 0;
+  }
+
+  /** 手动跳过：立刻跳一次（内部会重新排下一跳的时间戳） */
+  function skipTick() {
+    if (timer) doTick();
   }
 
   function open() {
     panelOpen.value = true;
     refreshUP();
-    startTicker();
   }
 
   function close() {
@@ -349,6 +363,8 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     panelOpen,
     up,
     refreshUP,
+    nextTickAt,
+    skipTick,
     open,
     close,
     doTick,
