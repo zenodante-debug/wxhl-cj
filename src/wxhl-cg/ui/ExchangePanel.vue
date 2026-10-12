@@ -39,6 +39,22 @@ function close(code: string) {
     toastr.error(e?.message ?? '平仓失败');
   }
 }
+
+const exchangeAmt = ref(0);
+async function doDeposit() {
+  try {
+    await store.depositUP(exchangeAmt.value);
+  } catch (e: any) {
+    toastr.error(e?.message ?? '入金失败');
+  }
+}
+async function doWithdraw() {
+  try {
+    await store.withdrawUP(exchangeAmt.value);
+  } catch (e: any) {
+    toastr.error(e?.message ?? '出金失败');
+  }
+}
 </script>
 
 <template>
@@ -93,7 +109,15 @@ function close(code: string) {
       <div>净资产：{{ net }}</div>
       <div>累计亏损：{{ acct.cumulativeLoss }}（破产线 250）</div>
       <div v-if="acct.frozen" class="cg-frozen">⛔ 账户冻结中</div>
-      <!-- Task 7 在此加 UP 兑换；Task 12 加借贷/破产；Task 14 加遗产税 -->
+      <div class="cg-exchange">
+        <h4>UP 兑换（1 UP = 1 币，双向 1% 手续费）</h4>
+        <input v-model.number="exchangeAmt" type="number" min="1" placeholder="金额" />
+        <div class="cg-btns">
+          <button @click="doDeposit">入金（UP→币）</button>
+          <button @click="doWithdraw">出金（币→UP）</button>
+        </div>
+      </div>
+      <!-- Task 12 加借贷/破产；Task 14 加遗产税 -->
     </div>
   </div>
 </template>

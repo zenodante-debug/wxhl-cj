@@ -3,8 +3,9 @@
 // 所有副作用集中在本层；引擎（engine/）保持纯净。
 // z / defineStore / ref / klona / toastr 由 unplugin-auto-import 提供。
 // ================================================================
-import { createAccount, type ExchangeAccount } from './engine/types';
+import { createAccount, round2, type ExchangeAccount } from './engine/types';
 import { tickMarket } from './engine/market';
+import { adjustUP } from './mvu';
 
 export const STORAGE_KEY = 'wxhl-cg:account';
 
@@ -61,6 +62,7 @@ export function saveAccount(storage: StorageLike, acct: ExchangeAccount): void {
 }
 
 const TICK_MS = 10_000;
+const EXCHANGE_FEE = 0.01; // UP 兑换双向 1%
 
 export const useExchangeStore = defineStore('wxhl-cg', () => {
   const acct = ref<ExchangeAccount>(loadAccount(localStorage));
@@ -104,5 +106,25 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     persist();
   }
 
-  return { acct, panelOpen, open, close, doTick, persist, startTicker, stopTicker };
+  /** 入金：扣 amount UP → 加 ×0.99 交易所币（先扣 UP，失败则币不动） */
+  async function depositUP(amount: number) {
+    if (!Number.isInteger(amount) || amount <= 0) throw new Error('入金金额必须是正整数');
+    await adjustUP(-amount);
+    acct.value.cash = round2(acct.value.cash + round2(amount * (1 - EXCHANGE_FEE)));
+    persist();
+    toastr.success(`入金成功：${amount} UP → ${round2(amount * (1 - EXCHANGE_FEE))} 币（手续费 1%）`);
+  }
+
+  /** 出金：扣 amount 币 → 加 ×0.99 UP（先加 UP，失败则币不动） */
+  async function withdrawUP(amount: number) {
+    if (!Number.isInteger(amount) || amount <= 0) throw new Error('出金金额必须是正整数');
+    if (acct.value.cash < amount) throw new Error(`现金不足：只有 ${round2(acct.value.cash)} 币`);
+    const upGain = round2(amount * (1 - EXCHANGE_FEE));
+    await adjustUP(upGain);
+    acct.value.cash = round2(acct.value.cash - amount);
+    persist();
+    toastr.success(`出金成功：${amount} 币 → ${upGain} UP（手续费 1%）`);
+  }
+
+  return { acct, panelOpen, open, close, doTick, persist, startTicker, stopTicker, depositUP, withdrawUP };
 });
