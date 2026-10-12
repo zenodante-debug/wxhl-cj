@@ -437,7 +437,9 @@ function coverImage(cover, className) {
   if (className) img.className = className;
   img.alt = '';
   img.loading = 'lazy';
-  img.src = W.coverOrPlaceholder(cover);
+    // no-referrer：部分图床（如百度贴吧）会按 Referer 拒绝外链，浏览器不带 Referer 时能取到
+    img.referrerPolicy = 'no-referrer';
+    img.src = W.coverOrPlaceholder(cover);
   img.addEventListener('error', () => {
     if (img.src !== W.COVER_PLACEHOLDER) img.src = W.COVER_PLACEHOLDER;
   });
@@ -604,6 +606,24 @@ function renderPreview(pack) {
   return box;
 }
 
+/** 把构筑/人设写进存档（走宿主 applyBuild：扮演改构筑字段，其余写实体表） */
+function doApply(pack, target, 类型) {
+  const payload = pack.type === 'build' ? pack.build : pack.persona;
+  const 名字 = String(payload?.构筑名 || payload?.角色名 || pack.name || '').trim();
+  const 外貌 = String(payload?.外貌 || '').trim();
+  const build = pack.type === 'build' ? payload : payload?.构筑 ?? payload;
+  const 提示 =
+    target === '扮演'
+      ? '将把你当前契约者的「构筑字段」（等级/阶位/天赋/血统/称号/四维属性/职业/通用技能/装备）替换为「' + 名字 + '」。\n\n经济、背包、人际关系、副本经历、小队与其他契约者都会保留。\n\n确定继续吗？'
+      : '将把「' + 名字 + '」写进你的存档：' + target + '（类型：' + (target === '副本角色' ? 类型 : target === '队友' ? '小队成员' : '其他契约者') + '）。\n\n同名的会被覆盖。确定继续吗？';
+  if (!window.confirm(提示)) return;
+  toast('正在写入存档…');
+  bridge
+    .request('applyBuild', { target, name: 名字, 外貌, 类型, build })
+    .then(res => toast('已写入：' + ((res && res.written) || []).join('、')))
+    .catch(error => toast((error && error.message) || String(error), true));
+}
+
 function renderActions(pack, installed) {
   const box = el('div', 'actions');
 
@@ -633,6 +653,23 @@ function renderActions(pack, installed) {
 
   box.append(button(label, 'primary', () => doInstall(pack.id)));
   if (installed) box.append(button('卸载', 'danger', () => doUninstall(pack.id)));
+
+  // 构筑/人设还能「写进存档」：扮演（覆盖构筑字段）/ 队友 / 副本角色 / 其他契约者
+  if (pack.type === 'build' || pack.type === 'persona') {
+    const row = el('div', 'actions');
+    const 类型Sel = selectInput(
+      ['杂兵', '精英', 'BOSS', '隐藏BOSS', '精英（固有角色）', 'BOSS（固有角色）', '隐藏BOSS（固有角色）'].map(t => [t, t]),
+      '杂兵',
+    );
+    row.append(el('div', 'install-state', '写到我的存档：'));
+    row.append(button('扮演', 'primary', () => doApply(pack, '扮演', 类型Sel.value)));
+    row.append(button('作为队友', 'btn', () => doApply(pack, '队友', 类型Sel.value)));
+    row.append(button('作为副本角色', 'btn', () => doApply(pack, '副本角色', 类型Sel.value)));
+    row.append(button('作为其他契约者', 'btn', () => doApply(pack, '其他契约者', 类型Sel.value)));
+    row.append(field('副本角色·类型', 类型Sel));
+    box.append(row);
+    box.append(el('div', 'hint', '「扮演」只替换你契约者的构筑字段（等级/阶位/天赋/血统/称号/四维/职业/通用技能/装备），经济·背包·人际关系·副本经历等都保留。'));
+  }
   return box;
 }
 
