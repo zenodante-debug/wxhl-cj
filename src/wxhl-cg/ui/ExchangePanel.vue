@@ -3,11 +3,12 @@
 import { useExchangeStore } from '../store';
 import { STOCKS } from '../engine/stocks';
 import { netAssets, openPosition, closePosition, positionPnl, liquidationPrice } from '../engine/trading';
+import type { LiquidationResult } from '../engine/bankruptcy';
 import SparkLine from './SparkLine.vue';
 
 const store = useExchangeStore();
 const acct = computed(() => store.acct);
-const tab = ref<'market' | 'positions' | 'assets'>('market');
+const tab = ref<'market' | 'positions' | 'loan' | 'assets'>('market');
 const detail = ref<string | null>(null);
 const qty = ref(1);
 const leverage = ref(1);
@@ -55,6 +56,57 @@ async function doWithdraw() {
     toastr.error(e?.message ?? '出金失败');
   }
 }
+
+const loanAmt = ref(0);
+const debtAmt = ref(0);
+const previewing = ref(false);
+const preview = ref<LiquidationResult | null>(null);
+
+function openPreview() {
+  try {
+    preview.value = store.previewBankruptcy();
+    previewing.value = true;
+  } catch (e: any) {
+    toastr.error(e?.message ?? '清算预览失败');
+  }
+}
+function doBorrow() {
+  try {
+    store.borrow(loanAmt.value);
+  } catch (e: any) {
+    toastr.error(e?.message ?? '借款失败');
+  }
+}
+function doRepay() {
+  try {
+    store.repay();
+  } catch (e: any) {
+    toastr.error(e?.message ?? '还款失败');
+  }
+}
+function doBorrowHigh() {
+  try {
+    store.borrowHigh();
+  } catch (e: any) {
+    toastr.error(e?.message ?? '高利贷失败');
+  }
+}
+function doPayDebt() {
+  try {
+    store.payDebt(debtAmt.value);
+  } catch (e: any) {
+    toastr.error(e?.message ?? '还债失败');
+  }
+}
+async function doBankruptcy() {
+  try {
+    await store.declareBankruptcy();
+    previewing.value = false;
+    toastr.warning('破产清算完成——愿你下局好运');
+  } catch (e: any) {
+    toastr.error(e?.message ?? '清算失败，已中止');
+  }
+}
 </script>
 
 <template>
@@ -68,6 +120,7 @@ async function doWithdraw() {
     <div class="cg-tabs">
       <button :class="{ on: tab === 'market' }" @click="tab = 'market'">行情</button>
       <button :class="{ on: tab === 'positions' }" @click="tab = 'positions'">持仓</button>
+      <button :class="{ on: tab === 'loan' }" @click="tab = 'loan'">借贷</button>
       <button :class="{ on: tab === 'assets' }" @click="tab = 'assets'">资产</button>
     </div>
 
@@ -105,6 +158,29 @@ async function doWithdraw() {
       </div>
     </div>
 
+    <div v-else-if="tab === 'loan'" class="cg-assets">
+      <template v-if="!acct.loan && acct.debt <= 0">
+        <div>可借额度：{{ store.loanOffer().maxAmount }}（利率 {{ store.loanOffer().rate * 100 }}%，期限 100 跳）</div>
+        <input v-model.number="loanAmt" type="number" min="1" placeholder="借款金额" />
+        <button @click="doBorrow">借款</button>
+      </template>
+      <template v-if="acct.loan">
+        <div>
+          借款本金：{{ acct.loan.principal }}（{{
+            acct.loan.highInterest ? '高利贷·还 2.5 倍+已累计利息 ' + acct.loan.accrued : '利率 ' + acct.loan.rate * 100 + '%'
+          }}）
+        </div>
+        <div v-if="!acct.loan.highInterest">到期：第 {{ acct.loan.dueTick }} 跳（当前 {{ acct.tick }}）</div>
+        <button @click="doRepay">还清</button>
+      </template>
+      <template v-if="acct.debt > 0">
+        <div class="cg-frozen">催收中债务：{{ acct.debt }}</div>
+        <input v-model.number="debtAmt" type="number" min="1" placeholder="还债金额" />
+        <button @click="doPayDebt">还债</button>
+        <button v-if="!acct.loan" class="danger" @click="doBorrowHigh">借高利贷（500，还 2.5 倍）</button>
+      </template>
+    </div>
+
     <div v-else class="cg-assets">
       <div>现金：{{ acct.cash }}</div>
       <div>净资产：{{ net }}</div>
@@ -118,7 +194,20 @@ async function doWithdraw() {
           <button @click="doWithdraw">出金（币→UP）</button>
         </div>
       </div>
-      <!-- Task 12 加借贷/破产；Task 14 加遗产税 -->
+      <div class="cg-bankruptcy">
+        <div>破产次数：{{ acct.bankruptcyCount }}</div>
+        <button class="danger" @click="openPreview">申请破产清算</button>
+        <div v-if="previewing" class="cg-modal">
+          <h4>破产清算清单（确认后不可撤销）</h4>
+          <div v-for="(s, i) in preview?.steps ?? []" :key="i">【{{ s.category }}】{{ s.name }} → 抵 {{ s.proceeds }}</div>
+          <div>抵债合计 {{ preview?.totalProceeds }}，剩余债务 {{ preview?.remainingDebt }}</div>
+          <div class="cg-btns">
+            <button class="danger" @click="doBankruptcy">确认清算</button>
+            <button @click="previewing = false">取消</button>
+          </div>
+        </div>
+      </div>
+      <!-- Task 14 加遗产税 -->
     </div>
   </div>
 </template>
@@ -236,5 +325,22 @@ async function doWithdraw() {
 }
 .cg-frozen {
   color: #f7b955;
+}
+.danger {
+  background: #5c1a1a;
+  color: #ffb3b3;
+  border: 1px solid #8a2f2f;
+  padding: 8px;
+  border-radius: 6px;
+}
+.cg-modal {
+  border: 1px solid #8a2f2f;
+  background: #151019;
+  border-radius: 8px;
+  padding: 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  font-size: 13px;
 }
 </style>

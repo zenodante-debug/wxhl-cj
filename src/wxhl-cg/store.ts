@@ -5,9 +5,18 @@
 // ================================================================
 import { createAccount, round2, type ExchangeAccount } from './engine/types';
 import { tickMarket } from './engine/market';
-import { tickTrading } from './engine/trading';
-import { tickLoan } from './engine/loan';
-import { adjustUP } from './mvu';
+import { closePosition, tickTrading } from './engine/trading';
+import {
+  HIGH_INTEREST_REPAY_MULT,
+  loanOffer,
+  repayDebt,
+  repayLoan,
+  takeHighInterestLoan,
+  takeLoan,
+  tickLoan,
+} from './engine/loan';
+import { computeLiquidation, type LiquidationResult } from './engine/bankruptcy';
+import { adjustUP, commitMvu, readContractor } from './mvu';
 
 export const STORAGE_KEY = 'wxhl-cg:account';
 
@@ -131,5 +140,142 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     toastr.success(`出金成功：${amount} 币 → ${upGain} UP（手续费 1%）`);
   }
 
-  return { acct, panelOpen, open, close, doTick, persist, startTicker, stopTicker, depositUP, withdrawUP };
+  // ==================== 借贷 ====================
+
+  function borrow(amount: number) {
+    takeLoan(acct.value, amount);
+    persist();
+    toastr.success(`借款 ${amount} 到账，到期第 ${acct.value.loan!.dueTick} 跳`);
+  }
+
+  function borrowHigh() {
+    takeHighInterestLoan(acct.value);
+    persist();
+    toastr.warning('高利贷到账 500——还 2.5 倍，利息每跳递增，好自为之');
+  }
+
+  function repay() {
+    repayLoan(acct.value);
+    persist();
+    toastr.success('借款已还清');
+  }
+
+  function payDebt(amount: number) {
+    repayDebt(acct.value, amount);
+    persist();
+    toastr.success(acct.value.debt <= 0 ? '债务已清，账户解冻' : `已还 ${amount}，剩余债务 ${acct.value.debt}`);
+  }
+
+  // ==================== 破产清算 ====================
+
+  /** 当前欠款总额 = debt + 未还借款（高利贷 2.5 倍+利息） */
+  function totalOwed(): number {
+    const loan = acct.value.loan;
+    const loanOwed = loan
+      ? loan.highInterest
+        ? loan.principal * HIGH_INTEREST_REPAY_MULT + loan.accrued
+        : loan.principal * (1 + loan.rate)
+      : 0;
+    return round2(acct.value.debt + loanOwed);
+  }
+
+  /** 快照主卡资产（读不到契约者 → null，UI 阻止破产流程并提示） */
+  function snapshotAssets() {
+    const r = readContractor();
+    if (!r) return null;
+    return {
+      r,
+      bag: (r.c.背包 ?? {}) as Record<string, any>,
+      equipment: (r.c.装备 ?? {}) as Record<string, any>,
+      skills: (r.c.通用技能 ?? {}) as Record<string, any>,
+      job: r.c.职业?.名称 && r.c.职业.名称 !== '无' ? { ...r.c.职业 } : null,
+      bloodline: r.c.头部?.血统 ?? null,
+      talent: r.c.头部?.天赋?.名称 && r.c.头部.天赋.名称 !== '无' ? { ...r.c.头部.天赋 } : null,
+      playerTier: String(r.c.头部?.阶位 ?? '一阶'),
+    };
+  }
+
+  /** 预览清算（不执行）：持仓按现价估值 + 当前现金 + 主卡资产快照 */
+  function previewBankruptcy(): LiquidationResult {
+    const snap = snapshotAssets();
+    if (!snap) throw new Error('读不到存档变量（契约者不存在），无法清算');
+    // 持仓按现价估值（不实际平仓，预览用净值近似）
+    let positionsValue = 0;
+    for (const [code, p] of Object.entries(acct.value.positions)) {
+      positionsValue += p.margin + (p.side === 'long' ? 1 : -1) * (acct.value.prices[code] - p.entryPrice) * p.qty;
+    }
+    return computeLiquidation({
+      positionsProceeds: Math.max(0, Math.round(positionsValue * 100) / 100),
+      cash: Math.max(0, acct.value.cash),
+      bag: snap.bag,
+      equipment: snap.equipment,
+      skills: snap.skills,
+      job: snap.job,
+      bloodline: snap.bloodline,
+      talent: snap.talent,
+      playerTier: snap.playerTier,
+      debt: totalOwed(),
+    });
+  }
+
+  /** 执行破产清算：强平持仓 → 快照 → 计算 → MVU 写回 → 更新交易所账本。任一步 throw 则中断（响亮失败）。 */
+  async function declareBankruptcy() {
+    const r = readContractor();
+    if (!r) throw new Error('读不到存档变量（契约者不存在），清算中止');
+    // 1. 持仓全部按现价强平（费用照收，亏损累计）
+    for (const code of Object.keys(acct.value.positions)) closePosition(acct.value, code);
+    // 2. 用最新快照计算（现金已含强平所得）
+    const snap = snapshotAssets()!;
+    const liq = computeLiquidation({
+      positionsProceeds: 0, // 已实际强平，所得在现金里
+      cash: Math.max(0, acct.value.cash),
+      bag: snap.bag,
+      equipment: snap.equipment,
+      skills: snap.skills,
+      job: snap.job,
+      bloodline: snap.bloodline,
+      talent: snap.talent,
+      playerTier: snap.playerTier,
+      debt: totalOwed(),
+    });
+    // 3. MVU 写回
+    for (const name of liq.removedBag) _.unset(r.mvu, ['stat_data', '契约者', '背包', name]);
+    for (const slot of liq.clearedSlots) _.set(r.mvu, ['stat_data', '契约者', '装备', slot, '名称'], '无');
+    for (const name of liq.removedSkills) _.unset(r.mvu, ['stat_data', '契约者', '通用技能', name]);
+    if (liq.clearJob) _.set(r.mvu, ['stat_data', '契约者', '职业'], { 名称: '无' });
+    if (liq.clearBloodline) _.set(r.mvu, ['stat_data', '契约者', '头部', '血统'], { 名称: '普通地球人类', 品质: '白色' });
+    if (liq.clearTalent) _.set(r.mvu, ['stat_data', '契约者', '头部', '天赋'], { 名称: '无' });
+    await commitMvu(r.mvu, r.mid, liq.removedBag.map(n => [['stat_data', '契约者', '背包', n], undefined] as [string[], unknown]));
+    // 4. 交易所账本：抵债
+    acct.value.cash = liq.returnCash; // 现金先全部抵债，溢出退回
+    acct.value.debt = liq.remainingDebt;
+    acct.value.loan = null;
+    acct.value.cumulativeLoss = 0;
+    acct.value.bankruptcyCount++;
+    if (liq.remainingDebt <= 0) {
+      acct.value.frozen = false;
+      acct.value.loanState = 'none';
+    }
+    persist();
+  }
+
+  return {
+    acct,
+    panelOpen,
+    open,
+    close,
+    doTick,
+    persist,
+    startTicker,
+    stopTicker,
+    depositUP,
+    withdrawUP,
+    borrow,
+    borrowHigh,
+    repay,
+    payDebt,
+    loanOffer: () => loanOffer(acct.value),
+    previewBankruptcy,
+    declareBankruptcy,
+  };
 });
