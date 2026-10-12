@@ -58,21 +58,21 @@ key：`wxhl-cg:account`（JSON，zod parse，版本字段 `v` 便于迁移）。
 
 ```ts
 interface ExchangeAccount {
-  v: 1;
-  cash: number;                       // 交易所币，可为负（高利贷利息可扣成负数）
-  positions: Record<string, Position>; // key = 股票代码
-  prices: Record<string, number>;      // 股票代码 -> 现价
-  priceHistory: Record<string, number[]>; // 每股票最近 60 跳（画走势线）
-  tick: number;                        // 累计跳动数（借贷到期、利息的计时单位）
-  loan: ActiveLoan | null;             // 一次一笔
-  loanState: 'none' | 'normal' | 'overdue' | 'delinquent'; // 失信 = delinquent
-  highInterestLoan: boolean;           // 高利贷未清标记
-  debt: number;                        // 清算后剩余债务（跨档背着）
+  v: 2;                                  // v1 存档自动迁移（见 §3.1）
+  cash: number;                          // 交易所币，可为负
+  positions: Record<string, Position>;   // key = 股票代码（一只股一笔）
+  prices: Record<string, number>;        // 股票代码 -> 现价
+  priceHistory: Record<string, number[]>;// 每股票最近 60 跳
+  openPrices: Record<string, number>;    // 开盘基准价：每次脚本加载快照（§4）
+  tick: number;                          // 累计跳动数
+  netInvested: number;                   // 净投入（币）：Σ存入所得 − Σ取出所扣
+  debt: number;                          // 破产清算后未抵完的欠款（跨档背着）
   bankruptcyCount: number;
-  deathTaxDue: { estate: number; tax: number; fee: number } | null; // 待缴遗产税
-  cumulativeLoss: number;              // 累计已实现亏损（破产线判定用）
-  frozen: boolean;                     // 失信冻结中
-  news: { text: string; stock: string; impact: number; ttl: number } | null;
+  cumulativeLoss: number;                // 累计已实现亏损（破产线判定用）
+  frozen: boolean;                       // 破产欠款未清 → 冻结（禁止开仓）
+  news: ActiveNews | null;
+  newsCooldown: number;
+  logs: LogEntry[];                      // 交易所日报（存档上限 200，界面显示最近 50）
 }
 
 interface Position {
@@ -82,6 +82,22 @@ interface Position {
   leverage: number;         // 1–100
   margin: number;           // 占用保证金
 }
+
+interface LogEntry {
+  tick: number;
+  time: string;             // 现实时钟 HH:MM:SS
+  kind: 'news' | 'trade' | 'system';
+  text: string;
+}
+```
+
+### 3.1 存档版本
+
+`v` 变更必须带迁移（终审 C1 教训：只改 schema 不迁移会把老存档静默清空）：
+
+- `v === 2`：按 `AccountSchema` 校验，失败则 `console.warn` + 重开新账户。
+- `v === 1`：走 `migrateV1()` —— 丢掉 `loan/loanState/deathMarked`，补上 `openPrices`（= 迁移时价）、`logs: []`、`netInvested`（= 迁移时的现金 + 持仓权益，即"盈亏从迁移那一刻重新起算"），其余（现金/持仓/价格/历史/跳动数/欠款/破产次数/累计亏损/冻结/新闻）全部保留。**不清空**。
+- 其他版本 / JSON 损坏：`console.warn` + 新账户。
 
 interface ActiveLoan {
   principal: number;
@@ -144,6 +160,7 @@ interface ActiveLoan {
 | UP | 主卡 `契约者.经济.UP`（每跳/每次兑换后重读） |
 | 持仓权益 | Σ(保证金 + 浮动盈亏) |
 | 净投入 | 累计存入所得币 − 累计取出扣掉币（已含兑换手续费） |
+| 净资产 | 现金 + 持仓权益 **− 未清欠款**（欠款是真的负债，不计就会高估家底——终审 I5 修订） |
 | 总盈亏 | 净资产 − 净投入（"我到底赚没赚"） |
 | 破产线 | 累计已实现亏损 / 250，带进度条 |
 
