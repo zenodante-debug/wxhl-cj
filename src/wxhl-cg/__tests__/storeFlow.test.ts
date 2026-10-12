@@ -67,7 +67,7 @@ describe('终审修复：C1/I3/I4', () => {
     const store = useExchangeStore();
     store.acct.cash = 2000;
     store.acct.debt = 500;
-    openPosition(store.acct, 'TGJ', 'long', 1, 1); // 持仓：保证金 100 佣金 1
+    openPosition(store.acct, 'TGJ', 'long', 100, 1); // 持仓：1 股 @100，保证金 100 佣金 1
     const cashBefore = store.acct.cash;
     const posBefore = klona(store.acct.positions);
     await expect(store.declareBankruptcy()).rejects.toThrow(/写回失败|清算中止/);
@@ -135,8 +135,8 @@ describe('交易写日报', () => {
     stubTavern();
     const store = useExchangeStore();
     store.acct.cash = 1000;
-    store.placeOrder('TGJ', 'long', 2, 5);
-    store.closeOrder('TGJ');
+    const opened = store.placeOrder('TGJ', 'long', 40, 5); // 2 股 @100
+    store.closeOrder(opened.id);
     const texts = store.acct.logs.map(l => l.text);
     expect(texts.some(t => t.startsWith('开多 TGJ'))).toBe(true);
     expect(texts.some(t => t.startsWith('平仓 TGJ'))).toBe(true);

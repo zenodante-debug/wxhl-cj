@@ -7,8 +7,8 @@ import { netAssets, positionEquity } from './trading';
 /** 持仓权益 = Σ(保证金 + 浮动盈亏) */
 export function positionEquitySum(acct: ExchangeAccount): number {
   let sum = 0;
-  for (const [code, pos] of Object.entries(acct.positions)) {
-    sum += positionEquity(pos, acct.prices[code] ?? pos.entryPrice);
+  for (const pos of acct.positions) {
+    sum += positionEquity(pos, acct.prices[pos.code] ?? pos.entryPrice);
   }
   return round2(sum);
 }

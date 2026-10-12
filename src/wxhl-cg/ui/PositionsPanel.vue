@@ -1,29 +1,34 @@
-<!-- 回廊交易所 · 右下：持仓（含距强平距离，强平不再莫名其妙） -->
+<!-- 回廊交易所 · 右下：持仓（一笔一行，同股可多笔/多空对冲；显示距强平） -->
 <script setup lang="ts">
 import { useExchangeStore } from '../store';
-import { liquidationPrice, positionPnl } from '../engine/trading';
+import { liquidationDistance, liquidationPrice, positionPnl } from '../engine/trading';
 
 const store = useExchangeStore();
 const acct = computed(() => store.acct);
+
 const rows = computed(() =>
-  Object.entries(acct.value.positions).map(([code, p]) => {
-    const price = acct.value.prices[code];
-    const liq = liquidationPrice(p);
-    const pnl = positionPnl(p, price);
-    // 距强平：现价距离强平价的百分比（1 倍杠杆无强平线）
-    const dist = Number.isFinite(liq) && liq > 0 ? Math.abs((price - liq) / price) * 100 : null;
-    return { code, ...p, price, liq, pnl, dist };
+  acct.value.positions.map(p => {
+    const price = acct.value.prices[p.code];
+    return {
+      ...p,
+      price,
+      liq: liquidationPrice(p),
+      pnl: positionPnl(p, price),
+      dist: liquidationDistance(p, price),
+    };
   }),
 );
-const closest = computed(() => {
+
+/** 离强平最近的那一笔（整行高亮，让"快爆了"一眼可见） */
+const closestId = computed(() => {
   const withDist = rows.value.filter(r => r.dist !== null);
   if (!withDist.length) return null;
-  return withDist.reduce((a, b) => (a.dist! <= b.dist! ? a : b)).code;
+  return withDist.reduce((a, b) => (a.dist! <= b.dist! ? a : b)).id;
 });
 
-function doClose(code: string) {
+function doClose(id: string, code: string) {
   try {
-    const r = store.closeOrder(code);
+    const r = store.closeOrder(id);
     toastr.success(`平仓 ${code}：盈亏 ${r.pnl >= 0 ? '+' : ''}${r.pnl}`);
   } catch (e: any) {
     toastr.error(e?.message ?? '平仓失败');
@@ -35,7 +40,7 @@ function doClose(code: string) {
   <div class="cg-card">
     <div class="cg-card-title">持仓<span class="cg-count">{{ rows.length }} 笔</span></div>
     <div v-if="!rows.length" class="cg-empty">空仓</div>
-    <div v-for="r in rows" :key="r.code" class="cg-pos" :class="{ danger: r.code === closest }">
+    <div v-for="r in rows" :key="r.id" class="cg-pos" :class="{ danger: r.id === closestId }">
       <div class="cg-pos-head">
         <span class="mono">{{ r.code }}</span>
         <span :class="r.side === 'long' ? 'side-long' : 'side-short'">{{ r.side === 'long' ? '多' : '空' }}</span>
@@ -43,15 +48,17 @@ function doClose(code: string) {
         <span class="mono pnl" :class="r.pnl >= 0 ? 'up' : 'down'">{{ r.pnl > 0 ? '+' : '' }}{{ r.pnl }}</span>
       </div>
       <div class="cg-pos-sub">
-        <span class="mono dim">{{ r.qty }} 股 @{{ r.entryPrice }}</span>
+        <span class="mono dim">{{ r.qty }} 股 @{{ r.entryPrice }} · 保证金 {{ r.margin }}</span>
+      </div>
+      <div class="cg-pos-sub">
         <span v-if="r.dist !== null">
           距强平
           <b class="mono" :class="r.dist < 5 ? 'down' : 'dim'">{{ r.dist.toFixed(1) }}%</b>
           <span class="dim mono">（{{ r.liq }}）</span>
         </span>
         <span v-else class="dim">1 倍无强平</span>
+        <button class="cg-close-pos" @click="doClose(r.id, r.code)">平仓</button>
       </div>
-      <button class="cg-close-pos" @click="doClose(r.code)">平仓</button>
     </div>
   </div>
 </template>

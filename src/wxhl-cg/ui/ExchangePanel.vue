@@ -2,7 +2,7 @@
 <script setup lang="ts">
 import { useExchangeStore } from '../store';
 import { STOCKS } from '../engine/stocks';
-import { liquidationPrice, tradePreview } from '../engine/trading';
+import { sideSummary, tradePreview } from '../engine/trading';
 import type { ChartLine } from './chartGeometry';
 import PriceChart from './PriceChart.vue';
 import SparkLine from './SparkLine.vue';
@@ -26,22 +26,32 @@ function pctOf(code: string): number {
   return ((acct.value.prices[code] - open) / open) * 100;
 }
 
-const position = computed(() => acct.value.positions[detail.value.code]);
-
-/** 图上三条线：开盘基准 / 开仓价 / 强平价 */
+/** 图上各线：开盘基准线 + 每个方向的均价成本线与最近强平线（多空对冲时两组都在） */
 const chartLines = computed<ChartLine[]>(() => {
   const lines: ChartLine[] = [{ value: openPrice.value, label: `开盘 ${openPrice.value}`, kind: 'base' }];
-  const pos = position.value;
-  if (pos) {
-    lines.push({ value: pos.entryPrice, label: `成本 ${pos.entryPrice}`, kind: 'entry' });
-    const liq = liquidationPrice(pos);
-    if (Number.isFinite(liq) && liq > 0) lines.push({ value: liq, label: `强平 ${liq}`, kind: 'liq' });
+  for (const side of ['long', 'short'] as const) {
+    const s = sideSummary(acct.value, detail.value.code, side);
+    if (!s) continue;
+    const tag = side === 'long' ? '多' : '空';
+    lines.push({ value: s.avgEntry, label: `${tag}成本 ${s.avgEntry}`, kind: 'entry' });
+    if (s.nearestLiq !== null) lines.push({ value: s.nearestLiq, label: `${tag}强平 ${s.nearestLiq}`, kind: 'liq' });
   }
   return lines;
 });
 
-const qty = ref(10);
+/** 下单金额 = **保证金**（实际掏的钱）；名义金额 = 保证金 × 杠杆，股数 = 名义 / 现价 */
+const marginAmt = ref(100);
 const leverage = ref(1);
+const cashAvail = computed(() => Math.max(0, Math.floor(acct.value.cash)));
+
+/** 100 / 1000 / 半仓 / 全仓（按保证金计，超出可用现金自动夹住） */
+function presetMargin(kind: number | 'half' | 'all'): number {
+  const raw = kind === 'all' ? cashAvail.value : kind === 'half' ? Math.floor(cashAvail.value / 2) : kind;
+  return Math.min(raw, cashAvail.value);
+}
+function applyPreset(kind: number | 'half' | 'all') {
+  marginAmt.value = presetMargin(kind);
+}
 
 /** 倒计时只做显示（1 秒刷新一次），不推进行情 */
 const now = ref(Date.now());
@@ -54,21 +64,22 @@ onUnmounted(() => {
 });
 const secondsLeft = computed(() => Math.max(0, Math.ceil((store.nextTickAt - now.value) / 1000)));
 
-/** 下单费用预览（做多/做空各一份），参数非法时为 null */
+/** 下单预览（做多/做空各一份），参数非法时为 null */
 function previewOf(side: 'long' | 'short') {
   try {
-    return tradePreview(acct.value, detail.value.code, side, qty.value, leverage.value);
+    return tradePreview(acct.value, detail.value.code, side, marginAmt.value, leverage.value);
   } catch {
     return null;
   }
 }
 const previewLong = computed(() => previewOf('long'));
 const previewShort = computed(() => previewOf('short'));
+const holdingThis = computed(() => acct.value.positions.filter(p => p.code === detail.value.code));
 
 function doOrder(side: 'long' | 'short') {
   try {
-    const r = store.placeOrder(detail.value.code, side, qty.value, leverage.value);
-    toastr.success(`开${side === 'long' ? '多' : '空'} ${detail.value.code} ×${qty.value}（保证金 ${r.margin}）`);
+    const r = store.placeOrder(detail.value.code, side, marginAmt.value, leverage.value);
+    toastr.success(`开${side === 'long' ? '多' : '空'} ${detail.value.code} ${r.qty} 股（保证金 ${r.margin}）`);
   } catch (e: any) {
     toastr.error(e?.message ?? '下单失败');
   }
@@ -132,40 +143,46 @@ function doOrder(side: 'long' | 'short') {
 
           <div class="cg-trade">
             <label class="cg-field">
-              数量
-              <input v-model.number="qty" type="number" min="1" step="1" />
+              金额
+              <input v-model.number="marginAmt" type="number" min="1" step="1" />
             </label>
-            <label class="cg-field cg-field-wide">
-              杠杆
-              <input v-model.number="leverage" type="range" min="1" max="100" />
-              <b class="mono">×{{ leverage }}</b>
-            </label>
+            <div class="cg-presets">
+              <button @click="applyPreset(100)">100</button>
+              <button @click="applyPreset(1000)">1000</button>
+              <button @click="applyPreset('half')">半仓</button>
+              <button @click="applyPreset('all')">全仓</button>
+            </div>
           </div>
+          <label class="cg-field cg-field-wide">
+            杠杆
+            <input v-model.number="leverage" type="range" min="1" max="100" />
+            <b class="mono">×{{ leverage }}</b>
+          </label>
 
           <div class="cg-fee">
+            <div class="dim">金额 = 保证金（实际掏的钱），名义 = 金额 × 杠杆</div>
             <template v-if="previewLong">
-              做多需 <b class="mono">{{ previewLong.total }}</b>（保证金 {{ previewLong.margin }} + 佣金
-              {{ previewLong.fee }}）
+              做多：名义 <b class="mono">{{ previewLong.notional }}</b> ≈ {{ previewLong.qty }} 股，共扣
+              <b class="mono">{{ previewLong.total }}</b>（保证金 {{ previewLong.margin }} + 佣金 {{ previewLong.fee }}）
             </template>
-            <template v-else>数量/杠杆不合法</template>
+            <template v-else>做多不可下单：金额太小 / 保证金不足 5 / 现金不够</template>
             <br />
             <template v-if="previewShort">
-              做空需 <b class="mono">{{ previewShort.total }}</b>（保证金 {{ previewShort.margin }} + 佣金
-              {{ previewShort.fee }} + 印花税 {{ previewShort.stamp }}）
+              做空：名义 <b class="mono">{{ previewShort.notional }}</b> ≈ {{ previewShort.qty }} 股，共扣
+              <b class="mono">{{ previewShort.total }}</b>（保证金 {{ previewShort.margin }} + 佣金 {{ previewShort.fee }} + 印花税
+              {{ previewShort.stamp }}）
             </template>
           </div>
 
           <div class="cg-actions">
-            <button class="cg-buy" :disabled="acct.frozen || !!position || !previewLong" @click="doOrder('long')">
-              做多
-            </button>
-            <button class="cg-sell" :disabled="acct.frozen || !!position || !previewShort" @click="doOrder('short')">
-              做空
-            </button>
+            <button class="cg-buy" :disabled="acct.frozen || !previewLong" @click="doOrder('long')">做多</button>
+            <button class="cg-sell" :disabled="acct.frozen || !previewShort" @click="doOrder('short')">做空</button>
           </div>
-          <div v-if="position" class="cg-hint">已持有 {{ detail.code }}，先平仓再反手</div>
+          <div v-if="holdingThis.length" class="cg-hint">
+            已持有 {{ detail.code }} {{ holdingThis.length }} 笔——可继续加仓，也可反手做对冲
+          </div>
           <div v-else-if="acct.frozen" class="cg-hint down">账户冻结中：先清偿欠款</div>
-          <div v-else-if="!previewLong" class="cg-hint down">保证金不足 {{ 5 }} 或参数不合法</div>
+          <div v-else-if="!previewLong" class="cg-hint down">金额太小或保证金不足 5</div>
         </div>
 
         <!-- 右：资产 + 持仓 -->

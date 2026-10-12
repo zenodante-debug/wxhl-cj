@@ -7,7 +7,7 @@ describe('账户指标', () => {
   it('持仓权益 = Σ(保证金 + 浮动盈亏)', () => {
     const a = createAccount();
     a.cash = 1000;
-    a.positions = { TGJ: { side: 'long', qty: 1, entryPrice: 100, leverage: 1, margin: 100 } };
+    a.positions = [{ id: 'p1', code: 'TGJ', side: 'long', qty: 1, entryPrice: 100, leverage: 1, margin: 100 }];
     a.prices['TGJ'] = 110;
     expect(positionEquitySum(a)).toBe(110);
     expect(netAssets(a)).toBe(1110);
@@ -16,7 +16,7 @@ describe('账户指标', () => {
     const a = createAccount();
     a.cash = 990;
     a.netInvested = 1000; // 存入 1000UP → 990 币（手续费 1%）
-    a.positions = { TGJ: { side: 'long', qty: 1, entryPrice: 100, leverage: 1, margin: 100 } };
+    a.positions = [{ id: 'p1', code: 'TGJ', side: 'long', qty: 1, entryPrice: 100, leverage: 1, margin: 100 }];
     a.prices['TGJ'] = 110;
     expect(totalPnl(a)).toBe(1100 - 1000);
   });

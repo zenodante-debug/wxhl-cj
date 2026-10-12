@@ -5,7 +5,7 @@
 // ================================================================
 import { createAccount, round2, type ExchangeAccount, type Side } from './engine/types';
 import { tickMarket } from './engine/market';
-import { closePosition, openPosition, tickTrading } from './engine/trading';
+import { closePosition, openPosition, positionOf, tickTrading } from './engine/trading';
 import { pushLog } from './engine/metrics';
 import { BANKRUPTCY_LINE, shouldGoBankrupt } from './engine/bankrupt';
 import { computeLiquidation, EMPTY_EQUIP_SLOT, type LiquidationResult } from './engine/bankruptcy';
@@ -18,19 +18,20 @@ export interface StorageLike {
   setItem(k: string, v: string): void;
 }
 
+const PositionSchema = z.looseObject({
+  id: z.string(),
+  code: z.string(),
+  side: z.enum(['long', 'short']),
+  qty: z.number(),
+  entryPrice: z.number(),
+  leverage: z.number(),
+  margin: z.number(),
+});
+
 const AccountSchema = z.looseObject({
-  v: z.literal(2),
+  v: z.literal(3),
   cash: z.number(),
-  positions: z.record(
-    z.string(),
-    z.looseObject({
-      side: z.enum(['long', 'short']),
-      qty: z.number(),
-      entryPrice: z.number(),
-      leverage: z.number(),
-      margin: z.number(),
-    }),
-  ),
+  positions: z.array(PositionSchema),
   prices: z.record(z.string(), z.number()),
   priceHistory: z.record(z.string(), z.array(z.number())),
   openPrices: z.record(z.string(), z.number()),
@@ -47,20 +48,20 @@ const AccountSchema = z.looseObject({
   ),
 });
 
-/** v1（有借贷/死亡字段、无 openPrices/netInvested/logs）——只用于迁移识别 */
+/** v1/v2 共有的持仓形状（record：key = 股票代码，一股一笔） */
+const OldPositionSchema = z.looseObject({
+  side: z.enum(['long', 'short']),
+  qty: z.number(),
+  entryPrice: z.number(),
+  leverage: z.number(),
+  margin: z.number(),
+});
+
+/** v1：有借贷/死亡字段，无 openPrices/netInvested/logs */
 const V1Schema = z.looseObject({
   v: z.literal(1),
   cash: z.number(),
-  positions: z.record(
-    z.string(),
-    z.looseObject({
-      side: z.enum(['long', 'short']),
-      qty: z.number(),
-      entryPrice: z.number(),
-      leverage: z.number(),
-      margin: z.number(),
-    }),
-  ),
+  positions: z.record(z.string(), OldPositionSchema),
   prices: z.record(z.string(), z.number()),
   priceHistory: z.record(z.string(), z.array(z.number())),
   tick: z.number(),
@@ -72,35 +73,61 @@ const V1Schema = z.looseObject({
   newsCooldown: z.number(),
 });
 
+/** v2：已砍借贷，字段齐全，但持仓还是 record */
+const V2Schema = V1Schema.omit({ v: true }).extend({
+  v: z.literal(2),
+  openPrices: z.record(z.string(), z.number()),
+  netInvested: z.number(),
+  logs: z.array(z.any()),
+});
+
+/** 老 record 形状 → 一笔一行的列表（补 id） */
+function toLots(rec: Record<string, z.infer<typeof OldPositionSchema>>): ExchangeAccount['positions'] {
+  return Object.entries(rec ?? {}).map(([code, p]) => ({
+    id: `${code}-${p.side}-migrated-${Math.random().toString(36).slice(2, 8)}`,
+    code,
+    side: p.side,
+    qty: p.qty,
+    entryPrice: p.entryPrice,
+    leverage: p.leverage,
+    margin: p.margin,
+  }));
+}
+
 /**
- * v1 → v2 迁移（终审 C1）：改 schema 必须带迁移，否则老存档会被 safeParse 判失败而静默清空。
- * 丢掉借贷/死亡字段，补上 openPrices/netInvested/logs；净投入取迁移点的现金+持仓权益，
- * 也就是"盈亏从迁移那一刻重新起算"。
+ * 老存档迁移（终审 C1 教训：改 schema 必须带迁移，否则 safeParse 判失败会静默清空玩家存档）。
+ * v1/v2 → v3：持仓 record 拆成一笔一行；v1 另需补 openPrices/netInvested/logs。
+ * 净投入取迁移点的现金+持仓权益 —— 也就是"盈亏从迁移那一刻重新起算"。
  */
-function migrateV1(o: z.infer<typeof V1Schema>): ExchangeAccount {
+function migrate(old: z.infer<typeof V1Schema> | z.infer<typeof V2Schema>, from: 1 | 2): ExchangeAccount {
   const base = createAccount();
+  const v2 = old as z.infer<typeof V2Schema>;
   const acct: ExchangeAccount = {
     ...base,
-    cash: round2(o.cash ?? 0),
-    positions: (o.positions ?? {}) as ExchangeAccount['positions'],
-    prices: { ...base.prices, ...(o.prices ?? {}) },
-    priceHistory: { ...base.priceHistory, ...(o.priceHistory ?? {}) },
-    tick: o.tick ?? 0,
-    debt: round2(o.debt ?? 0),
-    bankruptcyCount: o.bankruptcyCount ?? 0,
-    cumulativeLoss: round2(o.cumulativeLoss ?? 0),
-    frozen: !!o.frozen,
-    news: (o.news ?? null) as ExchangeAccount['news'],
-    newsCooldown: o.newsCooldown ?? 3,
-    logs: [],
+    cash: round2(old.cash ?? 0),
+    positions: toLots(old.positions),
+    prices: { ...base.prices, ...(old.prices ?? {}) },
+    priceHistory: { ...base.priceHistory, ...(old.priceHistory ?? {}) },
+    tick: old.tick ?? 0,
+    debt: round2(old.debt ?? 0),
+    bankruptcyCount: old.bankruptcyCount ?? 0,
+    cumulativeLoss: round2(old.cumulativeLoss ?? 0),
+    frozen: !!old.frozen,
+    news: (old.news ?? null) as ExchangeAccount['news'],
+    newsCooldown: old.newsCooldown ?? 3,
+    openPrices: from === 2 ? { ...(v2.openPrices ?? {}) } : {},
+    netInvested: from === 2 ? round2(v2.netInvested ?? 0) : 0,
+    logs: from === 2 ? ((v2.logs ?? []) as ExchangeAccount['logs']) : [],
   };
-  acct.openPrices = { ...acct.prices };
-  let equity = acct.cash;
-  for (const [code, p] of Object.entries(acct.positions)) {
-    const price = acct.prices[code] ?? p.entryPrice;
-    equity += p.margin + (p.side === 'long' ? 1 : -1) * (price - p.entryPrice) * p.qty;
+  if (!Object.keys(acct.openPrices).length) acct.openPrices = { ...acct.prices };
+  if (from === 1) {
+    let equity = acct.cash;
+    for (const p of acct.positions) {
+      const price = acct.prices[p.code] ?? p.entryPrice;
+      equity += p.margin + (p.side === 'long' ? 1 : -1) * (price - p.entryPrice) * p.qty;
+    }
+    acct.netInvested = round2(equity);
   }
-  acct.netInvested = round2(equity);
   return acct;
 }
 
@@ -109,22 +136,26 @@ export function loadAccount(storage: StorageLike): ExchangeAccount {
   if (!raw) return createAccount();
   try {
     const parsed = JSON.parse(raw);
-    if (parsed?.v === 1) {
-      const v1 = V1Schema.safeParse(parsed);
-      if (!v1.success) {
-        console.warn('[wxhl-cg] v1 存档结构异常，重置为新账户:', z.prettifyError(v1.error));
+    if (parsed?.v === 1 || parsed?.v === 2) {
+      const from = parsed.v as 1 | 2;
+      const schema = from === 1 ? V1Schema : V2Schema;
+      const r = schema.safeParse(parsed);
+      if (!r.success) {
+        console.warn(`[wxhl-cg] v${from} 存档结构异常，重置为新账户:`, z.prettifyError(r.error));
         return createAccount();
       }
-      console.info('[wxhl-cg] 检测到 v1 存档，已迁移到 v2（现金/持仓/计数保留）');
-      return migrateV1(v1.data);
+      console.info(`[wxhl-cg] 检测到 v${from} 存档，已迁移到 v3（现金/持仓/计数保留）`);
+      const migrated = migrate(r.data as z.infer<typeof V1Schema> | z.infer<typeof V2Schema>, from);
+      migrated.openPrices = { ...migrated.prices }; // 与现行版本同口径：开盘基准 = 本次加载时的价
+      return migrated;
     }
-    const v2 = AccountSchema.safeParse(parsed);
-    if (!v2.success) {
-      console.warn('[wxhl-cg] 存档结构校验失败，重置为新账户:', z.prettifyError(v2.error));
+    const cur = AccountSchema.safeParse(parsed);
+    if (!cur.success) {
+      console.warn('[wxhl-cg] 存档结构校验失败，重置为新账户:', z.prettifyError(cur.error));
       return createAccount();
     }
     // 开盘基准价 = 本次脚本加载时的价：涨跌幅与走势图基准线都按它算，因此每次加载都重新快照
-    const acct = v2.data as ExchangeAccount;
+    const acct = cur.data as ExchangeAccount;
     acct.openPrices = { ...acct.prices };
     return acct;
   } catch (e) {
@@ -191,13 +222,13 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     }
   }
 
-  /** 开仓（界面入口）：引擎 + 日报 + 落盘 */
-  function placeOrder(code: string, side: Side, qty: number, leverage: number) {
-    const r = openPosition(acct.value, code, side, qty, leverage);
+  /** 开仓（界面入口）：金额 = 保证金；每次新开一笔（同股可多笔、可多空对冲） */
+  function placeOrder(code: string, side: Side, marginWanted: number, leverage: number) {
+    const r = openPosition(acct.value, code, side, marginWanted, leverage);
     pushLog(
       acct.value,
       'trade',
-      `开${side === 'long' ? '多' : '空'} ${code} ×${qty} @${acct.value.prices[code]}（保证金 ${r.margin} 佣金 ${r.fee}${
+      `开${side === 'long' ? '多' : '空'} ${code} ${r.qty} 股 @${acct.value.prices[code]}（保证金 ${r.margin} 佣金 ${r.fee}${
         r.stamp ? ' 印花税 ' + r.stamp : ''
       }）`,
     );
@@ -205,18 +236,17 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     return r;
   }
 
-  /** 平仓（界面入口）：引擎 + 日报 + 落盘 */
-  function closeOrder(code: string) {
-    const pos = acct.value.positions[code];
-    if (!pos) throw new Error('没有该股仓位: ' + code);
-    const sideText = pos.side === 'long' ? '多' : '空';
-    const r = closePosition(acct.value, code);
+  /** 平仓（界面入口）：按持仓 id 平掉那一笔 */
+  function closeOrder(id: string) {
+    const pos = positionOf(acct.value, id);
+    if (!pos) throw new Error('没有这笔持仓');
+    const r = closePosition(acct.value, id);
     pushLog(
       acct.value,
       'trade',
-      `平仓 ${code} ${sideText} ×${pos.qty}：盈亏 ${r.pnl >= 0 ? '+' : ''}${r.pnl}（佣金 ${r.fee}${
-        r.stamp ? ' 印花税 ' + r.stamp : ''
-      }）`,
+      `平仓 ${r.code} ${r.side === 'long' ? '多' : '空'} ${r.qty} 股：盈亏 ${r.pnl >= 0 ? '+' : ''}${r.pnl}（佣金 ${
+        r.fee
+      }${r.stamp ? ' 印花税 ' + r.stamp : ''}）`,
     );
     persist();
     return r;
@@ -344,8 +374,8 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     if (!snap) throw new Error('读不到存档变量（契约者不存在），无法清算');
     // 持仓按现价估值（不实际平仓，预览用净值近似）
     let positionsValue = 0;
-    for (const [code, p] of Object.entries(acct.value.positions)) {
-      positionsValue += p.margin + (p.side === 'long' ? 1 : -1) * (acct.value.prices[code] - p.entryPrice) * p.qty;
+    for (const p of acct.value.positions) {
+      positionsValue += p.margin + (p.side === 'long' ? 1 : -1) * (acct.value.prices[p.code] - p.entryPrice) * p.qty;
     }
     return computeLiquidation({
       positionsProceeds: Math.max(0, Math.round(positionsValue * 100) / 100),
@@ -374,7 +404,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     const snapshot = klona(acct.value);
     try {
       // 1. 持仓全部按现价强平（费用照收，亏损累计；force 绕过冻结门禁）
-      for (const code of Object.keys(acct.value.positions)) closePosition(acct.value, code, true);
+      for (const id of acct.value.positions.map(p => p.id)) closePosition(acct.value, id, true);
       // 2. 用最新快照计算（现金已含强平所得）
       const snap = snapshotAssets()!;
       const liq = computeLiquidation({

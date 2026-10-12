@@ -5,12 +5,15 @@ import { STOCKS } from './stocks';
 
 export type Side = 'long' | 'short';
 
+/** 一笔持仓（一笔一行）：同一只股可以同时持有多笔，也可以多空对冲 */
 export interface Position {
+  id: string; // 唯一标识（平仓按它定位）
+  code: string; // 股票代码
   side: Side;
   qty: number; // 股数
-  entryPrice: number; // 开仓均价
+  entryPrice: number; // 这笔的开仓均价
   leverage: number; // 1–100
-  margin: number; // 占用保证金
+  margin: number; // 这笔占用的保证金
 }
 
 export interface ActiveNews {
@@ -34,9 +37,9 @@ export interface LogEntry {
 export const LOG_CAP = 200;
 
 export interface ExchangeAccount {
-  v: 2;
+  v: 3;
   cash: number; // 交易所币，可为负
-  positions: Record<string, Position>;
+  positions: Position[]; // 一笔一行
   prices: Record<string, number>;
   priceHistory: Record<string, number[]>;
   /** 本次开盘基准价：脚本加载时快照，走势图基准线与涨跌幅都按它算 */
@@ -62,9 +65,9 @@ export function createAccount(): ExchangeAccount {
     priceHistory[s.code] = [s.basePrice];
   }
   return {
-    v: 2,
+    v: 3,
     cash: 0,
-    positions: {},
+    positions: [],
     prices,
     priceHistory,
     openPrices: { ...prices },
