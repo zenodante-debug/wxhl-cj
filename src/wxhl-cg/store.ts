@@ -6,6 +6,7 @@
 import { createAccount, round2, type ExchangeAccount } from './engine/types';
 import { tickMarket } from './engine/market';
 import { tickTrading } from './engine/trading';
+import { tickLoan } from './engine/loan';
 import { adjustUP } from './mvu';
 
 export const STORAGE_KEY = 'wxhl-cg:account';
@@ -80,6 +81,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
       tickMarket(acct.value);
       const r = tickTrading(acct.value);
       if (r.liquidated.length) toastr.warning(`强平：${r.liquidated.join('、')} 已按现价强制平仓`);
+      tickLoan(acct.value);
       persist();
     } catch (e) {
       console.error('[wxhl-cg] 行情跳动失败，计时器已停止:', e);
