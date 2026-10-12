@@ -125,6 +125,25 @@ describe('负 UP 语义', () => {
   });
 });
 
+// 交易与日报的接线（纯逻辑已在 metrics.test.ts 先行 TDD；这里验 store 有没有真的写日志）
+describe('交易写日报', () => {
+  beforeEach(() => {
+    setActivePinia(createPinia());
+  });
+
+  it('开仓 / 平仓各写一条 trade 日志', () => {
+    stubTavern();
+    const store = useExchangeStore();
+    store.acct.cash = 1000;
+    store.placeOrder('TGJ', 'long', 2, 5);
+    store.closeOrder('TGJ');
+    const texts = store.acct.logs.map(l => l.text);
+    expect(texts.some(t => t.startsWith('开多 TGJ'))).toBe(true);
+    expect(texts.some(t => t.startsWith('平仓 TGJ'))).toBe(true);
+    expect(store.acct.logs.every(l => l.kind === 'trade')).toBe(true);
+  });
+});
+
 // 破产线自动清算（Review Focus 1）
 describe('破产线自动清算', () => {
   beforeEach(() => {

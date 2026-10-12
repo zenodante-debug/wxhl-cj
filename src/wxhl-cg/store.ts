@@ -3,9 +3,10 @@
 // 所有副作用集中在本层；引擎（engine/）保持纯净。
 // z / defineStore / ref / computed / klona / toastr 由 unplugin-auto-import 提供。
 // ================================================================
-import { createAccount, round2, type ExchangeAccount } from './engine/types';
+import { createAccount, round2, type ExchangeAccount, type Side } from './engine/types';
 import { tickMarket } from './engine/market';
-import { closePosition, tickTrading } from './engine/trading';
+import { closePosition, openPosition, tickTrading } from './engine/trading';
+import { pushLog } from './engine/metrics';
 import { BANKRUPTCY_LINE, shouldGoBankrupt } from './engine/bankrupt';
 import { computeLiquidation, EMPTY_EQUIP_SLOT, type LiquidationResult } from './engine/bankruptcy';
 import { adjustUP, commitMvu, readContractor } from './mvu';
@@ -89,9 +90,17 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
   /** 推进一跳：行情 → 交易结算（杠杆利息/强平）→ 破产线检查，然后持久化。引擎 throw 时响亮失败并停表。 */
   function doTick() {
     try {
+      const beforeNews = acct.value.news?.text;
       tickMarket(acct.value);
+      if (acct.value.news && acct.value.news.text !== beforeNews) {
+        pushLog(acct.value, 'news', acct.value.news.text);
+      }
       const r = tickTrading(acct.value);
-      if (r.liquidated.length) toastr.warning(`强平：${r.liquidated.join('、')} 已按现价强制平仓`);
+      if (r.liquidated.length) {
+        const text = `强平：${r.liquidated.join('、')} 已按现价强制平仓`;
+        pushLog(acct.value, 'system', text);
+        toastr.warning(text);
+      }
       persist();
       // 破产线：累计已实现亏损越过 250 → 自动清算（异步，失败不阻塞行情，下一跳重试）
       if (!bankruptcing && shouldGoBankrupt(acct.value)) {
@@ -104,12 +113,44 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     }
   }
 
+  /** 开仓（界面入口）：引擎 + 日报 + 落盘 */
+  function placeOrder(code: string, side: Side, qty: number, leverage: number) {
+    const r = openPosition(acct.value, code, side, qty, leverage);
+    pushLog(
+      acct.value,
+      'trade',
+      `开${side === 'long' ? '多' : '空'} ${code} ×${qty} @${acct.value.prices[code]}（保证金 ${r.margin} 佣金 ${r.fee}${
+        r.stamp ? ' 印花税 ' + r.stamp : ''
+      }）`,
+    );
+    persist();
+    return r;
+  }
+
+  /** 平仓（界面入口）：引擎 + 日报 + 落盘 */
+  function closeOrder(code: string) {
+    const pos = acct.value.positions[code];
+    if (!pos) throw new Error('没有该股仓位: ' + code);
+    const sideText = pos.side === 'long' ? '多' : '空';
+    const r = closePosition(acct.value, code);
+    pushLog(
+      acct.value,
+      'trade',
+      `平仓 ${code} ${sideText} ×${pos.qty}：盈亏 ${r.pnl >= 0 ? '+' : ''}${r.pnl}（佣金 ${r.fee}${
+        r.stamp ? ' 印花税 ' + r.stamp : ''
+      }）`,
+    );
+    persist();
+    return r;
+  }
+
   /** 破产线自动清算：以累计已实现亏损为待偿额；失败整体回滚，下一跳自动重试 */
   async function autoLiquidate() {
     const owed = round2(acct.value.cumulativeLoss);
     try {
       await runLiquidation(owed);
       liquidateFailures = 0;
+      pushLog(acct.value, 'system', `破产清算：变卖资产抵债 ${owed}，剩余欠款 ${acct.value.debt}`);
       toastr.error(`破产清算：累计亏损突破 ${BANKRUPTCY_LINE}，交易所已变卖你的资产抵债`);
     } catch (e) {
       liquidateFailures++;
@@ -150,6 +191,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
       const credited = round2(amount * (1 - EXCHANGE_FEE));
       acct.value.cash = round2(acct.value.cash + credited);
       acct.value.netInvested = round2(acct.value.netInvested + credited);
+      pushLog(acct.value, 'system', `存入 ${amount} UP → ${credited} 币`);
       persist();
       toastr.success(`入金成功：${amount} UP → ${credited} 币（手续费 1%）`);
     } finally {
@@ -168,6 +210,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
       await adjustUP(upGain);
       acct.value.cash = round2(acct.value.cash - amount);
       acct.value.netInvested = round2(acct.value.netInvested - amount);
+      pushLog(acct.value, 'system', `取出 ${amount} 币 → ${upGain} UP`);
       persist();
       toastr.success(`出金成功：${amount} 币 → ${upGain} UP（手续费 1%）`);
     } finally {
@@ -286,6 +329,7 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
       acct.value.debt = 0;
       acct.value.frozen = false;
     }
+    pushLog(acct.value, 'system', `清偿欠款 ${pay}，剩余欠款 ${acct.value.debt}`);
     persist();
   }
 
@@ -298,6 +342,8 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     persist,
     startTicker,
     stopTicker,
+    placeOrder,
+    closeOrder,
     depositUP,
     withdrawUP,
     previewBankruptcy,
