@@ -679,7 +679,11 @@
   /* ============ 模块覆盖面板 ============ */
   .module-overlay {
     display: none;
-    position: absolute;
+    /* fixed 而非 absolute：`.scene`（本元素的 absolute 包含块）在外壳 app-header
+       下面，absolute 时覆盖层盖不住那条 header —— 子集里左上角的「返回」其实一直是
+       外壳的 closeStatusbar，一点就退回主菜单。`.phone-frame` 带 transform，会成为
+       fixed 的包含块，于是覆盖层铺满整个手机屏（含 header），左上角只剩模块自己的 ✕。 */
+    position: fixed;
     inset: 0;
     z-index: 50;
     background: rgba(4, 3, 2, 0.9);
