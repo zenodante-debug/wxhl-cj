@@ -74,8 +74,12 @@ export interface CloseResult {
   returned: number; // 实际回到现金的金额
 }
 
-/** 平仓。平多收印花税；平空不收。已实现亏损累计进 cumulativeLoss。 */
-export function closePosition(acct: ExchangeAccount, code: string): CloseResult {
+/**
+ * 平仓。平多收印花税；平空不收。已实现亏损累计进 cumulativeLoss。
+ * 冻结账户禁止平仓（spec §7 只可读）；force=true 供强平/破产清算等强制结算绕过门禁。
+ */
+export function closePosition(acct: ExchangeAccount, code: string, force = false): CloseResult {
+  if (acct.frozen && !force) throw new Error('账户冻结中，禁止平仓');
   const pos = acct.positions[code];
   if (!pos) throw new Error('没有该股仓位: ' + code);
   const price = acct.prices[code];
@@ -129,7 +133,7 @@ export function tickTrading(acct: ExchangeAccount): TickTradingResult {
     const liq = liquidationPrice(pos);
     const hit = pos.side === 'long' ? price <= liq : price >= liq;
     if (hit) {
-      closePosition(acct, code); // 佣金印花税照收（按平仓方向计）
+      closePosition(acct, code, true); // 强平属强制结算（绕过冻结门禁）；佣金印花税照收
       liquidated.push(code);
     }
   }

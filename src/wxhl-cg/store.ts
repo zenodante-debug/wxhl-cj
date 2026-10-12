@@ -15,7 +15,7 @@ import {
   takeLoan,
   tickLoan,
 } from './engine/loan';
-import { computeLiquidation, type LiquidationResult } from './engine/bankruptcy';
+import { computeLiquidation, EMPTY_EQUIP_SLOT, type LiquidationResult } from './engine/bankruptcy';
 import { estateValue, inheritanceTax, settleInheritance, transferFee } from './engine/inheritance';
 import { adjustUP, commitMvu, readContractor } from './mvu';
 
@@ -80,6 +80,9 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
   const acct = ref<ExchangeAccount>(loadAccount(localStorage));
   const panelOpen = ref(false);
   let timer: ReturnType<typeof setInterval> | null = null;
+  /** 防重入闸（照市场 purchasing/listing 惯例）：异步 MVU 操作进行中拒绝并发调用 */
+  let exchanging = false;
+  let bankruptcing = false;
 
   function persist() {
     saveAccount(localStorage, klona(acct.value));
@@ -131,22 +134,34 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
 
   /** 入金：扣 amount UP → 加 ×0.99 交易所币（先扣 UP，失败则币不动） */
   async function depositUP(amount: number) {
+    if (exchanging) throw new Error('兑换处理中，请勿重复操作');
     if (!Number.isInteger(amount) || amount <= 0) throw new Error('入金金额必须是正整数');
-    await adjustUP(-amount);
-    acct.value.cash = round2(acct.value.cash + round2(amount * (1 - EXCHANGE_FEE)));
-    persist();
-    toastr.success(`入金成功：${amount} UP → ${round2(amount * (1 - EXCHANGE_FEE))} 币（手续费 1%）`);
+    exchanging = true;
+    try {
+      await adjustUP(-amount);
+      acct.value.cash = round2(acct.value.cash + round2(amount * (1 - EXCHANGE_FEE)));
+      persist();
+      toastr.success(`入金成功：${amount} UP → ${round2(amount * (1 - EXCHANGE_FEE))} 币（手续费 1%）`);
+    } finally {
+      exchanging = false;
+    }
   }
 
   /** 出金：扣 amount 币 → 加 ×0.99 UP（先加 UP，失败则币不动） */
   async function withdrawUP(amount: number) {
+    if (exchanging) throw new Error('兑换处理中，请勿重复操作');
     if (!Number.isInteger(amount) || amount <= 0) throw new Error('出金金额必须是正整数');
     if (acct.value.cash < amount) throw new Error(`现金不足：只有 ${round2(acct.value.cash)} 币`);
-    const upGain = round2(amount * (1 - EXCHANGE_FEE));
-    await adjustUP(upGain);
-    acct.value.cash = round2(acct.value.cash - amount);
-    persist();
-    toastr.success(`出金成功：${amount} 币 → ${upGain} UP（手续费 1%）`);
+    exchanging = true;
+    try {
+      const upGain = round2(amount * (1 - EXCHANGE_FEE));
+      await adjustUP(upGain);
+      acct.value.cash = round2(acct.value.cash - amount);
+      persist();
+      toastr.success(`出金成功：${amount} 币 → ${upGain} UP（手续费 1%）`);
+    } finally {
+      exchanging = false;
+    }
   }
 
   // ==================== 借贷 ====================
@@ -204,8 +219,9 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     };
   }
 
-  /** 预览清算（不执行）：持仓按现价估值 + 当前现金 + 主卡资产快照 */
+  /** 预览清算（不执行）：持仓按现价估值 + 当前现金 + 主卡资产快照。零债务拒绝（防误点清空现金）。 */
   function previewBankruptcy(): LiquidationResult {
+    if (totalOwed() <= 0) throw new Error('没有待清债务，无需破产清算');
     const snap = snapshotAssets();
     if (!snap) throw new Error('读不到存档变量（契约者不存在），无法清算');
     // 持仓按现价估值（不实际平仓，预览用净值近似）
@@ -227,45 +243,59 @@ export const useExchangeStore = defineStore('wxhl-cg', () => {
     });
   }
 
-  /** 执行破产清算：强平持仓 → 快照 → 计算 → MVU 写回 → 更新交易所账本。任一步 throw 则中断（响亮失败）。 */
+  /**
+   * 执行破产清算：强平持仓 → 快照 → 计算 → MVU 写回 → 更新交易所账本。
+   * 原子性：先快照交易所账本，任一步 throw 则整体回滚——宁可响亮失败也不半清算。
+   */
   async function declareBankruptcy() {
+    if (bankruptcing) throw new Error('清算处理中，请勿重复操作');
+    if (totalOwed() <= 0) throw new Error('没有待清债务，无需破产清算');
     const r = readContractor();
     if (!r) throw new Error('读不到存档变量（契约者不存在），清算中止');
-    // 1. 持仓全部按现价强平（费用照收，亏损累计）
-    for (const code of Object.keys(acct.value.positions)) closePosition(acct.value, code);
-    // 2. 用最新快照计算（现金已含强平所得）
-    const snap = snapshotAssets()!;
-    const liq = computeLiquidation({
-      positionsProceeds: 0, // 已实际强平，所得在现金里
-      cash: Math.max(0, acct.value.cash),
-      bag: snap.bag,
-      equipment: snap.equipment,
-      skills: snap.skills,
-      job: snap.job,
-      bloodline: snap.bloodline,
-      talent: snap.talent,
-      playerTier: snap.playerTier,
-      debt: totalOwed(),
-    });
-    // 3. MVU 写回
-    for (const name of liq.removedBag) _.unset(r.mvu, ['stat_data', '契约者', '背包', name]);
-    for (const slot of liq.clearedSlots) _.set(r.mvu, ['stat_data', '契约者', '装备', slot, '名称'], '无');
-    for (const name of liq.removedSkills) _.unset(r.mvu, ['stat_data', '契约者', '通用技能', name]);
-    if (liq.clearJob) _.set(r.mvu, ['stat_data', '契约者', '职业'], { 名称: '无' });
-    if (liq.clearBloodline) _.set(r.mvu, ['stat_data', '契约者', '头部', '血统'], { 名称: '普通地球人类', 品质: '白色' });
-    if (liq.clearTalent) _.set(r.mvu, ['stat_data', '契约者', '头部', '天赋'], { 名称: '无' });
-    await commitMvu(r.mvu, r.mid, liq.removedBag.map(n => [['stat_data', '契约者', '背包', n], undefined] as [string[], unknown]));
-    // 4. 交易所账本：抵债
-    acct.value.cash = liq.returnCash; // 现金先全部抵债，溢出退回
-    acct.value.debt = liq.remainingDebt;
-    acct.value.loan = null;
-    acct.value.cumulativeLoss = 0;
-    acct.value.bankruptcyCount++;
-    if (liq.remainingDebt <= 0) {
-      acct.value.frozen = false;
-      acct.value.loanState = 'none';
+    bankruptcing = true;
+    const snapshot = klona(acct.value);
+    try {
+      // 1. 持仓全部按现价强平（费用照收，亏损累计；force 绕过冻结门禁）
+      for (const code of Object.keys(acct.value.positions)) closePosition(acct.value, code, true);
+      // 2. 用最新快照计算（现金已含强平所得）
+      const snap = snapshotAssets()!;
+      const liq = computeLiquidation({
+        positionsProceeds: 0, // 已实际强平，所得在现金里
+        cash: Math.max(0, acct.value.cash),
+        bag: snap.bag,
+        equipment: snap.equipment,
+        skills: snap.skills,
+        job: snap.job,
+        bloodline: snap.bloodline,
+        talent: snap.talent,
+        playerTier: snap.playerTier,
+        debt: totalOwed(),
+      });
+      // 3. MVU 写回（装备槽整槽重置为空槽形状，不能只清名称——残留数值会被当装备读）
+      for (const name of liq.removedBag) _.unset(r.mvu, ['stat_data', '契约者', '背包', name]);
+      for (const slot of liq.clearedSlots) _.set(r.mvu, ['stat_data', '契约者', '装备', slot], { ...EMPTY_EQUIP_SLOT });
+      for (const name of liq.removedSkills) _.unset(r.mvu, ['stat_data', '契约者', '通用技能', name]);
+      if (liq.clearJob) _.set(r.mvu, ['stat_data', '契约者', '职业'], { 名称: '无' });
+      if (liq.clearBloodline) _.set(r.mvu, ['stat_data', '契约者', '头部', '血统'], { 名称: '普通地球人类', 品质: '白色' });
+      if (liq.clearTalent) _.set(r.mvu, ['stat_data', '契约者', '头部', '天赋'], { 名称: '无' });
+      await commitMvu(r.mvu, r.mid, liq.removedBag.map(n => [['stat_data', '契约者', '背包', n], undefined] as [string[], unknown]));
+      // 4. 交易所账本：抵债
+      acct.value.cash = liq.returnCash; // 现金先全部抵债，溢出退回
+      acct.value.debt = liq.remainingDebt;
+      acct.value.loan = null;
+      acct.value.cumulativeLoss = 0;
+      acct.value.bankruptcyCount++;
+      if (liq.remainingDebt <= 0) {
+        acct.value.frozen = false;
+        acct.value.loanState = 'none';
+      }
+      persist();
+    } catch (e) {
+      acct.value = snapshot; // 回滚交易所账本（MVU 未写成功 = 主卡没动）
+      throw e;
+    } finally {
+      bankruptcing = false;
     }
-    persist();
   }
 
   // ==================== 遗产税 ====================

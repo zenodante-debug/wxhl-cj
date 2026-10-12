@@ -93,4 +93,10 @@ describe('computeLiquidation 瀑布顺序', () => {
     expect(r.removedBag).toEqual(['药']);
     expect(r.clearedSlots).toEqual([]);
   });
+  it('终审 C1：零债务时不动一分一毫——现金全数退回、无清算步骤', () => {
+    const r = computeLiquidation(baseInput({ cash: 1480, debt: 0, positionsProceeds: 200 }));
+    expect(r.steps).toEqual([]);
+    expect(r.remainingDebt).toBe(0);
+    expect(r.returnCash).toBe(1680);
+  });
 });

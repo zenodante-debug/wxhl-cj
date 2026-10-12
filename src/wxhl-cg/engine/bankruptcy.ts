@@ -64,6 +64,28 @@ function equipCategoryOf(a: LiqAsset): EquipCategory {
   return '武器'; // 消耗品/道具按 GOODS_BASE_CATEGORY 惯例走武器列
 }
 
+/** 空装备槽形状：与 statusbar/core.ts 脱下装备时的全字段重置一致（不能只清名称，残留数值会被当装备读） */
+export const EMPTY_EQUIP_SLOT = {
+  名称: '无',
+  类型: '无',
+  品质: '无',
+  阶位: '无',
+  穿戴门槛: '无',
+  强化等级: 0,
+  伤害骰: '无',
+  倍率: 0,
+  主属性: '无',
+  副属性: '无',
+  主属性加成: 0,
+  副属性加成: 0,
+  装备防御: 0,
+  装备闪避: 0,
+  负重: 0,
+  效果: {},
+  描述: '无',
+  数量: 1,
+} as const;
+
 export function computeLiquidation(input: LiquidationInput): LiquidationResult {
   const steps: LiquidationStep[] = [];
   const result: LiquidationResult = {
@@ -78,6 +100,12 @@ export function computeLiquidation(input: LiquidationInput): LiquidationResult {
     clearBloodline: false,
     clearTalent: false,
   };
+  // 零债务：不动一分一毫，现金与持仓所得全数退回
+  if (input.debt <= 0) {
+    result.remainingDebt = 0;
+    result.returnCash = Math.round((input.cash + input.positionsProceeds) * 100) / 100;
+    return result;
+  }
   let covered = 0; // 已抵金额
 
   const gain = (category: LiqCategory, name: string, proceeds: number) => {

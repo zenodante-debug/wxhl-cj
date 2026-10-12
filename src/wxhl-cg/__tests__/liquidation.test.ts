@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { createAccount } from '../engine/types';
-import { liquidationPrice, openPosition, tickTrading } from '../engine/trading';
+import { closePosition, liquidationPrice, openPosition, tickTrading } from '../engine/trading';
 
 function withCash(v: number) {
   const a = createAccount();
@@ -60,6 +60,19 @@ describe('tickTrading', () => {
     openPosition(a, 'TGJ', 'long', 10, 10);
     // 模拟"关闭期间价格被改到破线"（重开后第一跳）
     a.prices['TGJ'] = 90;
+    expect(tickTrading(a).liquidated).toEqual(['TGJ']);
+  });
+});
+
+describe('终审 I1：冻结门禁', () => {
+  it('冻结账户禁止平仓（spec §7 只可读），但强平引擎不受限', () => {
+    const a = withCash(10000);
+    openPosition(a, 'TGJ', 'long', 10, 10);
+    a.frozen = true;
+    expect(() => closePosition(a, 'TGJ')).toThrow(/冻结/);
+    expect(a.positions['TGJ']).toBeDefined();
+    // 强平属强制结算，冻结照样执行
+    a.prices['TGJ'] = 80;
     expect(tickTrading(a).liquidated).toEqual(['TGJ']);
   });
 });
