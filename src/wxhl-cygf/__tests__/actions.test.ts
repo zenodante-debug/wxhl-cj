@@ -272,6 +272,40 @@ describe('applyBuild · 装到不同位置（2026-10-12）', () => {
     expect(契约者.小队.成员.老队友).toBeDefined();
   });
 
+  it('entityFromBuild：背包来自 背包建议（数量缺省 1，数量<=0 丢弃）', () => {
+    const 带背包 = { ...build, 背包建议: { 治疗药水: { 描述: '回血', 数量: 3 }, 干粮: { 描述: '果腹' }, 垃圾: { 描述: 'x', 数量: 0 } } };
+    const e = entityFromBuild(带背包, 'BOSS', '');
+    expect(e.背包['治疗药水']).toEqual({ 描述: '回血', 数量: 3 });
+    expect(e.背包['干粮'].数量).toBe(1);
+    expect(e.背包['垃圾']).toBeUndefined();
+  });
+
+  it('entityFromBuild：无 背包建议 → 背包为空对象', () => {
+    expect(entityFromBuild(build, '杂兵', '')).toEqual(expect.objectContaining({ 背包: {} }));
+  });
+
+  it('applyAsPlayer：背包合并新增——只加玩家没有的，同名不覆盖、已有不删', () => {
+    const 契约者: any = { 头部: {}, 背包: { 好东西: { 描述: '我的', 数量: 5 } } };
+    const 写入 = applyAsPlayer(契约者, { ...build, 背包建议: { 好东西: { 描述: '包里的', 数量: 99 }, 新药水: { 描述: '新的', 数量: 2 } } });
+    expect(写入).toContain('背包');
+    expect(契约者.背包.好东西).toEqual({ 描述: '我的', 数量: 5 }); // 同名不覆盖
+    expect(契约者.背包.新药水).toEqual({ 描述: '新的', 数量: 2 });
+  });
+
+  it('applyAsPlayer：包里没有新物品（或全被数量<=0 丢弃）时不写 背包', () => {
+    const 契约者 = { 头部: {}, 背包: { 好东西: { 数量: 5 } } };
+    const 写入 = applyAsPlayer(契约者, { ...build, 背包建议: { 好东西: { 数量: 1 }, 垃圾: { 数量: 0 } } });
+    expect(写入).not.toContain('背包');
+    expect(Object.keys(契约者.背包)).toEqual(['好东西']);
+  });
+
+  it('applyAsPlayer：玩家原本没有 背包 → 新建并写入新增物品', () => {
+    const 契约者: any = { 头部: {} };
+    const 写入 = applyAsPlayer(契约者, { ...build, 背包建议: { 新药水: { 描述: '新的', 数量: 2 } } });
+    expect(写入).toContain('背包');
+    expect(契约者.背包).toEqual({ 新药水: { 描述: '新的', 数量: 2 } });
+  });
+
   it('applyBuild 进互斥队列', () => {
     expect(MUTATING_ACTIONS.has('applyBuild')).toBe(true);
   });

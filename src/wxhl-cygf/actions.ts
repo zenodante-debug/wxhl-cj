@@ -280,6 +280,19 @@ export function composeAppearance(payload: Record<string, any>): string {
     .join('\n');
 }
 
+/** 背包建议（{物品名: {描述, 数量}}）→ 实体/契约者「背包」条目：数量缺省 1，数量 <= 0 的丢掉 */
+export function bagFromAdvice(背包建议: any): Record<string, { 描述: string; 数量: number }> {
+  const 背包: Record<string, { 描述: string; 数量: number }> = {};
+  for (const [名, item] of Object.entries(背包建议 ?? {})) {
+    if (!名) continue;
+    const 原数量 = Number((item as any)?.数量);
+    const 数量 = Number.isFinite(原数量) ? 原数量 : 1;
+    if (数量 <= 0) continue;
+    背包[名] = { 描述: String((item as any)?.描述 ?? ''), 数量 };
+  }
+  return 背包;
+}
+
 /** 构筑载荷 → 变量结构里的「实体」（实体Schema） */
 export function entityFromBuild(build: any, 类型: string, 外貌: string): Record<string, any> {
   const 基础 = { STR: 5, AGI: 5, CON: 5, PER: 5, ...(build?.属性基础 ?? {}) };
@@ -302,13 +315,15 @@ export function entityFromBuild(build: any, 类型: string, 外貌: string): Rec
     通用技能: build?.通用技能 ?? {},
     装备: build?.主要装备 ?? {},
     状态: { 生命状态: '健康', 特殊状态: {} },
-    背包: {},
+    背包: bagFromAdvice(build?.背包建议),
   };
 }
 
 /**
- * 扮演：**只覆盖构筑字段**，保留玩家自己的进度（经济/背包/人际关系/副本经历/论坛档案/小队…）。
+ * 扮演：**只覆盖构筑字段**，保留玩家自己的进度（经济/人际关系/副本经历/论坛档案/小队…）。
  * 用户 2026-10-12 拍板：不要把玩家的存档整个重置。
+ * 2026-10-13 裁决补充：背包按「合并新增」处理——只把包里、而玩家背包里没有的物品加进去，
+ * 同名不覆盖、不删除任何已有物品（既尊重「保留进度」，又让背包建议真正落地）。
  */
 export function applyAsPlayer(契约者: any, build: any): string[] {
   const 写入: string[] = [];
@@ -343,6 +358,22 @@ export function applyAsPlayer(契约者: any, build: any): string[] {
   if (build?.主要装备) {
     契约者.装备 = build.主要装备;
     写入.push('装备');
+  }
+  // 背包：合并新增（同名不覆盖、不删除已有）
+  const 新增背包 = bagFromAdvice(build?.背包建议);
+  const 背包名 = Object.keys(新增背包);
+  if (背包名.length > 0) {
+    const 现有背包 = 契约者.背包 && typeof 契约者.背包 === 'object' ? 契约者.背包 : {};
+    let 新增 = 0;
+    for (const 名 of 背包名) {
+      if (Object.prototype.hasOwnProperty.call(现有背包, 名)) continue; // 已有则跳过，绝不覆盖
+      现有背包[名] = 新增背包[名];
+      新增 += 1;
+    }
+    if (新增 > 0) {
+      契约者.背包 = 现有背包;
+      写入.push('背包');
+    }
   }
   return 写入;
 }

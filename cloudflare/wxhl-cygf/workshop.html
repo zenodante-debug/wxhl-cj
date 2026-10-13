@@ -117,8 +117,10 @@
   #uploadView { max-width: 880px; margin: 0 auto; padding: 16px; }
   .view-head { display: flex; align-items: center; gap: 10px; margin-bottom: 10px; flex-wrap: wrap; }
   .view-head h2 { margin: 0; font-size: 17px; }
-  #detailView.overlay { display: block; padding: 24px 16px; }
+  #detailView.overlay { padding: 24px 16px; }
   #detailView .card-box { max-width: 880px; margin: 0 auto; }
+  /* 详情顶部返回行吸顶：长内容滚到底也能返回 */
+  #detailView .row-between { position: sticky; top: 0; background: var(--bg-2); z-index: 1; padding: 4px 0; }
 
   /* 详情 */
   .detail-cover { aspect-ratio: 16 / 7; background: var(--bg-3); border-radius: 10px; overflow: hidden; margin-bottom: 12px; }
@@ -173,12 +175,14 @@
   #uploadView .actions { border-top: 1px solid var(--line); margin-top: 18px; }
 
   /* 弹层 */
+  /* 滚动安全写法：块级 + overflow-y auto（flex 居中会让长内容上溢被裁且滚不到顶） */
   .overlay {
-    position: fixed; inset: 0; z-index: 50; overflow: auto;
+    position: fixed; inset: 0; z-index: 50;
+    overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain;
     background: rgba(2, 6, 23, .82);
-    display: flex; align-items: center; justify-content: center; padding: 16px;
+    padding: 16px;
   }
-  .card-box { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 20px; max-width: 540px; width: 100%; }
+  .card-box { background: var(--bg-2); border: 1px solid var(--line); border-radius: 12px; padding: 20px; max-width: 540px; width: 100%; margin: 0 auto; }
   #agreement .card-box { border-color: var(--warn-line); }
   .card-box h2 { margin: 0 0 10px; font-size: 18px; }
   .agreement-text { color: #cbd5e1; margin: 0 0 14px; }
@@ -377,6 +381,13 @@ function textArea(rows, placeholder) {
   area.rows = rows;
   if (placeholder) area.placeholder = placeholder;
   return area;
+}
+
+function numberInput(value) {
+  const input = document.createElement('input');
+  input.type = 'number';
+  if (value !== undefined && value !== null) input.value = String(value);
+  return input;
 }
 
 function selectInput(options, value) {
@@ -1487,6 +1498,195 @@ function createDungeonSection() {
 
 const EQUIP_SLOTS = ['主武器', '副武器', '头部', '躯干', '手部', '下装', '饰品'];
 const ATTRIBUTES = ['STR', 'AGI', 'CON', 'PER'];
+const 转职状态选项 = ['未解锁', '未选择', '当前', '已完成', '跳过', '已放弃'];
+
+// 主卡 装备槽Schema 的 18 个字段（顺序与主卡一致）；kind: text / number / json
+const EQUIP_FIELDS = [
+  ['名称', 'text'],
+  ['类型', 'text'],
+  ['品质', 'text'],
+  ['阶位', 'text'],
+  ['穿戴门槛', 'text'],
+  ['强化等级', 'number'],
+  ['伤害骰', 'text'],
+  ['倍率', 'number'],
+  ['主属性', 'text'],
+  ['副属性', 'text'],
+  ['主属性加成', 'number'],
+  ['副属性加成', 'number'],
+  ['装备防御', 'number'],
+  ['装备闪避', 'number'],
+  ['负重', 'number'],
+  ['效果', 'json'],
+  ['描述', 'text'],
+  ['数量', 'number'],
+];
+const EQUIP_DEFAULTS = {
+  名称: '', 类型: '无', 品质: '无', 阶位: '无', 穿戴门槛: '无', 强化等级: 0, 伤害骰: '无', 倍率: 0,
+  主属性: '无', 副属性: '无', 主属性加成: 0, 副属性加成: 0, 装备防御: 0, 装备闪避: 0, 负重: 0, 描述: '无', 数量: 1,
+};
+
+/** 递归的分支树编辑器（一律用 DOM API 构建，绝不拼 HTML 字符串）：分支名/状态/详情字段 + 可增删的子分支 */
+function createTransferTreeEditor(listEl) {
+  const branches = [];
+  let depthWarned = false;
+
+  const blankNode = () => ({
+    分支名: '',
+    状态: '未选择',
+    详细内容: '',
+    效果: '',
+    主属性加成属性: '',
+    主属性加成值: '',
+    副属性加成属性: '',
+    副属性加成值: '',
+    职业特性: '',
+    职业技能: '',
+    子分支: [],
+  });
+
+  function nodeText(node, key, placeholder) {
+    const input = textInput(placeholder);
+    input.value = node[key] ?? '';
+    input.addEventListener('input', () => { node[key] = input.value; });
+    return input;
+  }
+  function nodeNumber(node, key) {
+    const input = numberInput(node[key] ?? '');
+    input.addEventListener('input', () => { node[key] = input.value; });
+    return input;
+  }
+  function nodeTextarea(node, key, rows, placeholder) {
+    const area = textArea(rows, placeholder);
+    area.value = node[key] ?? '';
+    area.addEventListener('input', () => { node[key] = area.value; });
+    return area;
+  }
+  function nodeState(node) {
+    const opts = [...转职状态选项];
+    if (node.状态 && !opts.includes(node.状态)) opts.push(node.状态); // 保留非枚举的自定义状态
+    const select = selectInput(opts.map(o => [o, o]), node.状态 || '未选择');
+    select.addEventListener('change', () => { node.状态 = select.value; });
+    return select;
+  }
+
+  function renderNode(node, siblings, depth) {
+    const box = el('div', 'entry-row');
+    box.style.gridColumn = '1 / -1'; // 嵌在父级 .entry-row 网格里时整行铺满
+    if (depth > 0) box.style.marginLeft = Math.min(depth, 8) * 16 + 'px';
+    const head = el('div', 'entry-head');
+    head.append(el('span', 'entry-index', depth === 0 ? '分支' : `↳ 子分支（第 ${depth + 1} 层）`));
+    const actions = el('div', 'row-actions');
+    actions.append(button('＋ 子分支', 'small', () => {
+      if (!depthWarned && depth + 1 >= 6) {
+        depthWarned = true;
+        if (!window.confirm('转职树已经很深了（≥6 层）。继续加深不利于解析与展示，确定继续吗？')) return;
+      }
+      node.子分支.push(blankNode());
+      render();
+    }));
+    actions.append(button('删除本分支', 'danger small', () => {
+      const index = siblings.indexOf(node);
+      if (index >= 0) siblings.splice(index, 1);
+      render();
+    }));
+    head.append(actions);
+    box.append(head);
+
+    box.append(field('分支名', nodeText(node, '分支名', '一转·卫士')));
+    box.append(field('状态', nodeState(node)));
+    box.append(field('详细内容', nodeText(node, '详细内容')));
+    box.append(field('效果', nodeText(node, '效果')));
+    box.append(field('主属性加成·属性', nodeText(node, '主属性加成属性', 'CON')));
+    box.append(field('主属性加成·值', nodeNumber(node, '主属性加成值')));
+    box.append(field('副属性加成·属性', nodeText(node, '副属性加成属性', 'STR')));
+    box.append(field('副属性加成·值', nodeNumber(node, '副属性加成值')));
+    box.append(field('职业特性（JSON）', nodeTextarea(node, '职业特性', 2, '{ "特性名": "描述" }'), 'full'));
+    box.append(field('职业技能（JSON）', nodeTextarea(node, '职业技能', 2, '{ "技能名": { "类型": "主动" } }'), 'full'));
+
+    for (const child of node.子分支) box.append(renderNode(child, node.子分支, depth + 1));
+    return box;
+  }
+
+  function render() {
+    listEl.replaceChildren(...branches.map(node => renderNode(node, branches, 0)));
+  }
+
+  /** 节点 → 载荷：状态总带上；详情/分支只在非空时才出现（其余交给 schema 的 prefault） */
+  function nodeToPayload(node) {
+    const out = { 状态: node.状态 || '未选择' };
+    const 详情 = {};
+    if (node.详细内容.trim()) 详情.详细内容 = node.详细内容.trim();
+    if (node.效果.trim()) 详情.效果 = node.效果.trim();
+    if (node.主属性加成属性.trim() || node.主属性加成值.trim()) {
+      详情.主属性加成 = { 属性: node.主属性加成属性.trim() || '无', 值: numOr(node.主属性加成值, 0) };
+    }
+    if (node.副属性加成属性.trim() || node.副属性加成值.trim()) {
+      详情.副属性加成 = { 属性: node.副属性加成属性.trim() || '无', 值: numOr(node.副属性加成值, 0) };
+    }
+    if (node.职业特性.trim()) 详情.职业特性 = parseJsonObject(node.职业特性, '转职树·职业特性');
+    if (node.职业技能.trim()) 详情.职业技能 = parseJsonObject(node.职业技能, '转职树·职业技能');
+    if (Object.keys(详情).length) out.详情 = 详情;
+
+    const 分支 = {};
+    for (const child of node.子分支) {
+      const 名 = child.分支名.trim();
+      if (!名) continue; // 未命名的分支连同其子树一起丢掉
+      分支[名] = nodeToPayload(child);
+    }
+    if (Object.keys(分支).length) out.分支 = 分支;
+    return out;
+  }
+
+  function payloadToNode(名, obj) {
+    const node = blankNode();
+    node.分支名 = 名;
+    if (obj && typeof obj === 'object') {
+      if (typeof obj.状态 === 'string') node.状态 = obj.状态;
+      const 详情 = obj.详情 ?? {};
+      if (详情.详细内容 !== undefined) node.详细内容 = String(详情.详细内容 ?? '');
+      if (详情.效果 !== undefined) node.效果 = String(详情.效果 ?? '');
+      if (详情.主属性加成) {
+        node.主属性加成属性 = String(详情.主属性加成.属性 ?? '');
+        node.主属性加成值 = String(详情.主属性加成.值 ?? '');
+      }
+      if (详情.副属性加成) {
+        node.副属性加成属性 = String(详情.副属性加成.属性 ?? '');
+        node.副属性加成值 = String(详情.副属性加成.值 ?? '');
+      }
+      if (详情.职业特性 !== undefined) node.职业特性 = JSON.stringify(详情.职业特性, null, 2);
+      if (详情.职业技能 !== undefined) node.职业技能 = JSON.stringify(详情.职业技能, null, 2);
+      for (const [子名, 子obj] of Object.entries(obj.分支 ?? {})) node.子分支.push(payloadToNode(子名, 子obj));
+    }
+    return node;
+  }
+
+  return {
+    add() {
+      branches.push(blankNode());
+      render();
+    },
+    get() {
+      const 分支 = {};
+      for (const node of branches) {
+        const 名 = node.分支名.trim();
+        if (!名) continue;
+        分支[名] = nodeToPayload(node);
+      }
+      return 分支;
+    },
+    set(tree) {
+      branches.length = 0;
+      for (const [名, obj] of Object.entries(tree?.分支 ?? {})) branches.push(payloadToNode(名, obj));
+      render();
+    },
+    reset() {
+      branches.length = 0;
+      depthWarned = false;
+      render();
+    },
+  };
+}
 
 function createBuildSection() {
   const root = el('section', 'type-section');
@@ -1555,6 +1755,7 @@ function createBuildSection() {
   const jobName = textInput('无');
   const jobRarity = textInput('无');
   const jobTreeName = textInput('无');
+  const jobTreeState = selectInput(转职状态选项.map(o => [o, o]), '未选择');
   const jobIntro = textArea(2, '以盾护人、以守为攻的前排');
   const jobStage = textInput('基础');
   const jobLevel = textInput('0');
@@ -1569,6 +1770,7 @@ function createBuildSection() {
     field('职业·名称', jobName),
     field('职业·稀有度', jobRarity),
     field('转职树·名称', jobTreeName),
+    field('转职树·状态', jobTreeState),
     field('转职阶段', jobStage),
     field('职业等级', jobLevel),
     field('主属性加成·属性', jobMainBonus),
@@ -1582,19 +1784,43 @@ function createBuildSection() {
   );
   root.append(jobGrid);
 
+  // 转职树·分支：可自定义、可增减的递归编辑器（整棵树可为空，非必填）
+  const treeWrap = el('div');
+  const treeHead = el('div', 'row-between');
+  treeHead.append(el('h3', 'section-title', '转职树·分支（可增删，留空则不提交）'));
+  const treeAddBtn = button('+ 添加分支', 'small');
+  treeHead.append(treeAddBtn);
+  const treeList = el('div');
+  treeWrap.append(treeHead, treeList);
+  root.append(treeWrap);
+  const transferTree = createTransferTreeEditor(treeList);
+  treeAddBtn.addEventListener('click', () => transferTree.add());
+
   root.append(el('h3', 'section-title', '通用技能（JSON，技能名 → 技能）'));
   const commonSkills = textArea(3, '{ "重击": { "类型": "主动", "消耗": "10体力", "效果": { "伤害": "2d6" } } }');
   const skillGrid = el('div', 'form');
   skillGrid.append(field('通用技能', commonSkills, 'full'));
   root.append(skillGrid);
 
-  root.append(el('h3', 'section-title', '主要装备（七槽，留空槽不提交）'));
-  const equipGrid = el('div', 'form');
+  root.append(el('h3', 'section-title', '主要装备（七槽，留空槽不提交；所有字段非必填）'));
+  const equipGrid = el('div');
   const slots = {};
   for (const slot of EQUIP_SLOTS) {
-    const parts = { 名称: textInput('无'), 品质: textInput('无'), 阶位: textInput('无'), 描述: textInput('无') };
+    const parts = {};
+    for (const [key, kind] of EQUIP_FIELDS) {
+      if (kind === 'number') parts[key] = numberInput(EQUIP_DEFAULTS[key]);
+      else if (kind === 'json') parts[key] = textArea(2, '{ "特效名": "描述" }');
+      else parts[key] = textInput('无');
+    }
     slots[slot] = parts;
-    equipGrid.append(field(`${slot}·名称`, parts.名称), field(`${slot}·品质`, parts.品质), field(`${slot}·阶位`, parts.阶位), field(`${slot}·描述`, parts.描述));
+    const block = el('div', 'entry-row');
+    const head = el('div', 'entry-head');
+    head.append(el('span', 'entry-index', `${slot}（名称为空或「无」→ 不提交此槽）`));
+    block.append(head);
+    for (const [key, kind] of EQUIP_FIELDS) {
+      block.append(field(key === '效果' ? '效果（JSON）' : key, parts[key], kind === 'json' ? 'full' : undefined));
+    }
+    equipGrid.append(block);
   }
   root.append(equipGrid);
 
@@ -1656,16 +1882,21 @@ function createBuildSection() {
     if (job.职业技能) jobSkills.value = JSON.stringify(job.职业技能, null, 2);
     if (job.传承技能) jobInherited.value = JSON.stringify(job.传承技能, null, 2);
     if (job.转职树?.名称) jobTreeName.value = String(job.转职树.名称);
+    if (job.转职树?.状态) jobTreeState.value = String(job.转职树.状态);
+    transferTree.set(job.转职树);
     if (b.通用技能) commonSkills.value = JSON.stringify(b.通用技能, null, 2);
     const equip = b.主要装备 ?? {};
     for (const slot of EQUIP_SLOTS) {
       const src = equip[slot];
       if (!src) continue;
       const parts = slots[slot];
-      if (src.名称 !== undefined) parts.名称.value = String(src.名称 ?? '');
-      if (src.品质 !== undefined) parts.品质.value = String(src.品质 ?? '无');
-      if (src.阶位 !== undefined) parts.阶位.value = String(src.阶位 ?? '无');
-      if (src.描述 !== undefined) parts.描述.value = String(src.描述 ?? '无');
+      for (const [key, kind] of EQUIP_FIELDS) {
+        if (kind === 'json') {
+          parts[key].value = src[key] && Object.keys(src[key]).length ? JSON.stringify(src[key], null, 2) : '';
+        } else {
+          parts[key].value = String(src[key] ?? EQUIP_DEFAULTS[key]);
+        }
+      }
     }
   }
 
@@ -1692,6 +1923,7 @@ function createBuildSection() {
       jobName.value = '无';
       jobRarity.value = '无';
       jobTreeName.value = '无';
+      jobTreeState.value = '未选择';
       jobIntro.value = '';
       jobStage.value = '基础';
       jobLevel.value = '0';
@@ -1702,13 +1934,13 @@ function createBuildSection() {
       jobTraits.value = '';
       jobSkills.value = '';
       jobInherited.value = '';
+      transferTree.reset();
       commonSkills.value = '';
       for (const slot of EQUIP_SLOTS) {
         const parts = slots[slot];
-        parts.名称.value = '';
-        parts.品质.value = '无';
-        parts.阶位.value = '无';
-        parts.描述.value = '无';
+        for (const [key, kind] of EQUIP_FIELDS) {
+          parts[key].value = kind === 'json' ? '' : String(EQUIP_DEFAULTS[key]);
+        }
       }
       bag.value = '';
     },
@@ -1718,12 +1950,14 @@ function createBuildSection() {
         const parts = slots[slot];
         const slotName = parts.名称.value.trim();
         if (!slotName || slotName === '无') continue; // 「无」= 空槽（粘贴来的实体常七槽全「无」）
-        主要装备[slot] = {
-          名称: slotName,
-          品质: parts.品质.value.trim() || '无',
-          阶位: parts.阶位.value.trim() || '无',
-          描述: parts.描述.value.trim() || '无',
-        };
+        const 槽 = { 名称: slotName };
+        for (const [key, kind] of EQUIP_FIELDS) {
+          if (key === '名称') continue;
+          if (kind === 'number') 槽[key] = numOr(parts[key].value, EQUIP_DEFAULTS[key]);
+          else if (kind === 'json') 槽[key] = parseJsonObject(parts[key].value, `${slot}·效果`);
+          else 槽[key] = parts[key].value.trim() || '无';
+        }
+        主要装备[slot] = 槽;
       }
       return {
         build: {
@@ -1747,7 +1981,7 @@ function createBuildSection() {
             职业特性: parseJsonObject(jobTraits.value, '职业特性'),
             职业技能: parseJsonObject(jobSkills.value, '职业技能'),
             传承技能: parseJsonObject(jobInherited.value, '传承技能'),
-            转职树: { 名称: jobTreeName.value.trim() || '无', 分支: {} },
+            转职树: { 名称: jobTreeName.value.trim() || '无', 状态: jobTreeState.value || '未选择', 分支: transferTree.get() },
           },
           通用技能: parseJsonObject(commonSkills.value, '通用技能'),
           主要装备,
