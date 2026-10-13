@@ -211,6 +211,16 @@
             <button class="pager-arrow" :disabled="desktopPage === 1" @click="desktopPage = 1">›</button>
           </div>
           <div class="desktop-footer"><span>◆ 无 限 回 廊 ◆</span></div>
+          <!-- 新玩家须知：首进桌面弹一次，读完写入 localStorage 不再弹 -->
+          <div v-if="!noticeSeen" class="dialog-mask">
+            <div class="dialog-box">
+              <div class="dialog-title">📢 新手须知</div>
+              <div v-for="(t, i) in NOTICE_ITEMS" :key="i" class="notice-item">{{ t }}</div>
+              <div class="dialog-btns">
+                <button class="dialog-btn confirm" @click="onNoticeOk">知道了</button>
+              </div>
+            </div>
+          </div>
         </div>
 
         <!-- ============ FORUM ============ -->
@@ -451,6 +461,12 @@
             </button>
             <button class="menu-btn" @click="settingsPage = 'workshop-author'">
               <span class="menu-icon">🗃️</span><span>收录契约者</span><span class="menu-arrow">›</span>
+            </button>
+            <button class="menu-btn" @click="reloadApp()">
+              <span class="menu-icon">↻</span><span>重载小手机</span><span class="menu-arrow">›</span>
+            </button>
+            <button class="menu-btn" @click="settingsPage = 'notice'">
+              <span class="menu-icon">📢</span><span>新手须知</span><span class="menu-arrow">›</span>
             </button>
           </div>
         </div>
@@ -775,6 +791,19 @@
               </div>
               <button class="wb-load-btn" @click="workshopStore.loadContracts()">🔄 刷新列表</button>
             </div>
+          </div>
+        </div>
+
+        <div v-if="currentView === 'settings' && settingsPage === 'notice'" class="app-page">
+          <div class="app-header">
+            <button class="hdr-btn" @click="settingsPage = ''">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+                <polyline points="15 18 9 12 15 6" />
+              </svg></button
+            ><span class="hdr-title">新手须知</span><span class="hdr-spacer"></span>
+          </div>
+          <div class="scroll-area settings-inner">
+            <div v-for="(t, i) in NOTICE_ITEMS" :key="i" class="notice-item">{{ t }}</div>
           </div>
         </div>
 
@@ -2371,6 +2400,8 @@ import {
 } from './data';
 import ApiFields from './ApiFields.vue';
 import EditableObject from './EditableObject.vue';
+import { reloadApp } from './reload';
+import { NOTICE_ITEMS, loadNoticeSeen, saveNoticeSeen } from './notice';
 import MarketView from './market/MarketView.vue';
 import { useMarketStore } from './market/store';
 import RankView from './rank/RankView.vue';
@@ -2478,6 +2509,14 @@ const newPlanKeywords = ref('');
 const showNewDialog = ref(false);
 const showModifyDialog = ref(false);
 const deleteTargetId = ref(0);
+
+// ============ 新玩家须知（首进遮罩）============
+// 首次进入桌面时弹一次；读不到 localStorage 时 loadNoticeSeen() 返回 true（不弹）。
+const noticeSeen = ref(loadNoticeSeen());
+function onNoticeOk() {
+  saveNoticeSeen();
+  noticeSeen.value = true;
+}
 
 // ============ 副本攻略状态 ============
 const dungeonView = ref<'list' | 'detail'>('list');
@@ -5338,6 +5377,13 @@ onUnmounted(() => {
       background: rgba(180, 40, 40, 0.5);
     }
   }
+}
+// 新手须知条目：沿用对话框正文的排版，不新造视觉
+.notice-item {
+  font-size: 11px;
+  color: var(--chalk-d);
+  line-height: 1.5;
+  margin-bottom: 8px;
 }
 
 // ============ DUNGEON WIZARD ============

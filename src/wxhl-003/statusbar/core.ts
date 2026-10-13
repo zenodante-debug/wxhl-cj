@@ -189,6 +189,16 @@ export function mountStatusbar(root: HTMLElement): () => void {
     const entity = _.get(stat_data, basePath);
     if (!entity) return false;
 
+    /* 变更判定用的前后快照：本函数会在内存里改写大量衍生值（属性修正值 / 衍生属性 /
+       生命状态），但原先只有「升级」路径会置 changed —— 而调用点（init 与
+       VARIABLE_UPDATE_ENDED 监听）是**门控写回**的，于是这些改写被整批丢弃，
+       首次载入时表现为 HP 0/0，直到玩家编辑任意字段走无条件写回才落库。 */
+    const 衍生快照 = JSON.stringify([
+      _.get(entity, '属性.属性修正值'),
+      _.get(entity, '衍生属性'),
+      _.get(entity, '状态.生命状态'),
+    ]);
+
     const isPlayerMode = getEntityMode(entity) === 'player';
     const hpFactor = getHpFactor(entity);
     const rankStr = _.get(entity, '头部.阶位', '一阶');
@@ -433,6 +443,18 @@ export function mountStatusbar(root: HTMLElement): () => void {
     else if (ratio <= 0.3) lifeState = '重伤';
     else if (ratio <= 0.7) lifeState = '受伤';
     _.set(entity, '状态.生命状态', lifeState);
+
+    /* 派生值真的变了才算「有变更」，好让门控写回把上面这些改写落库。
+       该计算是幂等的：写回后第二轮比对相同即返回 false，不会来回抖。 */
+    if (
+      JSON.stringify([
+        _.get(entity, '属性.属性修正值'),
+        _.get(entity, '衍生属性'),
+        _.get(entity, '状态.生命状态'),
+      ]) !== 衍生快照
+    ) {
+      changed = true;
+    }
 
     return changed;
   }
