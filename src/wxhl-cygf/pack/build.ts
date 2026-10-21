@@ -37,7 +37,11 @@ export const 装备槽Schema = z
     装备防御: z.coerce.number().prefault(0),
     装备闪避: z.coerce.number().prefault(0),
     负重: z.coerce.number().prefault(0),
-    效果: z.record(z.string(), z.string()).prefault({}),
+    // 与主卡一致：对象照收；纯字符串（如 "无"）归一成 {}，不让它把整包卡死在 422
+    效果: z
+      .union([z.record(z.string(), z.string()), z.string()])
+      .transform(value => (typeof value === 'string' ? {} : value))
+      .prefault({}),
     描述: z.string().prefault('无'),
     数量: z.coerce.number().prefault(1),
   })

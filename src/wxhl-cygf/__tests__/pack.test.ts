@@ -261,3 +261,29 @@ describe('persona · 人设', () => {
     expect(部分.persona.外观).toEqual({ 外貌: '短发', 衣着: '', 装备幻化: '' });
   });
 });
+
+describe('装备·效果 兼容字符串（主卡口径）', () => {
+  const base = {
+    format: 'wxhl-mod@2', id: 'p1', name: 'x', version: '1.0.0',
+    author: { name: 'a' }, description: 'd', cover: '',
+  };
+  const 造包 = (效果: unknown) => ({
+    ...base, type: 'build',
+    build: { 构筑名: 'x', 定位: 'y', 主要装备: { 主武器: { 名称: '斩首大剑', 效果 } } },
+  });
+
+  it('对象照收', () => {
+    const parsed = BuildPack.parse(造包({ 灼烧: '每回合 2 点' }));
+    expect(parsed.build.主要装备.主武器.效果).toEqual({ 灼烧: '每回合 2 点' });
+  });
+
+  it('纯字符串归一成 {}（不再把整包卡死在 422）', () => {
+    expect(BuildPack.parse(造包('无')).build.主要装备.主武器.效果).toEqual({});
+    expect(BuildPack.parse(造包('')).build.主要装备.主武器.效果).toEqual({});
+  });
+
+  it('技能/称号 的 效果 仍只收对象（不跟着放宽）', () => {
+    const 坏 = { ...base, type: 'build', build: { 构筑名: 'x', 定位: 'y', 称号: { 名称: 't', 效果: '纯文本' } } };
+    expect(BuildPack.safeParse(坏).success).toBe(false);
+  });
+});

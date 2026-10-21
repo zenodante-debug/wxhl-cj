@@ -431,6 +431,17 @@ function nullableInt(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+/** 装备·效果：JSON 对象照常解析；纯文本原样按字符串带上（契约兼容字符串，服务端归一成 {}） */
+function parseEffectText(text, label) {
+  const raw = String(text ?? '').trim();
+  if (!raw) return {};
+  try {
+    return parseJsonObject(raw, label);
+  } catch {
+    return raw;
+  }
+}
+
 function parseJsonObject(text, label) {
   const raw = String(text ?? '').trim();
   if (!raw) return {};
@@ -1954,7 +1965,7 @@ function createBuildSection() {
         for (const [key, kind] of EQUIP_FIELDS) {
           if (key === '名称') continue;
           if (kind === 'number') 槽[key] = numOr(parts[key].value, EQUIP_DEFAULTS[key]);
-          else if (kind === 'json') 槽[key] = parseJsonObject(parts[key].value, `${slot}·效果`);
+          else if (kind === 'json') 槽[key] = parseEffectText(parts[key].value, `${slot}·效果`);
           else 槽[key] = parts[key].value.trim() || '无';
         }
         主要装备[slot] = 槽;
