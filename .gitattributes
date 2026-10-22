@@ -3,5 +3,8 @@
 *.{bat,[bB][aA][tT]} text eol=crlf
 
 dist/** merge=ours
+<<<<<<< HEAD
 # Windows 批处理必须保留 CRLF，否则 cmd 解析错乱（双击会闪退）
 *.bat text eol=crlf
+=======
+>>>>>>> 9aadd35b2a8c888b756179046743cbf920a1a0c8
