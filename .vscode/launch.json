@@ -7,7 +7,11 @@
       "request": "launch",
       "preLaunchTask": "开始任务",
       "postDebugTask": "结束任务",
+<<<<<<< HEAD
       "url": "http://127.0.0.1:8000/",
+=======
+      "url": "http://localhost:8000",
+>>>>>>> c264c1a620cdf0169281cbcc1ead53e3dcc7f4dc
       "disableNetworkCache": true,
       "internalConsoleOptions": "neverOpen",
       "cwd": "${workspaceFolder}",
@@ -27,7 +31,11 @@
       "request": "launch",
       "preLaunchTask": "开始任务",
       "postDebugTask": "结束任务",
+<<<<<<< HEAD
       "url": "http://127.0.0.1:8000/",
+=======
+      "url": "http://localhost:8000",
+>>>>>>> c264c1a620cdf0169281cbcc1ead53e3dcc7f4dc
       "disableNetworkCache": true,
       "internalConsoleOptions": "neverOpen",
       "cwd": "${workspaceFolder}",
